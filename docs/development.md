@@ -53,8 +53,11 @@ Seed `VEKRO_DATA_DIR/projects.json` to start with chosen projects (a plain list 
 
 ```json
 {
-  "projects": [{ "path": "/path/to/a", "category": null }, { "path": "/path/to/b", "category": "Work" }],
-  "categories": [{ "name": "Work", "collapsed": false }],
+  "projects": [
+    { "path": "/path/to/a", "category": null, "color": "#8b7bff", "icon": "rocket" },
+    { "path": "/path/to/b", "category": "category-1", "name": "Billing" }
+  ],
+  "categories": [{ "id": "category-1", "name": "", "collapsed": false }],
   "active": "/path/to/a"
 }
 ```

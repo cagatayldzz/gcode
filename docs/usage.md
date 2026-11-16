@@ -35,16 +35,37 @@ Projects are only listed in the rail; nothing Vekro does deletes a project's fol
 
 ### Categories
 
-Group projects in the rail the way Discord groups servers into folders. Right-click a project's avatar:
+Group projects in the rail the way Discord groups servers into folders.
 
-- **New category…** asks for a name, creates the category and puts the project in it;
-- **Move to** lists the categories (the current one is checked); pick one to move the project there;
-- **Remove from category** takes it out again.
+- **Drag a project onto another one.** They become a new, unnamed category. Drag a project onto a project that is
+  already in a category, or onto the category's folder tile, to add it there.
+- Or right-click a project: **New category…** (asks for a name), **Move to** (the current category is checked) and
+  **Remove from category**.
 
 An unfolded category is a tinted block: its folder tile on top, its projects below. Click the folder tile to fold
 it into one tile that shows the first four projects' initials (outlined when the open project is inside).
-Right-click the folder tile to **Rename…** or **Delete category** (the projects stay, outside any category).
-Projects without a category come first, then the categories in the order they were created.
+Right-click the folder tile to **Rename…** (an empty name makes it unnamed again) or **Delete category** (the
+projects stay, outside any category). A category that loses its last project goes away. Projects without a
+category come first, then the categories in the order they were created.
+
+### Managing the project bar in Settings
+
+`⌘,` opens Settings. The **Project bar** page lists every project and category in the order the rail shows them
+(projects without a category first). Per project: **Name, icon and color**, **Move up / down** (within its
+category), **Category** (a menu to move it, start a new category or leave its category) and **Remove from Vekro**
+(asks first: its terminals stop, the folder and its files stay). Per category: **Rename**, **Move up / down**,
+**Fold / unfold** in the rail and **Delete** (the projects stay). The **Projects** page holds the projects folder
+and **Add all**.
+
+### Project settings
+
+Right-click a project and choose **Settings…** to change how it looks:
+
+- **Name** replaces the folder's name in the rail, the tooltip and the Explorer (the folder itself is not renamed);
+- **Color** tints the avatar, and fills it while the project is open;
+- **Icon** shows one of 20 icons instead of the first letter.
+
+Press Save (or Enter in the name field). Clearing the name, choosing **Default** and **Aa** goes back to the folder's name, the theme's blue and the first letter.
 
 ## Terminals
 

@@ -1,7 +1,9 @@
 use crate::{
-  components::{display_path, selected_style},
+  components::{avatar_look, display_path},
   editor::EditorPanel,
   explorer,
+  project_manager::ProjectManager,
+  project_settings::{AppearanceChosen, ProjectSettings},
   project_setup::{ProjectReady, ProjectSetup},
   settings::{init_settings, settings_view, AddAllProjectsRequested, SettingsGlobal, SettingsModel},
   terminal::{NewTerminalRequested, Terminal, TerminalExited},
@@ -46,7 +48,7 @@ const HOVER_PREPARE_DELAY: Duration = Duration::from_millis(120);
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Width of the icon rail on the far left.
-const RAIL_WIDTH: Pixels = px(56.);
+const RAIL_WIDTH: Pixels = px(72.);
 
 /// Width of the sidebar when the window opens.
 const SIDEBAR_WIDTH: Pixels = px(280.);
@@ -114,7 +116,7 @@ pub struct Workspace {
   hovered_file: Option<PathBuf>,
   focus_handle: FocusHandle,
   _setup_subscription: Option<Subscription>,
-  _entry_subscription: Option<Subscription>,
+  _dialog_subscription: Option<Subscription>,
   /// Whether the Explorer shows its tree or only its header.
   explorer_open: bool,
   _settings_subscriptions: Vec<Subscription>,
@@ -123,6 +125,8 @@ pub struct Workspace {
   /// Repaints the window when the editor changes: the status bar shows the cursor.
   _editor: Subscription,
   _refresh_task: Task<()>,
+  /// A check for projects whose folder was deleted is running.
+  syncing: bool,
   dock: Entity<DockArea>,
   editor_panel: Entity<EditorPanel>,
   /// The shells of every project that has been opened, kept alive while another project is shown.
@@ -156,7 +160,7 @@ impl Workspace {
       views: HashMap::new(),
       focus_handle: cx.focus_handle(),
       _setup_subscription: None,
-      _entry_subscription: None,
+      _dialog_subscription: None,
       explorer_open: true,
       _settings_subscriptions: vec![
         // Any change to a setting is saved and applied in every window.
@@ -185,15 +189,22 @@ impl Workspace {
       _activation: cx.observe_window_activation(window, |this, window, cx| {
         if window.is_window_active() {
           this.refresh_in_background(cx);
+          this.sync_projects(window, cx);
         }
       }),
-      _refresh_task: cx.spawn(async move |this, cx| loop {
+      _refresh_task: cx.spawn_in(window, async move |this, cx| loop {
         cx.background_executor().timer(REFRESH_INTERVAL).await;
-        if this.update(cx, |this, cx| this.refresh_in_background(cx)).is_err() {
+        let refreshed = this.update_in(cx, |this, window, cx| {
+          this.refresh_in_background(cx);
+          this.sync_projects(window, cx);
+        });
+        if refreshed.is_err() {
           break;
         }
       }),
+      syncing: false,
     };
+    this.sync_projects(window, cx);
     this.refresh_project();
     this.show_terminals(window, cx);
     this
@@ -274,8 +285,18 @@ impl Workspace {
   /// Opens the Settings dialog.
   pub fn open_settings(&mut self, _: &OpenSettings, window: &mut Window, cx: &mut Context<Self>) {
     let fallback = self.new_project_dir(cx);
-    window
-      .open_dialog(cx, move |dialog, _, _| dialog.title("Settings").width(px(720.)).child(div().h(px(500.)).child(settings_view(fallback.clone()))));
+    let workspace = cx.entity();
+    let projects = cx.new(|cx| ProjectManager::new(workspace, cx));
+    window.open_dialog(cx, move |dialog, _, _| {
+      // The dialog's own padding is removed so that the page list reaches the edges of the window.
+      dialog.p_0().width(px(820.)).child(
+        v_flex()
+          .rounded_b_lg()
+          .overflow_hidden()
+          .child(Label::new("Settings").text_lg().font_weight(FontWeight::SEMIBOLD).px_6().py_4())
+          .child(div().h(px(520.)).child(settings_view(fallback.clone(), projects.clone()))),
+      )
+    });
   }
 
   /// Adds the repositories directly inside the projects folder that are not listed yet, and says how many.
@@ -322,49 +343,116 @@ impl Workspace {
     }
   }
 
-  /// Asks for the name of a new category and puts `project`, if given, in it.
-  fn new_category(&mut self, project: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+  /// Makes a category from a project, unnamed: the menu's way to start one without a second project.
+  pub(crate) fn new_category(&mut self, project: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
     self.ask_name("New category", "Category name", "", window, cx, move |this, name, _, cx| {
-      if !this.projects.add_category(name) {
-        return Err("Enter a category name that is not used yet.".into());
-      }
-      if let Some(path) = &project {
-        this.projects.set_category(path, Some(name.trim()));
-      }
+      let id = this.projects.add_category(name);
+      this.projects.set_category(&project, Some(&id));
       this.persist_projects();
       cx.notify();
       Ok(())
     });
   }
 
-  fn rename_category(&mut self, old: String, window: &mut Window, cx: &mut Context<Self>) {
-    let initial = old.clone();
+  /// Renames a category. An empty name makes it unnamed again.
+  pub(crate) fn rename_category(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+    let initial = self.projects.categories.iter().find(|category| category.id == id).map(|category| category.name.clone()).unwrap_or_default();
     self.ask_name("Rename category", "Category name", &initial, window, cx, move |this, name, _, cx| {
-      if !this.projects.rename_category(&old, name) {
-        return Err("Enter a category name that is not used yet.".into());
-      }
+      this.projects.rename_category(&id, name);
       this.persist_projects();
       cx.notify();
       Ok(())
     });
   }
 
-  fn delete_category(&mut self, name: &str, cx: &mut Context<Self>) {
-    self.projects.remove_category(name);
+  pub(crate) fn delete_category(&mut self, id: &str, cx: &mut Context<Self>) {
+    self.projects.remove_category(id);
     self.persist_projects();
     cx.notify();
   }
 
-  fn toggle_category(&mut self, name: &str, cx: &mut Context<Self>) {
-    self.projects.toggle_category(name);
+  pub(crate) fn toggle_category(&mut self, id: &str, cx: &mut Context<Self>) {
+    self.projects.toggle_category(id);
     self.persist_projects();
     cx.notify();
   }
 
-  fn move_project(&mut self, path: &Path, category: Option<&str>, cx: &mut Context<Self>) {
+  pub(crate) fn move_project(&mut self, path: &Path, category: Option<&str>, cx: &mut Context<Self>) {
     self.projects.set_category(path, category);
     self.persist_projects();
     cx.notify();
+  }
+
+  /// A project was dropped on another one: they share a category now, a new unnamed one if there was none.
+  fn group_projects(&mut self, dragged: &Path, target: &Path, cx: &mut Context<Self>) {
+    if self.projects.group(dragged, target).is_some() {
+      self.persist_projects();
+      cx.notify();
+    }
+  }
+
+  /// The projects and categories the rail shows.
+  pub(crate) fn project_list(&self) -> &ProjectList {
+    &self.projects
+  }
+
+  /// Moves a project up or down among the projects of its category.
+  pub(crate) fn move_project_by(&mut self, path: &Path, delta: isize, cx: &mut Context<Self>) {
+    self.projects.move_project_by(path, delta);
+    self.persist_projects();
+    cx.notify();
+  }
+
+  /// Moves a category up or down in the rail.
+  pub(crate) fn move_category_by(&mut self, id: &str, delta: isize, cx: &mut Context<Self>) {
+    self.projects.move_category_by(id, delta);
+    self.persist_projects();
+    cx.notify();
+  }
+
+  /// Asks before taking a project out of Vekro: its shells stop, its folder stays on disk.
+  pub(crate) fn confirm_remove_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(project) = self.projects.projects.iter().find(|project| project.path == path) else { return };
+    let (title, workspace) = (SharedString::from(format!("Remove {}?", project.name())), cx.entity());
+    window.open_alert_dialog(cx, move |alert, _, _| {
+      let (workspace, path) = (workspace.clone(), path.clone());
+      alert
+        .title(title.clone())
+        .description("The project leaves the list and its terminals stop. The folder and its files stay on disk.")
+        .confirm()
+        .on_ok(move |_, window, cx| {
+          workspace.update(cx, |this, cx| this.remove_project(&path, window, cx));
+          true
+        })
+    });
+  }
+
+  /// Takes a project out of the list. If it is the open one, another project opens.
+  fn remove_project(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    if self.projects.active.as_deref() == Some(path) {
+      let removed = path.to_path_buf();
+      self.switch_project(window, cx, move |projects| projects.remove(&removed));
+    } else {
+      self.projects.remove(path);
+      self.persist_projects();
+    }
+    self.terminals.remove(path);
+    self.views.remove(path);
+    cx.notify();
+  }
+
+  /// Opens the dialog for a project's name, icon and color.
+  pub(crate) fn open_project_settings(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(project) = self.projects.projects.iter().find(|project| project.path == path).cloned() else { return };
+    let settings = cx.new(|cx| ProjectSettings::new(&project, window, cx));
+    self._dialog_subscription = Some(cx.subscribe_in(&settings, window, |this, _, chosen: &AppearanceChosen, window, cx| {
+      this.projects.set_appearance(&chosen.path, &chosen.name, chosen.icon.as_deref(), chosen.color.as_deref());
+      this.persist_projects();
+      window.close_dialog(cx);
+      cx.notify();
+    }));
+    let title = SharedString::from(format!("{} settings", project.name()));
+    window.open_dialog(cx, move |dialog, _, _| dialog.title(title.clone()).width(px(460.)).child(settings.clone()));
   }
 
   fn select_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -415,6 +503,32 @@ impl Workspace {
         self.rows.clear();
       }
     }
+  }
+
+  /// Takes projects whose folder was deleted out of the list, off the interface thread, and says which.
+  fn sync_projects(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if self.syncing || self.projects.projects.is_empty() {
+      return;
+    }
+    self.syncing = true;
+    let list = self.projects.clone();
+    let work = cx.background_executor().spawn(async move { list.missing_paths() });
+    cx.spawn_in(window, async move |this, cx| {
+      let missing = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.syncing = false;
+        let names: Vec<String> =
+          missing.iter().filter_map(|path| this.projects.projects.iter().find(|project| &project.path == path)).map(Project::name).collect();
+        if names.is_empty() {
+          return;
+        }
+        for path in &missing {
+          this.remove_project(path, window, cx);
+        }
+        window.push_notification(Notification::info(format!("Removed {}: the folder no longer exists.", names.join(", "))), cx);
+      });
+    })
+    .detach();
   }
 
   /// Reads the repository and the folder tree off the interface thread and shows them only if they changed.
@@ -470,11 +584,11 @@ impl Workspace {
   ) {
     let initial = initial.to_owned();
     let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder).default_value(initial));
-    self._entry_subscription = Some(cx.subscribe_in(&input, window, move |this, input, event: &InputEvent, window, cx| {
+    self._dialog_subscription = Some(cx.subscribe_in(&input, window, move |this, input, event: &InputEvent, window, cx| {
       if let InputEvent::PressEnter { .. } = event {
         let name = input.read(cx).value().to_string();
         match submit(this, &name, window, cx) {
-          Ok(()) => window.close_all_dialogs(cx),
+          Ok(()) => window.close_dialog(cx),
           Err(message) => window.push_notification(Notification::error(message), cx),
         }
       }
@@ -581,54 +695,81 @@ impl Workspace {
     bar
   }
 
-  /// One project's avatar. A right click offers the categories to put it in.
+  /// One project's avatar. It can be dragged onto another project or a category, and a right click opens its menu.
   fn rail_project(&self, project: &Project, cx: &mut Context<Self>) -> impl IntoElement {
-    let selected_style = selected_style(cx);
+    let palette = colors(cx);
     let path = project.path.clone();
-    let name = project.name();
-    let selected = self.projects.active.as_ref() == Some(&project.path);
-    let letter = initial(&name);
+    let name = SharedString::from(project.name());
+    let look = avatar_look(project, self.projects.active.as_ref() == Some(&project.path), cx);
+    let (fill, text, hover) = (look.fill, look.text, look.hover);
     let workspace = cx.entity();
-    let categories: Vec<SharedString> = self.projects.categories.iter().map(|category| SharedString::from(category.name.clone())).collect();
+    let categories: Vec<(String, SharedString)> = self
+      .projects
+      .categories
+      .iter()
+      .enumerate()
+      .map(|(index, category)| (category.id.clone(), SharedString::from(category_label(index, category))))
+      .collect();
     let current = project.category.clone();
-    let owner = path.clone();
+    let (drag_label, drag_fill, drag_text) = (look.letter.clone(), fill.unwrap_or(palette.rail_hover), text);
     div()
-      .id(SharedString::from(format!("rail-item-{}", path.display())))
-      .child(
-        Button::new(SharedString::from(format!("rail-{}", path.display())))
-          .label(letter)
-          .w_10()
-          .h_10()
-          .rounded_lg()
-          .when(selected, |button| button.custom(selected_style))
-          .when(!selected, |button| button.ghost())
-          .tooltip(name)
-          .on_click(cx.listener(move |this, _, window, cx| this.select_project(path.clone(), window, cx))),
-      )
+      .id(SharedString::from(format!("rail-{}", path.display())))
+      .size_12()
+      .flex()
+      .flex_none()
+      .items_center()
+      .justify_center()
+      .rounded_lg()
+      .cursor_pointer()
+      .text_lg()
+      .font_weight(FontWeight::MEDIUM)
+      .text_color(text)
+      .when_some(fill, |avatar, fill| avatar.bg(fill))
+      .hover(move |avatar| avatar.bg(hover))
+      .drag_over::<DraggedProject>(move |style, _, _, _| style.bg(palette.rail_hover))
+      .when_some(look.icon.clone(), |avatar, icon| avatar.child(Icon::empty().path(icon).size_6()))
+      .when(look.icon.is_none(), |avatar| avatar.child(look.letter.clone()))
+      .tooltip(move |window, cx| Tooltip::new(name.clone()).build(window, cx))
+      .on_drag(DraggedProject(path.clone()), move |_, _, _, cx| {
+        cx.new(|_| DragPreview { label: drag_label.clone().into(), fill: drag_fill, text: drag_text })
+      })
+      .on_drop(cx.listener({
+        let target = path.clone();
+        move |this, dragged: &DraggedProject, _, cx| this.group_projects(&dragged.0, &target, cx)
+      }))
+      .on_click(cx.listener({
+        let path = path.clone();
+        move |this, _, window, cx| this.select_project(path.clone(), window, cx)
+      }))
       .context_menu(move |menu, _, _| {
-        let mut menu = menu;
+        let (settings_workspace, settings_path) = (workspace.clone(), path.clone());
+        let mut menu = menu.item(
+          PopupMenuItem::new("Settings…")
+            .on_click(move |_, window, cx| settings_workspace.update(cx, |this, cx| this.open_project_settings(&settings_path, window, cx))),
+        );
+        menu = menu.separator();
         if !categories.is_empty() {
           menu = menu.label("Move to");
-          for category in &categories {
-            let (workspace, owner, target) = (workspace.clone(), owner.clone(), category.clone());
-            let checked = current.as_deref() == Some(category.as_ref());
+          for (id, label) in &categories {
+            let (workspace, path, id_owned) = (workspace.clone(), path.clone(), id.clone());
+            let checked = current.as_deref() == Some(id.as_str());
             menu = menu.item(
-              PopupMenuItem::new(category.clone())
+              PopupMenuItem::new(label.clone())
                 .checked(checked)
-                .on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.move_project(&owner, Some(&target), cx))),
+                .on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.move_project(&path, Some(&id_owned), cx))),
             );
           }
           menu = menu.separator();
         }
-        let (new_workspace, new_owner) = (workspace.clone(), owner.clone());
+        let (new_workspace, new_path) = (workspace.clone(), path.clone());
         menu = menu.item(
           PopupMenuItem::new("New category…")
-            .on_click(move |_, window, cx| new_workspace.update(cx, |this, cx| this.new_category(Some(new_owner.clone()), window, cx))),
+            .on_click(move |_, window, cx| new_workspace.update(cx, |this, cx| this.new_category(new_path.clone(), window, cx))),
         );
         if current.is_some() {
-          let (workspace, owner) = (workspace.clone(), owner.clone());
+          let (workspace, path) = (workspace.clone(), path.clone());
           menu = menu.item(
-            PopupMenuItem::new("Remove from category").on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.move_project(&owner, None, cx))),
+            PopupMenuItem::new("Remove from category").on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.move_project(&path, None, cx))),
           );
         }
         menu
@@ -636,16 +777,17 @@ impl Workspace {
   }
 
   /// A category in the rail: one tile that folds and unfolds it, and its projects below while it is unfolded.
-  fn rail_category(&self, category: &Category, cx: &mut Context<Self>) -> impl IntoElement {
+  fn rail_category(&self, index: usize, category: &Category, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
-    let members: Vec<&Project> = self.projects.projects_in(Some(&category.name)).collect();
-    let name = SharedString::from(category.name.clone());
+    let members: Vec<&Project> = self.projects.projects_in(Some(&category.id)).collect();
+    let label = SharedString::from(category_label(index, category));
     let has_active = members.iter().any(|project| self.projects.active.as_ref() == Some(&project.path));
     let folded = category.collapsed;
+    let shows_initials = folded && !members.is_empty();
     let workspace = cx.entity();
     let tile = div()
-      .id(SharedString::from(format!("rail-category-{}", category.name)))
-      .size_10()
+      .id(SharedString::from(format!("rail-category-{}", category.id)))
+      .size_12()
       .flex()
       .flex_none()
       .items_center()
@@ -656,20 +798,25 @@ impl Workspace {
       .when(folded, |tile| tile.bg(palette.rail_hover))
       .when(folded && has_active, |tile| tile.border_1().border_color(palette.accent))
       .hover(move |tile| tile.bg(palette.rail_hover))
+      .drag_over::<DraggedProject>(move |style, _, _, _| style.bg(palette.rail_hover))
       .tooltip({
-        let name = name.clone();
-        move |window, cx| Tooltip::new(name.clone()).build(window, cx)
+        let label = label.clone();
+        move |window, cx| Tooltip::new(label.clone()).build(window, cx)
       })
-      .on_click(cx.listener({
-        let name = category.name.clone();
-        move |this, _, _, cx| this.toggle_category(&name, cx)
+      .on_drop(cx.listener({
+        let id = category.id.clone();
+        move |this, dragged: &DraggedProject, _, cx| this.move_project(&dragged.0, Some(&id), cx)
       }))
-      .when(folded && !members.is_empty(), |tile| {
+      .on_click(cx.listener({
+        let id = category.id.clone();
+        move |this, _, _, cx| this.toggle_category(&id, cx)
+      }))
+      .when(shows_initials, |tile| {
         // Discord's folded folder: the first four projects as small initials.
         tile.child(div().size_full().flex().flex_wrap().items_center().justify_center().children(members.iter().take(4).map(|project| {
           let active = self.projects.active.as_ref() == Some(&project.path);
           div()
-            .size_4()
+            .size_5()
             .flex()
             .items_center()
             .justify_center()
@@ -678,22 +825,20 @@ impl Workspace {
             .child(initial(&project.name()))
         })))
       })
-      .when(!(folded && !members.is_empty()), |tile| {
-        tile.child(Icon::empty().path(if folded { "icons/folder.svg" } else { "icons/folder-open.svg" }).size_5())
-      })
+      .when(!shows_initials, |tile| tile.child(Icon::empty().path(if folded { "icons/folder.svg" } else { "icons/folder-open.svg" }).size_6()))
       .context_menu({
-        let name = category.name.clone();
+        let id = category.id.clone();
         move |menu, _, _| {
-          let (rename_workspace, rename_name) = (workspace.clone(), name.clone());
-          let (delete_workspace, delete_name) = (workspace.clone(), name.clone());
+          let (rename_workspace, rename_id) = (workspace.clone(), id.clone());
+          let (delete_workspace, delete_id) = (workspace.clone(), id.clone());
           menu
             .item(
               PopupMenuItem::new("Rename…")
-                .on_click(move |_, window, cx| rename_workspace.update(cx, |this, cx| this.rename_category(rename_name.clone(), window, cx))),
+                .on_click(move |_, window, cx| rename_workspace.update(cx, |this, cx| this.rename_category(rename_id.clone(), window, cx))),
             )
             .item(
               PopupMenuItem::new("Delete category")
-                .on_click(move |_, _, cx| delete_workspace.update(cx, |this, cx| this.delete_category(&delete_name, cx))),
+                .on_click(move |_, _, cx| delete_workspace.update(cx, |this, cx| this.delete_category(&delete_id, cx))),
             )
         }
       });
@@ -708,7 +853,8 @@ impl Workspace {
   fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let loose: Vec<AnyElement> = self.projects.projects_in(None).map(|project| self.rail_project(project, cx).into_any_element()).collect();
-    let groups: Vec<AnyElement> = self.projects.categories.iter().map(|category| self.rail_category(category, cx).into_any_element()).collect();
+    let groups: Vec<AnyElement> =
+      self.projects.categories.iter().enumerate().map(|(index, category)| self.rail_category(index, category, cx).into_any_element()).collect();
     v_flex()
       .w(RAIL_WIDTH)
       .h_full()
@@ -860,11 +1006,10 @@ impl Workspace {
     });
     let name = self
       .projects
-      .active
-      .as_ref()
-      .and_then(|path| path.file_name())
-      .map(|name| SharedString::from(name.to_string_lossy().into_owned()))
-      .unwrap_or_else(|| "Vekro".into());
+      .projects
+      .iter()
+      .find(|project| self.projects.active.as_ref() == Some(&project.path))
+      .map_or_else(|| SharedString::from("Vekro"), |project| SharedString::from(project.name()));
     let open = self.explorer_open;
     let action =
       |id: &'static str, icon: &'static str, tooltip: &'static str| Button::new(id).ghost().xsmall().icon(Icon::empty().path(icon)).tooltip(tooltip);
@@ -933,6 +1078,43 @@ impl Workspace {
   }
 }
 
+/// What a category is called in a menu or a tooltip: its name, or its place in the rail while it has none.
+fn category_label(index: usize, category: &Category) -> String {
+  if category.name.is_empty() {
+    format!("Category {}", index + 1)
+  } else {
+    category.name.clone()
+  }
+}
+
+/// A project avatar being dragged in the rail.
+#[derive(Clone)]
+struct DraggedProject(PathBuf);
+
+/// What follows the pointer while a project is dragged.
+struct DragPreview {
+  label: SharedString,
+  fill: Hsla,
+  text: Hsla,
+}
+
+impl Render for DragPreview {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    div()
+      .size_12()
+      .flex()
+      .items_center()
+      .justify_center()
+      .rounded_lg()
+      .text_lg()
+      .font_weight(FontWeight::MEDIUM)
+      .bg(self.fill)
+      .text_color(self.text)
+      .opacity(0.9)
+      .child(self.label.clone())
+  }
+}
+
 /// The first letter of a project's name, in capitals: its avatar.
 fn initial(name: &str) -> String {
   name.chars().take(1).flat_map(char::to_uppercase).collect()
@@ -950,7 +1132,7 @@ fn rail_button(
   let hover = palette.rail_hover;
   div()
     .id(id)
-    .size_10()
+    .size_12()
     .flex()
     .flex_none()
     .items_center()

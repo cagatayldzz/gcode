@@ -46,40 +46,74 @@ fn adding_many_skips_listed_projects_and_keeps_the_open_one() {
 }
 
 #[test]
-fn categories_group_projects_and_survive_a_save_and_load() {
+fn dropping_a_project_on_another_starts_an_unnamed_category_and_survives_a_save() {
   let dir = std::env::temp_dir().join(format!("vekro-categories-{}", std::process::id()));
   let file = dir.join("projects.json");
+  let (a, b, c) = (PathBuf::from("/work/a"), PathBuf::from("/work/b"), PathBuf::from("/work/c"));
   let mut list = ProjectList::default();
-  list.add(PathBuf::from("/work/a"));
-  list.add(PathBuf::from("/work/b"));
-  assert!(list.add_category("Work"));
-  assert!(!list.add_category("Work"));
-  assert!(!list.add_category("  "));
-  list.set_category(&PathBuf::from("/work/a"), Some("Work"));
-  list.set_category(&PathBuf::from("/work/b"), Some("Missing"));
-  list.toggle_category("Work");
+  list.add_all([a.clone(), b.clone(), c.clone()]);
 
-  assert_eq!(list.projects_in(Some("Work")).count(), 1);
-  assert_eq!(list.projects_in(None).count(), 1);
+  let id = list.group(&b, &a).unwrap();
+  assert_eq!(list.categories.len(), 1);
+  assert_eq!(list.categories[0].name, "");
+  assert_eq!(list.projects_in(Some(&id)).count(), 2);
+  // A third project dropped on a member joins the same category.
+  assert_eq!(list.group(&c, &a), Some(id.clone()));
+  assert_eq!(list.projects_in(Some(&id)).count(), 3);
+  assert_eq!(list.group(&a, &a), None);
+
+  list.toggle_category(&id);
   list.save(&file).unwrap();
   assert_eq!(ProjectList::load(&file), list);
   std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn renaming_and_deleting_a_category_keeps_the_projects() {
+fn a_category_with_no_projects_left_is_deleted() {
+  let (a, b) = (PathBuf::from("/work/a"), PathBuf::from("/work/b"));
   let mut list = ProjectList::default();
-  list.add(PathBuf::from("/work/a"));
-  list.add_category("Work");
-  list.add_category("Play");
-  list.set_category(&PathBuf::from("/work/a"), Some("Work"));
-
-  assert!(!list.rename_category("Work", "Play"));
-  assert!(list.rename_category("Work", "Office"));
-  assert_eq!(list.projects_in(Some("Office")).count(), 1);
-  list.remove_category("Office");
-  assert_eq!(list.projects_in(None).count(), 1);
+  list.add_all([a.clone(), b.clone()]);
+  let id = list.group(&b, &a).unwrap();
+  list.set_category(&a, None);
   assert_eq!(list.categories.len(), 1);
+  list.set_category(&b, None);
+  assert!(list.categories.is_empty());
+  assert_eq!(list.projects_in(Some(&id)).count(), 0);
+}
+
+#[test]
+fn renaming_and_deleting_a_category_keeps_the_projects() {
+  let a = PathBuf::from("/work/a");
+  let mut list = ProjectList::default();
+  list.add(a.clone());
+  let id = list.add_category("Work");
+  list.set_category(&a, Some(&id));
+
+  list.rename_category(&id, "Office");
+  assert_eq!(list.categories[0].name, "Office");
+  list.remove_category(&id);
+  assert_eq!(list.projects_in(None).count(), 1);
+  assert!(list.categories.is_empty());
+}
+
+#[test]
+fn a_project_keeps_its_name_icon_and_color_across_a_save() {
+  let dir = std::env::temp_dir().join(format!("vekro-appearance-{}", std::process::id()));
+  let file = dir.join("projects.json");
+  let a = PathBuf::from("/work/atlas");
+  let mut list = ProjectList::default();
+  list.add(a.clone());
+  assert_eq!(list.projects[0].name(), "atlas");
+
+  list.set_appearance(&a, "  Maps  ", Some("rocket"), Some("#4d8dff"));
+  assert_eq!(list.projects[0].name(), "Maps");
+  list.save(&file).unwrap();
+  assert_eq!(ProjectList::load(&file), list);
+
+  // The folder's own name, or nothing, goes back to the default.
+  list.set_appearance(&a, "atlas", None, None);
+  assert_eq!(list.projects[0], vekro_storage::Project::new(a));
+  std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -92,5 +126,44 @@ fn a_list_of_plain_paths_from_an_older_version_still_loads() {
   assert_eq!(list.projects.len(), 2);
   assert!(list.categories.is_empty());
   assert_eq!(list.active, Some(PathBuf::from("/work/b")));
+  std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn projects_and_categories_move_within_their_own_group() {
+  let (a, b, c, d) = (PathBuf::from("/work/a"), PathBuf::from("/work/b"), PathBuf::from("/work/c"), PathBuf::from("/work/d"));
+  let mut list = ProjectList::default();
+  list.add_all([a.clone(), b.clone(), c.clone(), d.clone()]);
+  let first = list.group(&b, &d).unwrap();
+  let second = list.group(&c, &a).unwrap();
+
+  // b and d share a category, so b moves past d and not past a or c.
+  list.move_project_by(&b, 1);
+  let order: Vec<_> = list.projects.iter().map(|project| project.path.clone()).collect();
+  assert!(order.iter().position(|path| *path == d) < order.iter().position(|path| *path == b));
+  // Already last in its group: nothing happens.
+  let before = list.clone();
+  list.move_project_by(&b, 1);
+  assert_eq!(list, before);
+
+  list.move_category_by(&second, -1);
+  assert_eq!(list.categories[0].id, second);
+  assert_eq!(list.categories[1].id, first);
+  list.move_category_by(&second, -1);
+  assert_eq!(list.categories[0].id, second);
+}
+
+#[test]
+fn only_projects_whose_folder_is_gone_are_reported_missing() {
+  let dir = std::env::temp_dir().join(format!("vekro-missing-{}", std::process::id()));
+  let (kept, gone) = (dir.join("kept"), dir.join("gone"));
+  std::fs::create_dir_all(&kept).unwrap();
+  std::fs::create_dir_all(&gone).unwrap();
+  let mut list = ProjectList::default();
+  list.add_all([kept.clone(), gone.clone()]);
+  assert!(list.missing_paths().is_empty());
+
+  std::fs::remove_dir_all(&gone).unwrap();
+  assert_eq!(list.missing_paths(), vec![gone]);
   std::fs::remove_dir_all(dir).unwrap();
 }

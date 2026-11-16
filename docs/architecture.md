@@ -22,6 +22,8 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/editor.rs` | `EditorPanel`: the editor for a file, the diff of a changed file, or the empty state |
 | `crates/ui/src/terminal.rs` | `Terminal` (a dock panel): draws a `Session`, handles keys, mouse, selection, scrolling and paste |
 | `crates/ui/src/project_setup.rs` | the Add project dialog (New, Clone, Import) |
+| `crates/ui/src/project_settings.rs` | the dialog for a project's name, icon and color |
+| `crates/ui/src/project_manager.rs` | the Project bar page of Settings: every project and category with its actions |
 | `crates/ui/src/settings.rs` | the Settings pages (the Kit `Settings` component) and `SettingsModel`, the settings every window shares |
 | `crates/ui/src/explorer.rs` | the folder tree rows |
 | `crates/ui/src/selection.rs` | terminal selection math (words, extending, arrow keys) |
@@ -34,7 +36,7 @@ apps/vekro ─► app ─► ui ─► terminal
 
 ## Window layout
 
-The `Workspace` renders the title band, then a row of the **project rail** (fixed), the **sidebar** (the project name, an
+The `Workspace` renders the title band, then a row of the **project rail** (fixed, 72 px; projects can be dragged onto each other to group them into categories), the **sidebar** (an
 icon `TabBar` that switches between Explorer and Git, and the selected view, in a Kit `h_resizable` pane,
 200–480 px) and the Kit **`DockArea`**, and the status bar below. The sidebar is plain
 workspace content, not a dock panel, so it has no tab bar. The dock holds:
@@ -102,7 +104,7 @@ Data directory `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_
 
 | File | Type | Written |
 | --- | --- | --- |
-| `projects.json` | `ProjectList` (project paths and their categories, the categories and whether each is folded, the active project) | when a project is added or selected, or a category changes |
+| `projects.json` | `ProjectList` (project paths with their name, icon, color and category; the categories and whether each is folded; the active project) | when a project is added or selected, or a category changes |
 | `preferences.json` | `Preferences` (theme, projects folder) | on each settings change |
 
 Not stored yet: window size and position, dock layout, open files, running terminals.

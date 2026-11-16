@@ -9,23 +9,40 @@ use std::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Project {
   pub path: PathBuf,
-  /// The name of the category the project is in; `None` for a project outside any category.
+  /// The id of the category the project is in; `None` for a project outside any category.
   pub category: Option<String>,
-}
-
-/// A named group of projects in the rail, like a folder of servers in Discord.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Category {
-  pub name: String,
-  /// Shown as one tile instead of its projects.
-  pub collapsed: bool,
+  /// The name shown instead of the folder's name.
+  pub name: Option<String>,
+  /// The name of the icon shown instead of the first letter.
+  pub icon: Option<String>,
+  /// The color of the avatar, as `#rrggbb`.
+  pub color: Option<String>,
 }
 
 impl Project {
-  /// The folder's name, shown in the project list.
-  pub fn name(&self) -> String {
+  pub fn new(path: PathBuf) -> Self {
+    Self { path, category: None, name: None, icon: None, color: None }
+  }
+
+  /// The folder's name.
+  pub fn folder_name(&self) -> String {
     self.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| self.path.display().to_string())
   }
+
+  /// The name shown in the interface: the one the user chose, or the folder's.
+  pub fn name(&self) -> String {
+    self.name.clone().unwrap_or_else(|| self.folder_name())
+  }
+}
+
+/// A group of projects in the rail, like a folder of servers in Discord.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Category {
+  pub id: String,
+  /// Empty for a category the user has not named.
+  pub name: String,
+  /// Shown as one tile instead of its projects.
+  pub collapsed: bool,
 }
 
 /// The projects in the sidebar and the one that was open last (`projects.json`).
@@ -46,7 +63,8 @@ impl ProjectList {
     let Some(Value::Object(root)) = fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()) else {
       return Self::default();
     };
-    // A project is a path (older files) or an object with a path and a category.
+    // A project is a path (older files) or an object.
+    let text = |object: &serde_json::Map<String, Value>, key: &str| object.get(key).and_then(Value::as_str).map(str::to_owned);
     let projects: Vec<Project> = root
       .get("projects")
       .and_then(Value::as_array)
@@ -54,10 +72,13 @@ impl ProjectList {
         items
           .iter()
           .filter_map(|item| match item {
-            Value::String(path) => Some(Project { path: PathBuf::from(path), category: None }),
+            Value::String(path) => Some(Project::new(PathBuf::from(path))),
             Value::Object(object) => Some(Project {
               path: PathBuf::from(object.get("path")?.as_str()?),
-              category: object.get("category").and_then(Value::as_str).map(str::to_owned),
+              category: text(object, "category"),
+              name: text(object, "name").filter(|name| !name.is_empty()),
+              icon: text(object, "icon"),
+              color: text(object, "color"),
             }),
             _ => None,
           })
@@ -66,16 +87,18 @@ impl ProjectList {
       .unwrap_or_default();
     let mut categories: Vec<Category> = Vec::new();
     for item in root.get("categories").and_then(Value::as_array).into_iter().flatten() {
-      let Some(name) = item.get("name").and_then(Value::as_str) else { continue };
-      if !name.is_empty() && !categories.iter().any(|category| category.name == name) {
-        categories.push(Category { name: name.to_owned(), collapsed: item.get("collapsed").and_then(Value::as_bool).unwrap_or(false) });
+      let Value::Object(object) = item else { continue };
+      let name = text(object, "name").unwrap_or_default();
+      let Some(id) = text(object, "id").or_else(|| Some(name.clone()).filter(|name| !name.is_empty())) else { continue };
+      if !categories.iter().any(|category| category.id == id) {
+        categories.push(Category { id, name, collapsed: object.get("collapsed").and_then(Value::as_bool).unwrap_or(false) });
       }
     }
     let active = root.get("active").and_then(Value::as_str).map(PathBuf::from);
     let mut list = Self { projects, categories, active };
     // A project never points at a category that does not exist.
     for project in &mut list.projects {
-      if project.category.as_ref().is_some_and(|name| !list.categories.iter().any(|category| &category.name == name)) {
+      if project.category.as_ref().is_some_and(|id| !list.categories.iter().any(|category| &category.id == id)) {
         project.category = None;
       }
     }
@@ -87,8 +110,14 @@ impl ProjectList {
       fs::create_dir_all(parent)?;
     }
     let value = json!({
-      "projects": self.projects.iter().map(|project| json!({ "path": project.path.to_string_lossy(), "category": project.category })).collect::<Vec<_>>(),
-      "categories": self.categories.iter().map(|category| json!({ "name": category.name, "collapsed": category.collapsed })).collect::<Vec<_>>(),
+      "projects": self.projects.iter().map(|project| json!({
+          "path": project.path.to_string_lossy(),
+          "category": project.category,
+          "name": project.name,
+          "icon": project.icon,
+          "color": project.color,
+        })).collect::<Vec<_>>(),
+      "categories": self.categories.iter().map(|category| json!({ "id": category.id, "name": category.name, "collapsed": category.collapsed })).collect::<Vec<_>>(),
       "active": self.active.as_ref().map(|path| path.to_string_lossy()),
     });
     fs::write(path, serde_json::to_string_pretty(&value)?)
@@ -97,7 +126,7 @@ impl ProjectList {
   /// Adds a folder (once) and makes it the active project.
   pub fn add(&mut self, path: PathBuf) {
     if !self.projects.iter().any(|project| project.path == path) {
-      self.projects.push(Project { path: path.clone(), category: None });
+      self.projects.push(Project::new(path.clone()));
     }
     self.active = Some(path);
   }
@@ -108,13 +137,24 @@ impl ProjectList {
     let before = self.projects.len();
     for path in paths {
       if !self.projects.iter().any(|project| project.path == path) {
-        self.projects.push(Project { path, category: None });
+        self.projects.push(Project::new(path));
       }
     }
     if self.active.is_none() {
       self.active = self.projects.first().map(|project| project.path.clone());
     }
     self.projects.len() - before
+  }
+
+  /// The projects whose folder is gone. A folder that cannot be read for another reason (no permission, a disk that is
+  /// not mounted) is not counted: only a folder that is certainly missing.
+  pub fn missing_paths(&self) -> Vec<PathBuf> {
+    self
+      .projects
+      .iter()
+      .filter(|project| matches!(fs::metadata(&project.path), Err(error) if error.kind() == io::ErrorKind::NotFound))
+      .map(|project| project.path.clone())
+      .collect()
   }
 
   /// Removes a project from the list; the folder stays on disk.
@@ -125,57 +165,98 @@ impl ProjectList {
     }
   }
 
-  /// The projects in `category`, or outside any category for `None`, in list order.
+  /// The projects in the category with this id, or outside any category for `None`, in list order.
   pub fn projects_in<'a>(&'a self, category: Option<&'a str>) -> impl Iterator<Item = &'a Project> {
     self.projects.iter().filter(move |project| project.category.as_deref() == category)
   }
 
-  /// Adds an empty category. Returns false for an empty or a taken name.
-  pub fn add_category(&mut self, name: &str) -> bool {
-    let name = name.trim();
-    if name.is_empty() || self.categories.iter().any(|category| category.name == name) {
-      return false;
-    }
-    self.categories.push(Category { name: name.to_owned(), collapsed: false });
-    true
+  /// Adds an empty category, named or not, and returns its id.
+  pub fn add_category(&mut self, name: &str) -> String {
+    let next = self.categories.iter().filter_map(|category| category.id.strip_prefix("category-")?.parse::<u64>().ok()).max().unwrap_or(0) + 1;
+    let id = format!("category-{next}");
+    self.categories.push(Category { id: id.clone(), name: name.trim().to_owned(), collapsed: false });
+    id
   }
 
-  /// Renames a category, keeping its projects. Returns false for an empty or a taken name.
-  pub fn rename_category(&mut self, old: &str, new: &str) -> bool {
-    let new = new.trim();
-    if new.is_empty() || (new != old && self.categories.iter().any(|category| category.name == new)) {
-      return false;
+  /// Sets a category's name; an empty name makes it unnamed.
+  pub fn rename_category(&mut self, id: &str, name: &str) {
+    if let Some(category) = self.categories.iter_mut().find(|category| category.id == id) {
+      category.name = name.trim().to_owned();
     }
-    let Some(category) = self.categories.iter_mut().find(|category| category.name == old) else { return false };
-    category.name = new.to_owned();
-    for project in self.projects.iter_mut().filter(|project| project.category.as_deref() == Some(old)) {
-      project.category = Some(new.to_owned());
-    }
-    true
   }
 
   /// Deletes a category; its projects stay in the list, outside any category.
-  pub fn remove_category(&mut self, name: &str) {
-    self.categories.retain(|category| category.name != name);
-    for project in self.projects.iter_mut().filter(|project| project.category.as_deref() == Some(name)) {
+  pub fn remove_category(&mut self, id: &str) {
+    self.categories.retain(|category| category.id != id);
+    for project in self.projects.iter_mut().filter(|project| project.category.as_deref() == Some(id)) {
       project.category = None;
     }
   }
 
   /// Puts a project in a category, or takes it out with `None`. An unknown category leaves the project where it is.
+  /// A category left without projects is deleted.
   pub fn set_category(&mut self, path: &Path, category: Option<&str>) {
-    if category.is_some_and(|name| !self.categories.iter().any(|existing| existing.name == name)) {
+    if category.is_some_and(|id| !self.categories.iter().any(|existing| existing.id == id)) {
       return;
     }
     if let Some(project) = self.projects.iter_mut().find(|project| project.path == path) {
       project.category = category.map(str::to_owned);
     }
+    self.prune_empty_categories();
+  }
+
+  /// Drops `dragged` onto `target`: it joins the category `target` is in, or the two start a new unnamed category.
+  /// Returns the id of that category, or `None` when either is not listed or they are the same project.
+  pub fn group(&mut self, dragged: &Path, target: &Path) -> Option<String> {
+    if dragged == target || !self.projects.iter().any(|project| project.path == dragged) {
+      return None;
+    }
+    let existing = self.projects.iter().find(|project| project.path == target)?.category.clone();
+    let id = existing.unwrap_or_else(|| {
+      let id = self.add_category("");
+      self.set_category(target, Some(&id));
+      id
+    });
+    self.set_category(dragged, Some(&id));
+    Some(id)
   }
 
   /// Folds or unfolds a category.
-  pub fn toggle_category(&mut self, name: &str) {
-    if let Some(category) = self.categories.iter_mut().find(|category| category.name == name) {
+  pub fn toggle_category(&mut self, id: &str) {
+    if let Some(category) = self.categories.iter_mut().find(|category| category.id == id) {
       category.collapsed = !category.collapsed;
     }
+  }
+
+  /// Sets how a project looks in the rail. An empty name, icon or color goes back to the default.
+  pub fn set_appearance(&mut self, path: &Path, name: &str, icon: Option<&str>, color: Option<&str>) {
+    if let Some(project) = self.projects.iter_mut().find(|project| project.path == path) {
+      project.name = Some(name.trim().to_owned()).filter(|name| !name.is_empty() && *name != project.folder_name());
+      project.icon = icon.map(str::to_owned);
+      project.color = color.map(str::to_owned);
+    }
+  }
+
+  /// Moves a project up (`-1`) or down (`1`) among the projects of its own category, which is the order the rail shows.
+  pub fn move_project_by(&mut self, path: &Path, delta: isize) {
+    let Some(index) = self.projects.iter().position(|project| project.path == path) else { return };
+    let category = self.projects[index].category.clone();
+    let siblings: Vec<usize> = (0..self.projects.len()).filter(|&other| self.projects[other].category == category).collect();
+    let Some(place) = siblings.iter().position(|&other| other == index) else { return };
+    let Some(&neighbor) = place.checked_add_signed(delta).and_then(|target| siblings.get(target)) else { return };
+    self.projects.swap(index, neighbor);
+  }
+
+  /// Moves a category up (`-1`) or down (`1`) among the categories.
+  pub fn move_category_by(&mut self, id: &str, delta: isize) {
+    let Some(index) = self.categories.iter().position(|category| category.id == id) else { return };
+    if let Some(target) = index.checked_add_signed(delta).filter(|&target| target < self.categories.len()) {
+      self.categories.swap(index, target);
+    }
+  }
+
+  fn prune_empty_categories(&mut self) {
+    let projects = &self.projects;
+    self.categories.retain(|category| projects.iter().any(|project| project.category.as_deref() == Some(category.id.as_str())));
   }
 }

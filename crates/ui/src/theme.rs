@@ -61,6 +61,24 @@ fn hex(value: u32) -> Hsla {
   rgb(value).into()
 }
 
+/// The colors a project's avatar can take, as `(name, #rrggbb)`.
+pub(crate) const PROJECT_COLORS: [(&str, &str); 8] = [
+  ("Blue", "#4d8dff"),
+  ("Purple", "#8b7bff"),
+  ("Pink", "#f066b0"),
+  ("Red", "#ee5a5a"),
+  ("Orange", "#f0883e"),
+  ("Yellow", "#d9a62e"),
+  ("Green", "#3fb68b"),
+  ("Teal", "#2fb5c9"),
+];
+
+/// A stored `#rrggbb` color.
+pub(crate) fn project_color(value: &str) -> Option<Hsla> {
+  let digits = value.strip_prefix('#')?;
+  (digits.len() == 6).then(|| u32::from_str_radix(digits, 16).ok()).flatten().map(hex)
+}
+
 impl Colors {
   fn dark() -> Self {
     Self {

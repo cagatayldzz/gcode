@@ -1,5 +1,6 @@
 //! The Settings dialog, built with the Kit's `Settings` component, and the model that holds the settings.
 
+use crate::project_manager::ProjectManager;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -65,7 +66,7 @@ fn choose_projects_folder(cx: &mut App) {
 }
 
 /// The Settings pages. `fallback_dir` is the projects folder shown while none is chosen.
-pub(crate) fn settings_view(fallback_dir: PathBuf) -> Settings {
+pub(crate) fn settings_view(fallback_dir: PathBuf, projects: Entity<ProjectManager>) -> Settings {
   let shown_dir = fallback_dir.clone();
   Settings::new("vekro-settings").with_group_variant(GroupBoxVariant::Outline).sidebar_width(px(180.)).pages(vec![
     SettingPage::new("General").icon(IconName::Settings).default_open(true).resettable(false).groups(vec![
@@ -94,8 +95,10 @@ pub(crate) fn settings_view(fallback_dir: PathBuf) -> Settings {
         )
         .description("System follows the macOS appearance."),
       ),
+    ]),
+    SettingPage::new("Projects").icon(IconName::Folder).resettable(false).groups(vec![
       SettingGroup::new()
-        .title("Projects")
+        .title("Folder")
         .item(
           SettingItem::new(
             "Projects folder",
@@ -141,6 +144,12 @@ pub(crate) fn settings_view(fallback_dir: PathBuf) -> Settings {
           .description("Adds every Git repository directly inside the projects folder to the project bar."),
         ),
     ]),
+    SettingPage::new("Project bar").icon(IconName::Menu).resettable(false).group(
+      SettingGroup::new()
+        .title("Projects and categories")
+        .description("Rename, recolor, reorder and group the projects of the bar on the left, or remove them. Drag a project onto another one in the bar to group them.")
+        .item(SettingItem::render(move |_, _, _| projects.clone())),
+    ),
     SettingPage::new("About").icon(IconName::Info).resettable(false).group(
       SettingGroup::new()
         .title("Vekro")
