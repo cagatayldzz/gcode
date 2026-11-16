@@ -1,6 +1,5 @@
 //! The "Add project" dialog: create a new project, clone a repository or import an existing folder.
 
-use crate::components::selected_style;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -8,7 +7,8 @@ use gpui_kit::{
     h_flex,
     input::{Input, InputEvent, InputState},
     label::Label,
-    v_flex, ActiveTheme, Disableable as _, Sizable as _,
+    tab::{Tab, TabBar},
+    v_flex, ActiveTheme, Disableable as _, Icon, Sizable as _, WindowExt as _,
   },
   *,
 };
@@ -24,6 +24,35 @@ enum Mode {
   New,
   Clone,
   Import,
+}
+
+const MODES: [Mode; 3] = [Mode::New, Mode::Clone, Mode::Import];
+
+impl Mode {
+  fn label(self) -> &'static str {
+    match self {
+      Mode::New => "New",
+      Mode::Clone => "Clone",
+      Mode::Import => "Import",
+    }
+  }
+
+  fn icon(self) -> Icon {
+    Icon::empty().path(match self {
+      Mode::New => "icons/folder-plus.svg",
+      Mode::Clone => "icons/git-fork.svg",
+      Mode::Import => "icons/folder-input.svg",
+    })
+  }
+
+  /// What the mode does, shown under the tabs.
+  fn hint(self) -> &'static str {
+    match self {
+      Mode::New => "Creates a new folder with an empty Git repository.",
+      Mode::Clone => "Downloads a repository with your Git login (SSH key or credential helper).",
+      Mode::Import => "Adds a folder that already exists on this Mac. The folder stays where it is.",
+    }
+  }
 }
 
 pub(crate) struct ProjectSetup {
@@ -113,61 +142,78 @@ impl ProjectSetup {
     })
     .detach();
   }
+}
 
-  fn tab(&self, id: &'static str, label: &'static str, mode: Mode, cx: &mut Context<Self>) -> impl IntoElement {
-    Button::new(id)
-      .label(label)
-      .small()
-      .when(self.mode == mode, |button| button.custom(selected_style(cx)))
-      .when(self.mode != mode, |button| button.ghost())
-      .on_click(cx.listener(move |this, _, window, cx| this.set_mode(mode, window, cx)))
-  }
+/// A field with a small caption above it.
+fn field(caption: &'static str, muted: Hsla, content: impl IntoElement) -> impl IntoElement {
+  v_flex().gap_1p5().child(Label::new(caption).text_color(muted).text_size(crate::theme::FONT_SIZE_SM)).child(content)
 }
 
 impl Render for ProjectSetup {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
-    let (hint, action) = match self.mode {
-      Mode::New => ("Creates a new folder with an empty Git repository.", "Create project"),
-      Mode::Clone => ("Downloads a repository with your Git login (SSH key or credential helper).", "Clone"),
-      Mode::Import => ("Adds a folder that already exists on this Mac.", "Choose folder…"),
-    };
     let importing = self.mode == Mode::Import;
+    let (caption, action) = match self.mode {
+      Mode::Clone => ("Repository URL", "Clone"),
+      _ => ("Name", "Create project"),
+    };
+    let selected = MODES.iter().position(|mode| *mode == self.mode).unwrap_or(0);
+    let tabs = TabBar::new("add-project-mode")
+      .segmented()
+      .selected_index(selected)
+      .on_click(cx.listener(|this, index: &usize, window, cx| {
+        if let Some(mode) = MODES.get(*index) {
+          this.set_mode(*mode, window, cx);
+        }
+      }))
+      .children(MODES.map(|mode| Tab::new().prefix(mode.icon().size_4()).label(mode.label())));
+    let location = h_flex()
+      .gap_2()
+      .items_center()
+      .pl_3()
+      .pr_1()
+      .py_1()
+      .rounded_md()
+      .border_1()
+      .border_color(theme.input)
+      .child(Icon::empty().path("icons/folder.svg").size_4().text_color(theme.muted_foreground))
+      .child(Label::new(crate::components::display_path(&self.location)).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+      .child(Button::new("choose-location").label("Change…").small().ghost().on_click(cx.listener(|this, _, _, cx| this.choose_folder(cx))));
+    let choose = v_flex()
+      .id("import-card")
+      .items_center()
+      .gap_2()
+      .py_6()
+      .rounded_lg()
+      .border_1()
+      .border_color(theme.input)
+      .cursor_pointer()
+      .hover(|card| card.bg(theme.muted))
+      .child(Icon::empty().path("icons/folder-open.svg").size_8().text_color(theme.muted_foreground))
+      .child(Label::new("Choose a folder…").font_weight(FontWeight::SEMIBOLD))
+      .child(Label::new("It opens as a project at once.").text_color(theme.muted_foreground).text_size(crate::theme::FONT_SIZE_SM))
+      .on_click(cx.listener(|this, _, _, cx| this.choose_folder(cx)));
     v_flex()
       .text_size(crate::theme::FONT_SIZE)
-      .gap_3()
-      .child(
-        h_flex().gap_1().child(self.tab("mode-new", "New", Mode::New, cx)).child(self.tab("mode-clone", "Clone", Mode::Clone, cx)).child(self.tab(
-          "mode-import",
-          "Import",
-          Mode::Import,
-          cx,
-        )),
-      )
-      .child(Label::new(hint).text_color(theme.muted_foreground))
+      .gap_4()
+      .child(tabs)
+      .child(Label::new(self.mode.hint()).text_color(theme.muted_foreground))
       .when(!importing, |form| {
-        form.child(Input::new(&self.input)).child(
-          h_flex()
-            .gap_2()
-            .items_center()
-            .child(Label::new("In").text_color(theme.muted_foreground))
-            .child(
-              Label::new(crate::components::display_path(&self.location)).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis(),
-            )
-            .child(Button::new("choose-location").label("Change…").small().on_click(cx.listener(|this, _, _, cx| this.choose_folder(cx)))),
-        )
+        form.child(field(caption, theme.muted_foreground, Input::new(&self.input))).child(field("Location", theme.muted_foreground, location))
       })
+      .when(importing, |form| form.child(choose))
       .when_some(self.error.clone(), |form, error| form.child(Label::new(error).text_color(theme.danger)))
-      .child(h_flex().justify_end().child(
-        Button::new("submit").label(if self.busy { "Working…" } else { action }).primary().disabled(self.busy).on_click(cx.listener(
-          |this, _, _, cx| {
-            if this.mode == Mode::Import {
-              this.choose_folder(cx);
-            } else {
-              this.submit(cx);
-            }
-          },
-        )),
+      .child(h_flex().gap_2().justify_end().child(Button::new("cancel").label("Cancel").on_click(|_, window, cx| window.close_dialog(cx))).when(
+        !importing,
+        |footer| {
+          footer.child(
+            Button::new("submit")
+              .label(if self.busy { "Working…" } else { action })
+              .primary()
+              .disabled(self.busy)
+              .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
+          )
+        },
       ))
   }
 }

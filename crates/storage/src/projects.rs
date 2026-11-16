@@ -255,8 +255,31 @@ impl ProjectList {
     }
   }
 
+  /// Puts `dragged` right before `target` in the list, in the category of `target`. Returns false when either is not
+  /// listed or they are the same project.
+  pub fn move_project_before(&mut self, dragged: &Path, target: &Path) -> bool {
+    if dragged == target {
+      return false;
+    }
+    let (Some(from), Some(_)) =
+      (self.projects.iter().position(|project| project.path == dragged), self.projects.iter().position(|project| project.path == target))
+    else {
+      return false;
+    };
+    let mut project = self.projects.remove(from);
+    let to = self.projects.iter().position(|other| other.path == target).unwrap_or(self.projects.len());
+    project.category = self.projects[to].category.clone();
+    self.projects.insert(to, project);
+    self.prune_empty_categories();
+    true
+  }
+
+  /// Deletes the unnamed categories without projects: the ones that dragging made, and nobody asked for by name. A
+  /// category the user named stays until it is deleted, empty or not.
   fn prune_empty_categories(&mut self) {
     let projects = &self.projects;
-    self.categories.retain(|category| projects.iter().any(|project| project.category.as_deref() == Some(category.id.as_str())));
+    self
+      .categories
+      .retain(|category| !category.name.is_empty() || projects.iter().any(|project| project.category.as_deref() == Some(category.id.as_str())));
   }
 }

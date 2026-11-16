@@ -167,3 +167,36 @@ fn only_projects_whose_folder_is_gone_are_reported_missing() {
   assert_eq!(list.missing_paths(), vec![gone]);
   std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn a_named_category_stays_when_it_is_empty_and_an_unnamed_one_does_not() {
+  let (a, b) = (PathBuf::from("/work/a"), PathBuf::from("/work/b"));
+  let mut list = ProjectList::default();
+  list.add_all([a.clone(), b.clone()]);
+  let named = list.add_category("Work");
+  list.set_category(&a, Some(&named));
+  list.set_category(&a, None);
+  assert_eq!(list.categories.len(), 1);
+  assert_eq!(list.projects_in(Some(&named)).count(), 0);
+
+  let unnamed = list.group(&b, &a).unwrap();
+  list.set_category(&a, None);
+  list.set_category(&b, None);
+  assert!(list.categories.iter().all(|category| category.id != unnamed));
+}
+
+#[test]
+fn dropping_a_project_before_another_moves_it_into_that_category_and_place() {
+  let (a, b, c) = (PathBuf::from("/work/a"), PathBuf::from("/work/b"), PathBuf::from("/work/c"));
+  let mut list = ProjectList::default();
+  list.add_all([a.clone(), b.clone(), c.clone()]);
+  let id = list.add_category("Work");
+  list.set_category(&b, Some(&id));
+
+  assert!(list.move_project_before(&c, &b));
+  let order: Vec<_> = list.projects.iter().map(|project| project.path.clone()).collect();
+  assert_eq!(order, vec![a.clone(), c.clone(), b.clone()]);
+  assert_eq!(list.projects.iter().find(|project| project.path == c).unwrap().category.as_deref(), Some(id.as_str()));
+  assert!(!list.move_project_before(&c, &c));
+  assert!(!list.move_project_before(&c, &PathBuf::from("/work/missing")));
+}

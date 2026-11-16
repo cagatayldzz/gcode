@@ -187,6 +187,56 @@ pub fn discard_changes(path: &Path, file: &Path) -> Result<(), String> {
   }
 }
 
+/// Commits `files` (relative to the repository) with the given message, and nothing else: other changes stay as they are,
+/// also those that were staged. Returns the short id of the new commit.
+///
+/// The commit is built from the last commit plus the chosen files, so what was staged for other files is left out of it.
+/// Afterwards the index of the chosen files matches the commit, like after `git commit <files>`.
+pub fn commit(path: &Path, files: &[PathBuf], summary: &str, description: &str) -> Result<String, String> {
+  let summary = summary.trim();
+  if summary.is_empty() {
+    return Err("Write a summary for the commit.".into());
+  }
+  if files.is_empty() {
+    return Err("Choose at least one file to commit.".into());
+  }
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  let workdir = repository.workdir().ok_or("The repository has no working folder.")?.to_path_buf();
+  let signature = repository.signature().map_err(|_| "Set user.name and user.email in your Git configuration first.".to_string())?;
+  let parent = repository.head().ok().and_then(|head| head.peel_to_commit().ok());
+
+  // A copy of the last commit's tree in memory, with the chosen files applied.
+  let mut tree_index = git2::Index::new().map_err(|error| error.message().to_string())?;
+  if let Some(parent) = &parent {
+    tree_index.read_tree(&parent.tree().map_err(|error| error.message().to_string())?).map_err(|error| error.message().to_string())?;
+  }
+  let mut real_index = repository.index().map_err(|error| error.message().to_string())?;
+  for file in files {
+    if workdir.join(file).exists() {
+      real_index.add_path(file).map_err(|error| error.message().to_string())?;
+      let entry = real_index.get_path(file, 0).ok_or_else(|| format!("Could not add {}.", file.display()))?;
+      tree_index.add(&entry).map_err(|error| error.message().to_string())?;
+    } else {
+      // A deleted file: it leaves both the commit and the index.
+      let _ = tree_index.remove_path(file);
+      let _ = real_index.remove_path(file);
+    }
+  }
+  let tree_id = tree_index.write_tree_to(&repository).map_err(|error| error.message().to_string())?;
+  let tree = repository.find_tree(tree_id).map_err(|error| error.message().to_string())?;
+  if parent.as_ref().is_some_and(|parent| parent.tree_id() == tree_id) {
+    return Err("The chosen files have no changes to commit.".into());
+  }
+  let message = match description.trim() {
+    "" => summary.to_string(),
+    description => format!("{summary}\n\n{description}"),
+  };
+  let parents: Vec<&git2::Commit> = parent.iter().collect();
+  let id = repository.commit(Some("HEAD"), &signature, &signature, &message, &tree, &parents).map_err(|error| error.message().to_string())?;
+  real_index.write().map_err(|error| error.message().to_string())?;
+  Ok(id.to_string().chars().take(7).collect())
+}
+
 /// The folders directly inside `folder` that are Git repositories, sorted by name. Folders that cannot be read are skipped.
 pub fn find_repositories(folder: &Path) -> Vec<PathBuf> {
   let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };

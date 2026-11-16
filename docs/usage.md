@@ -6,8 +6,11 @@ A Vekro window has four parts:
 - the **sidebar**: two icon tabs. **Explorer** shows the folder tree of the open project, under a row with the project's name and four
   buttons: new file, new folder (created inside the selected folder, next to the selected file, or in the project folder; type the name and
   press Enter, `dir/name.rs` makes the subfolder too), refresh and collapse all folders. **Git** shows the branch
-  and the changed files (click one for its diff; right-click for **Open in Editor** and **Discard changes**, which asks first,
-  throws away every change to that file and deletes it if it is new);
+  and the changed files, each with a checkbox (click a file for its diff; right-click for **Open in Editor** and
+  **Discard changes**, which asks first, throws away every change to that file and deletes it if it is new). Below the list
+  is the commit box: type a **Summary** (required) and, if you like, a **Description**, then **Commit N files to
+  <branch>**. Only the ticked files go into the commit; the others (staged or not) stay as they are, so they show up
+  again in the list. A commit needs `user.name` and `user.email` in your Git configuration;
 - the **editor area** in the middle: a file, or the diff of a changed file;
 - the **terminal dock** at the bottom: one or more shells of the open project.
 
@@ -59,12 +62,19 @@ category come first, then the categories in the order they were created.
 
 ### Managing the project bar in Settings
 
-`⌘,` opens Settings. The **Project bar** page lists every project and category in the order the rail shows them
-(projects without a category first). Per project: **Name, icon and color**, **Move up / down** (within its
-category), **Category** (a menu to move it, start a new category or leave its category) and **Remove from Vekro**
-(asks first: its terminals stop, the folder and its files stay). Per category: **Rename**, **Move up / down**,
-**Fold / unfold** in the rail and **Delete** (the projects stay). The **Projects** page holds the projects folder
-and **Add all**.
+`⌘,` opens Settings. The **Project bar** page lists every project and category in the order the bar shows them
+(projects without a category first).
+
+- **New category** (top right) asks for a name and adds an empty category, a place to drop projects on. A category you
+  named stays until you delete it, even when it is empty.
+- **Drag a row** by its grip: onto a category's title to put the project in it, onto **No category** to take it out,
+  onto another project to put it right before that project, in that project's category.
+- Per project: **Name, icon and color**, the **category menu** (it shows the current category; pick another, start a
+  new one or choose none), **Move up / down** and **Remove from Vekro** (asks first: its terminals stop, the folder
+  and its files stay).
+- Per category: **Rename**, **Move up / down**, **Fold / unfold** in the bar and **Delete** (the projects stay).
+
+The **Projects** page holds the projects folder and **Add all**.
 
 ### Project settings
 

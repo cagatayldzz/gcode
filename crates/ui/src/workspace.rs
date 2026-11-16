@@ -14,9 +14,10 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
     button::{Button, ButtonVariants as _},
+    checkbox::Checkbox,
     dock::{panel_handle, DockArea, DockLayout, DockPlacement, DockSkin},
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{Input, InputEvent, InputState, Textarea, TextareaState},
     label::Label,
     menu::{ContextMenuExt as _, PopupMenuItem},
     notification::Notification,
@@ -25,7 +26,7 @@ use gpui_kit::{
     status_bar::StatusBar,
     tab::{Tab, TabBar},
     tooltip::Tooltip,
-    v_flex, ActiveTheme, Icon, IconName, Sizable as _, TitleBar, WindowExt as _,
+    v_flex, ActiveTheme, Disableable as _, Icon, IconName, Sizable as _, TitleBar, WindowExt as _,
   },
   *,
 };
@@ -120,6 +121,13 @@ pub struct Workspace {
   _dialog_subscription: Option<Subscription>,
   /// The scroll position of the folder tree.
   explorer_scroll: UniformListScrollHandle,
+  /// The changed files left out of the next commit.
+  excluded: HashSet<PathBuf>,
+  commit_summary: Entity<InputState>,
+  commit_description: Entity<TextareaState>,
+  /// A commit is being made.
+  committing: bool,
+  _commit_subscriptions: Vec<Subscription>,
   _settings_subscriptions: Vec<Subscription>,
   _appearance: Subscription,
   _activation: Subscription,
@@ -151,6 +159,8 @@ impl Workspace {
     dock.update(cx, |area, cx| {
       area.set_center(DockLayout::h_split().child(DockLayout::tabs().panel_view(panel_handle(editor_panel.clone()), cx), None), window, cx);
     });
+    let commit_summary = cx.new(|cx| InputState::new(window, cx).placeholder("Summary (required)"));
+    let commit_description = cx.new(|cx| TextareaState::new(window, cx).placeholder("Description"));
     let mut this = Self {
       projects: ProjectList::load(&ProjectList::default_path()),
       settings: settings.clone(),
@@ -166,6 +176,14 @@ impl Workspace {
       _setup_subscription: None,
       _dialog_subscription: None,
       explorer_scroll: UniformListScrollHandle::default(),
+      excluded: HashSet::new(),
+      commit_summary: commit_summary.clone(),
+      commit_description: commit_description.clone(),
+      committing: false,
+      _commit_subscriptions: vec![
+        // The commit button is enabled once there is a summary.
+        cx.subscribe(&commit_summary, |_, _, _: &InputEvent, cx| cx.notify()),
+      ],
       _settings_subscriptions: vec![
         // Any change to a setting is saved and applied in every window.
         cx.observe_in(&settings, window, |_, settings, window, cx| {
@@ -350,6 +368,27 @@ impl Workspace {
     }
   }
 
+  /// Asks for a name and adds an empty category: a place to drop projects on in the project bar.
+  pub(crate) fn create_category(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.ask_name("New category", "Category name", "", window, cx, move |this, name, _, cx| {
+      if name.trim().is_empty() {
+        return Err("Enter a name for the category.".into());
+      }
+      this.projects.add_category(name);
+      this.persist_projects();
+      cx.notify();
+      Ok(())
+    });
+  }
+
+  /// Puts a project in the place and the category of another one: dragging a row in the project list in Settings.
+  pub(crate) fn move_project_before(&mut self, dragged: &Path, target: &Path, cx: &mut Context<Self>) {
+    if self.projects.move_project_before(dragged, target) {
+      self.persist_projects();
+      cx.notify();
+    }
+  }
+
   /// Makes a category from a project, unnamed: the menu's way to start one without a second project.
   pub(crate) fn new_category(&mut self, project: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
     self.ask_name("New category", "Category name", "", window, cx, move |this, name, _, cx| {
@@ -487,6 +526,7 @@ impl Workspace {
     if let Err(error) = self.projects.save(&ProjectList::default_path()) {
       eprintln!("Could not save the project list: {error}");
     }
+    self.excluded.clear();
     let after = self.projects.active.clone();
     let view = after.as_ref().and_then(|root| self.views.remove(root)).unwrap_or_default();
     self.expanded = view.expanded;
@@ -707,6 +747,48 @@ impl Workspace {
       }
       Err(message) => window.push_notification(Notification::error(message), cx),
     }
+  }
+
+  /// Commits the changed files that are ticked, with the summary and description typed below the list.
+  fn commit_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
+    if self.committing {
+      return;
+    }
+    let files: Vec<PathBuf> = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).map(|change| change.path.clone()).collect();
+    let summary = self.commit_summary.read(cx).value().to_string();
+    let description = self.commit_description.read(cx).value().to_string();
+    self.committing = true;
+    cx.notify();
+    let work = cx.background_executor().spawn({
+      let (root, files) = (root.clone(), files.clone());
+      async move { vekro_git::commit(&root, &files, &summary, &description) }
+    });
+    cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.committing = false;
+        match result {
+          Ok(id) => {
+            this.commit_summary.update(cx, |input, cx| input.set_value("", window, cx));
+            this.commit_description.update(cx, |input, cx| input.set_value("", window, cx));
+            this.excluded.clear();
+            // The diff of a file that was just committed has nothing left to show.
+            if let Some(open) = this.selected_change.clone().filter(|open| files.contains(open)) {
+              if let Some(path) = vekro_git::workdir_file(&root, &open) {
+                this.editor_panel.update(cx, |editor, cx| editor.forget(&path, &open.display().to_string(), cx));
+              }
+              this.selected_change = None;
+            }
+            this.refresh_project();
+            window.push_notification(Notification::info(format!("Committed {id}.")), cx);
+          }
+          Err(message) => window.push_notification(Notification::error(message), cx),
+        }
+        cx.notify();
+      });
+    })
+    .detach();
   }
 
   /// Saves the file open in the editor.
@@ -959,62 +1041,109 @@ impl Workspace {
       count => format!("{count} changed files"),
     };
     let workspace = cx.entity();
-    let changes_list = v_flex().id("git-changes").max_h(px(170.)).overflow_y_scrollbar().children(git.changes.iter().map(|change| {
+    let changes_list = v_flex().id("git-changes").flex_1().min_h_0().overflow_y_scrollbar().children(git.changes.iter().map(|change| {
       let file = change.path.clone();
       let selected = self.selected_change.as_ref() == Some(&change.path);
+      let included = !self.excluded.contains(&change.path);
       let name = change.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
       let folder = change.path.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
-      h_flex()
-        .id(SharedString::from(format!("change-{}", change.path.display())))
-        .gap_1p5()
-        .px_2()
-        .py_1()
-        .rounded_md()
-        .items_center()
-        .cursor_pointer()
-        .when(selected, |row| row.bg(palette.selected))
-        .hover(|row| row.bg(palette.hover))
-        .child(Label::new(change.kind.mark()).w_4().text_color(kind_color(change.kind, &palette)))
-        .child(Label::new(name).flex_none())
-        .when_some(folder, |row, folder| {
-          row.child(
-            Label::new(folder)
-              .text_size(FONT_SIZE_SM)
-              .text_color(theme.muted_foreground)
+      div().w_full().pr_3().child(
+        h_flex()
+          .id(SharedString::from(format!("change-row-{}", change.path.display())))
+          .gap_1p5()
+          .pl_2()
+          .pr_2()
+          .py_1()
+          .rounded_md()
+          .items_center()
+          .when(selected, |row| row.bg(palette.selected))
+          .hover(|row| row.bg(palette.hover))
+          .child(Checkbox::new(SharedString::from(format!("include-{}", change.path.display()))).checked(included).on_click(cx.listener({
+            let file = file.clone();
+            move |this, checked: &bool, _, cx| {
+              if *checked {
+                this.excluded.remove(&file);
+              } else {
+                this.excluded.insert(file.clone());
+              }
+              cx.notify();
+            }
+          })))
+          .child(
+            h_flex()
+              .id(SharedString::from(format!("change-{}", change.path.display())))
               .flex_1()
               .min_w_0()
-              .overflow_hidden()
-              .whitespace_nowrap()
-              .text_ellipsis(),
+              .gap_1p5()
+              .items_center()
+              .cursor_pointer()
+              .child(Label::new(change.kind.mark()).w_4().flex_none().text_color(kind_color(change.kind, &palette)))
+              .child(Label::new(name).min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+              .when_some(folder, |row, folder| {
+                row.child(
+                  Label::new(folder)
+                    .text_size(FONT_SIZE_SM)
+                    .text_color(theme.muted_foreground)
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis(),
+                )
+              })
+              .on_click(cx.listener({
+                let file = file.clone();
+                move |this, _, window, cx| this.open_change(file.clone(), window, cx)
+              })),
           )
-        })
-        .on_click(cx.listener({
-          let file = file.clone();
-          move |this, _, window, cx| this.open_change(file.clone(), window, cx)
-        }))
-        .context_menu({
-          let (workspace, deleted) = (workspace.clone(), change.kind == vekro_git::ChangeKind::Deleted);
-          move |menu, _, _| {
-            let (open_workspace, open_file) = (workspace.clone(), file.clone());
-            let (discard_workspace, discard_file) = (workspace.clone(), file.clone());
-            menu
-              .item(
-                PopupMenuItem::new("Open in Editor")
-                  .disabled(deleted)
-                  .on_click(move |_, window, cx| open_workspace.update(cx, |this, cx| this.open_change_in_editor(&open_file, window, cx))),
-              )
-              .item(PopupMenuItem::new("Discard changes").on_click(move |_, window, cx| {
-                discard_workspace.update(cx, |this, cx| this.confirm_discard_changes(discard_file.clone(), window, cx))
-              }))
-          }
-        })
+          .context_menu({
+            let (workspace, deleted) = (workspace.clone(), change.kind == vekro_git::ChangeKind::Deleted);
+            move |menu, _, _| {
+              let (open_workspace, open_file) = (workspace.clone(), file.clone());
+              let (discard_workspace, discard_file) = (workspace.clone(), file.clone());
+              menu
+                .item(
+                  PopupMenuItem::new("Open in Editor")
+                    .disabled(deleted)
+                    .on_click(move |_, window, cx| open_workspace.update(cx, |this, cx| this.open_change_in_editor(&open_file, window, cx))),
+                )
+                .item(PopupMenuItem::new("Discard changes").on_click(move |_, window, cx| {
+                  discard_workspace.update(cx, |this, cx| this.confirm_discard_changes(discard_file.clone(), window, cx))
+                }))
+            }
+          }),
+      )
     }));
+    let chosen = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).count();
+    let summary_filled = !self.commit_summary.read(cx).value().trim().is_empty();
+    let label = match chosen {
+      1 => format!("Commit 1 file to {}", git.branch),
+      count => format!("Commit {count} files to {}", git.branch),
+    };
+    let commit_box = v_flex()
+      .flex_none()
+      .gap_2()
+      .pr_3()
+      .pb_3()
+      .pt_2()
+      .child(Input::new(&self.commit_summary))
+      .child(Textarea::new(&self.commit_description).h(px(88.)))
+      .child(
+        Button::new("commit")
+          .primary()
+          .w_full()
+          .label(label)
+          .disabled(chosen == 0 || !summary_filled || self.committing)
+          .on_click(cx.listener(|this, _, window, cx| this.commit_changes(window, cx))),
+      );
     Some(
       v_flex()
+        .size_full()
         .gap_1()
         .child(
           h_flex()
-            .px_2()
+            .pl_2()
+            .pr_5()
             .py_1()
             .gap_2()
             .items_center()
@@ -1031,7 +1160,8 @@ impl Workspace {
             .child(div().size_2().rounded_full().bg(if git.changed() > 0 { theme.primary } else { theme.muted_foreground }).mx_1())
             .child(Label::new(changed).text_color(theme.muted_foreground)),
         )
-        .when(git.changed() > 0, |section| section.child(changes_list)),
+        .child(div().flex_1().min_h_0().when(git.changed() > 0, |list| list.child(changes_list)))
+        .child(commit_box),
     )
   }
 
@@ -1159,7 +1289,7 @@ impl Workspace {
     let content = match self.sidebar_tab {
       SidebarTab::Explorer => self.render_explorer(cx).into_any_element(),
       SidebarTab::Git => match self.render_git(cx) {
-        Some(git) => div().pr_3().child(git).into_any_element(),
+        Some(git) => git.into_any_element(),
         None => Label::new("Not a Git repository").text_color(cx.theme().muted_foreground).px_2().into_any_element(),
       },
     };

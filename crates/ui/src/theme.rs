@@ -34,6 +34,8 @@ pub(crate) struct Colors {
   /// A slightly raised surface: the status bar, empty-state icons.
   pub surface_alt: Hsla,
   pub border: Hsla,
+  /// The outline of a field or a checkbox: stronger than `border`, which only separates areas.
+  pub control_border: Hsla,
   /// The row that is chosen.
   pub selected: Hsla,
   pub hover: Hsla,
@@ -86,6 +88,7 @@ impl Colors {
       surface: hex(0x131820),
       surface_alt: hex(0x181e28),
       border: hex(0x222a36),
+      control_border: hex(0x3d4757),
       selected: hex(0x1f2836),
       hover: hex(0x1a212c),
       rail: hex(0x010409),
@@ -111,6 +114,7 @@ impl Colors {
       surface: hex(0xf4f6f9),
       surface_alt: hex(0xebeef3),
       border: hex(0xe1e5ec),
+      control_border: hex(0xbcc5d1),
       selected: hex(0xe3e9f4),
       hover: hex(0xebeff6),
       rail: hex(0xf6f8fa),
@@ -165,7 +169,9 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     colors.sidebar_primary = c.accent;
     colors.sidebar_primary_foreground = white();
     colors.border = c.border;
-    colors.input = c.border;
+    colors.input = c.control_border;
+    colors.tab_bar_segmented = c.surface_alt;
+    colors.tab_active = c.selected;
     colors.popover = c.surface;
     colors.popover_foreground = c.text;
     colors.muted = c.surface_alt;

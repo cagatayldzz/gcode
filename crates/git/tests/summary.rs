@@ -158,3 +158,74 @@ fn a_changed_file_is_found_by_its_repository_relative_path() {
   assert!(found.ends_with("kept.txt") && found.exists());
   fs::remove_dir_all(dir).unwrap();
 }
+
+fn configure_author(dir: &PathBuf) {
+  let repository = git2::Repository::open(dir).unwrap();
+  let mut config = repository.config().unwrap();
+  config.set_str("user.name", "Test").unwrap();
+  config.set_str("user.email", "test@example.com").unwrap();
+}
+
+#[test]
+fn committing_takes_only_the_chosen_files() {
+  use vekro_git::commit;
+  let dir = committed_repository("commit-chosen");
+  configure_author(&dir);
+  fs::write(dir.join("kept.txt"), "edited").unwrap();
+  fs::write(dir.join("other.txt"), "edited too").unwrap();
+  fs::write(dir.join("fresh.txt"), "new").unwrap();
+
+  let id = commit(&dir, &[PathBuf::from("kept.txt"), PathBuf::from("fresh.txt")], "  Change two files ", "More about it").unwrap();
+  assert_eq!(id.len(), 7);
+  let found = summary(&dir).unwrap();
+  let left: Vec<_> = found.changes.iter().map(|change| change.path.to_string_lossy().into_owned()).collect();
+  assert_eq!(left, ["other.txt"]);
+
+  let repository = git2::Repository::open(&dir).unwrap();
+  let head = repository.head().unwrap().peel_to_commit().unwrap();
+  assert_eq!(head.message().unwrap(), "Change two files\n\nMore about it");
+  assert_eq!(head.parent_count(), 1);
+  fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_file_staged_but_not_chosen_stays_out_of_the_commit() {
+  use vekro_git::commit;
+  let dir = committed_repository("commit-staged");
+  configure_author(&dir);
+  fs::write(dir.join("kept.txt"), "edited").unwrap();
+  fs::write(dir.join("other.txt"), "edited too").unwrap();
+  let repository = git2::Repository::open(&dir).unwrap();
+  let mut index = repository.index().unwrap();
+  index.add_path(std::path::Path::new("other.txt")).unwrap();
+  index.write().unwrap();
+
+  commit(&dir, &[PathBuf::from("kept.txt")], "Only one", "").unwrap();
+  let head_tree = repository.head().unwrap().peel_to_tree().unwrap();
+  let in_commit = head_tree.get_path(std::path::Path::new("other.txt")).unwrap().to_object(&repository).unwrap();
+  assert_eq!(in_commit.as_blob().unwrap().content(), b"other");
+  assert_eq!(summary(&dir).unwrap().changed(), 1);
+  fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn committing_handles_deleted_files_the_first_commit_and_bad_input() {
+  use vekro_git::commit;
+  let dir = committed_repository("commit-edges");
+  configure_author(&dir);
+  fs::remove_file(dir.join("other.txt")).unwrap();
+  commit(&dir, &[PathBuf::from("other.txt")], "Remove it", "").unwrap();
+  assert_eq!(summary(&dir).unwrap().changed(), 0);
+  assert!(commit(&dir, &[], "No files", "").is_err());
+  assert!(commit(&dir, &[PathBuf::from("kept.txt")], "   ", "").is_err());
+  assert!(commit(&dir, &[PathBuf::from("kept.txt")], "Nothing changed", "").is_err());
+
+  let fresh = temp_dir("commit-first");
+  git2::Repository::init_opts(&fresh, git2::RepositoryInitOptions::new().initial_head("main")).unwrap();
+  configure_author(&fresh);
+  fs::write(fresh.join("a.txt"), "a").unwrap();
+  commit(&fresh, &[PathBuf::from("a.txt")], "First", "").unwrap();
+  assert_eq!(summary(&fresh).unwrap().changed(), 0);
+  fs::remove_dir_all(dir).unwrap();
+  fs::remove_dir_all(fresh).unwrap();
+}
