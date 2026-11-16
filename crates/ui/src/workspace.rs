@@ -142,7 +142,10 @@ impl Workspace {
       Some(global) => global.0.clone(),
       None => init_settings(cx),
     };
-    apply_theme(settings.read(cx).preferences.theme, window, cx);
+    {
+      let preferences = &settings.read(cx).preferences;
+      apply_theme(preferences.theme, preferences.code_font_size, window, cx);
+    }
     let (dock, _skin) = DockSkin::dock_area("workspace-dock", Some(1), window, cx);
     let editor_panel = cx.new(|cx| EditorPanel::new(window, cx));
     dock.update(cx, |area, cx| {
@@ -170,7 +173,7 @@ impl Workspace {
           if let Err(error) = preferences.save(&Preferences::default_path()) {
             eprintln!("Could not save the settings: {error}");
           }
-          apply_theme(preferences.theme, window, cx);
+          apply_theme(preferences.theme, preferences.code_font_size, window, cx);
           cx.notify();
         }),
         // "Add all" is handled by the window the user is in.
@@ -184,7 +187,10 @@ impl Workspace {
       editor_panel: editor_panel.clone(),
       terminals: HashMap::new(),
       _terminal_subscriptions: Vec::new(),
-      _appearance: cx.observe_window_appearance(window, |this, window, cx| apply_theme(this.settings.read(cx).preferences.theme, window, cx)),
+      _appearance: cx.observe_window_appearance(window, |this, window, cx| {
+        let preferences = &this.settings.read(cx).preferences;
+        apply_theme(preferences.theme, preferences.code_font_size, window, cx)
+      }),
       // Changes made in another app (an editor, GitHub Desktop, a terminal) show up as soon as the window is back.
       _editor: cx.observe(&editor_panel, |_, _, cx| cx.notify()),
       _activation: cx.observe_window_activation(window, |this, window, cx| {
@@ -659,6 +665,50 @@ impl Workspace {
     cx.notify();
   }
 
+  /// Opens a changed file itself, not its diff, in the editor.
+  pub(crate) fn open_change_in_editor(&mut self, file: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    match vekro_git::workdir_file(&root, file).filter(|path| path.is_file()) {
+      Some(path) => self.open_file(path, window, cx),
+      None => window.push_notification(Notification::error(format!("{} is not on the disk.", file.display())), cx),
+    }
+  }
+
+  /// Asks before throwing away the changes of one file: that cannot be undone.
+  pub(crate) fn confirm_discard_changes(&mut self, file: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    let (workspace, title) = (cx.entity(), SharedString::from(format!("Discard changes to {}?", file.display())));
+    window.open_alert_dialog(cx, move |alert, _, _| {
+      let (workspace, file) = (workspace.clone(), file.clone());
+      alert
+        .title(title.clone())
+        .description("Every change to this file, staged or not, is lost. A new file is deleted. This cannot be undone.")
+        .confirm()
+        .on_ok(move |_, window, cx| {
+          workspace.update(cx, |this, cx| this.discard_changes(&file, window, cx));
+          true
+        })
+    });
+  }
+
+  fn discard_changes(&mut self, file: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    match vekro_git::discard_changes(&root, file) {
+      Ok(()) => {
+        if let Some(path) = vekro_git::workdir_file(&root, file) {
+          let name = file.display().to_string();
+          self.editor_panel.update(cx, |editor, cx| editor.forget(&path, &name, cx));
+        }
+        if self.selected_change.as_deref() == Some(file) {
+          self.selected_change = None;
+        }
+        self.refresh_project();
+        window.push_notification(Notification::info(format!("Discarded the changes to {}.", file.display())), cx);
+        cx.notify();
+      }
+      Err(message) => window.push_notification(Notification::error(message), cx),
+    }
+  }
+
   /// Saves the file open in the editor.
   pub fn save_file(&mut self, _: &SaveFile, window: &mut Window, cx: &mut Context<Self>) {
     match self.editor_panel.update(cx, |editor, cx| editor.save(cx)) {
@@ -908,6 +958,7 @@ impl Workspace {
       1 => "1 changed file".to_string(),
       count => format!("{count} changed files"),
     };
+    let workspace = cx.entity();
     let changes_list = v_flex().id("git-changes").max_h(px(170.)).overflow_y_scrollbar().children(git.changes.iter().map(|change| {
       let file = change.path.clone();
       let selected = self.selected_change.as_ref() == Some(&change.path);
@@ -937,7 +988,26 @@ impl Workspace {
               .text_ellipsis(),
           )
         })
-        .on_click(cx.listener(move |this, _, window, cx| this.open_change(file.clone(), window, cx)))
+        .on_click(cx.listener({
+          let file = file.clone();
+          move |this, _, window, cx| this.open_change(file.clone(), window, cx)
+        }))
+        .context_menu({
+          let (workspace, deleted) = (workspace.clone(), change.kind == vekro_git::ChangeKind::Deleted);
+          move |menu, _, _| {
+            let (open_workspace, open_file) = (workspace.clone(), file.clone());
+            let (discard_workspace, discard_file) = (workspace.clone(), file.clone());
+            menu
+              .item(
+                PopupMenuItem::new("Open in Editor")
+                  .disabled(deleted)
+                  .on_click(move |_, window, cx| open_workspace.update(cx, |this, cx| this.open_change_in_editor(&open_file, window, cx))),
+              )
+              .item(PopupMenuItem::new("Discard changes").on_click(move |_, window, cx| {
+                discard_workspace.update(cx, |this, cx| this.confirm_discard_changes(discard_file.clone(), window, cx))
+              }))
+          }
+        })
     }));
     Some(
       v_flex()
@@ -1029,7 +1099,8 @@ impl Workspace {
       self.rows.len(),
       cx.processor(|this, range: Range<usize>, _, cx| {
         let rows: Vec<explorer::Row> = this.rows.get(range).map(<[explorer::Row]>::to_vec).unwrap_or_default();
-        rows.iter().map(|row| this.explorer_row(row, cx).into_any_element()).collect::<Vec<_>>()
+        // The padding on the right is inside each line, so that the scrollbar sits at the edge of the sidebar.
+        rows.iter().map(|row| div().w_full().pr_3().child(this.explorer_row(row, cx)).into_any_element()).collect::<Vec<_>>()
       }),
     )
     .track_scroll(&self.explorer_scroll)
@@ -1052,6 +1123,7 @@ impl Workspace {
       .gap_1()
       .items_center()
       .pl_2()
+      .pr_3()
       .child(Label::new(name).flex_1().min_w_0().font_weight(FontWeight::SEMIBOLD).whitespace_nowrap().overflow_hidden().text_ellipsis())
       .child(
         action("explorer-new-file", "icons/file-plus.svg", "New file").on_click(cx.listener(|this, _, window, cx| this.new_entry(false, window, cx))),
@@ -1087,11 +1159,11 @@ impl Workspace {
     let content = match self.sidebar_tab {
       SidebarTab::Explorer => self.render_explorer(cx).into_any_element(),
       SidebarTab::Git => match self.render_git(cx) {
-        Some(git) => git.into_any_element(),
+        Some(git) => div().pr_3().child(git).into_any_element(),
         None => Label::new("Not a Git repository").text_color(cx.theme().muted_foreground).px_2().into_any_element(),
       },
     };
-    v_flex().size_full().bg(cx.theme().sidebar).child(div().px_3().pt_2().child(tabs)).child(v_flex().flex_1().min_h_0().p_3().child(content))
+    v_flex().size_full().bg(cx.theme().sidebar).child(div().px_3().pt_2().child(tabs)).child(v_flex().flex_1().min_h_0().pl_3().pt_3().child(content))
   }
 }
 

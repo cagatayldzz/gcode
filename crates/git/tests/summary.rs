@@ -99,3 +99,62 @@ fn repositories_directly_inside_a_folder_are_found_by_name() {
   assert!(vekro_git::find_repositories(&parent.join("missing")).is_empty());
   fs::remove_dir_all(parent).unwrap();
 }
+
+fn committed_repository(name: &str) -> PathBuf {
+  let dir = temp_dir(name);
+  let repository = git2::Repository::init_opts(&dir, git2::RepositoryInitOptions::new().initial_head("main")).unwrap();
+  fs::write(dir.join("kept.txt"), "original").unwrap();
+  fs::write(dir.join("other.txt"), "other").unwrap();
+  let mut index = repository.index().unwrap();
+  index.add_path(std::path::Path::new("kept.txt")).unwrap();
+  index.add_path(std::path::Path::new("other.txt")).unwrap();
+  index.write().unwrap();
+  let tree = repository.find_tree(index.write_tree().unwrap()).unwrap();
+  let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+  repository.commit(Some("HEAD"), &signature, &signature, "first", &tree, &[]).unwrap();
+  dir
+}
+
+#[test]
+fn discarding_restores_a_modified_or_deleted_file_and_leaves_the_others_alone() {
+  use vekro_git::discard_changes;
+  let dir = committed_repository("discard-tracked");
+  fs::write(dir.join("kept.txt"), "edited").unwrap();
+  fs::write(dir.join("other.txt"), "edited too").unwrap();
+  discard_changes(&dir, std::path::Path::new("kept.txt")).unwrap();
+  assert_eq!(fs::read_to_string(dir.join("kept.txt")).unwrap(), "original");
+  assert_eq!(fs::read_to_string(dir.join("other.txt")).unwrap(), "edited too");
+
+  fs::remove_file(dir.join("other.txt")).unwrap();
+  discard_changes(&dir, std::path::Path::new("other.txt")).unwrap();
+  assert_eq!(fs::read_to_string(dir.join("other.txt")).unwrap(), "other");
+  assert_eq!(summary(&dir).unwrap().changed(), 0);
+  fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn discarding_a_new_file_deletes_it_even_when_it_was_staged() {
+  use vekro_git::discard_changes;
+  let dir = committed_repository("discard-new");
+  fs::write(dir.join("fresh.txt"), "new").unwrap();
+  fs::write(dir.join("staged.txt"), "new").unwrap();
+  let repository = git2::Repository::open(&dir).unwrap();
+  let mut index = repository.index().unwrap();
+  index.add_path(std::path::Path::new("staged.txt")).unwrap();
+  index.write().unwrap();
+
+  discard_changes(&dir, std::path::Path::new("fresh.txt")).unwrap();
+  discard_changes(&dir, std::path::Path::new("staged.txt")).unwrap();
+  assert!(!dir.join("fresh.txt").exists());
+  assert!(!dir.join("staged.txt").exists());
+  assert_eq!(summary(&dir).unwrap().changed(), 0);
+  fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_changed_file_is_found_by_its_repository_relative_path() {
+  let dir = committed_repository("workdir-file");
+  let found = vekro_git::workdir_file(&dir, std::path::Path::new("kept.txt")).unwrap();
+  assert!(found.ends_with("kept.txt") && found.exists());
+  fs::remove_dir_all(dir).unwrap();
+}

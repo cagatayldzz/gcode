@@ -33,12 +33,26 @@ impl ThemeChoice {
   }
 }
 
+/// The smallest and the largest size of code, in pixels.
+pub const CODE_FONT_SIZES: std::ops::RangeInclusive<u32> = 9..=24;
+
+/// The size of code when the user has not chosen one.
+pub const DEFAULT_CODE_FONT_SIZE: u32 = 13;
+
 /// The user's settings (`preferences.json`).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Preferences {
   pub theme: ThemeChoice,
   /// The folder new and cloned projects go into; `None` is the folder of the open project, else home.
   pub projects_dir: Option<PathBuf>,
+  /// The size of the code in the editor and in changes, in pixels, within [`CODE_FONT_SIZES`].
+  pub code_font_size: u32,
+}
+
+impl Default for Preferences {
+  fn default() -> Self {
+    Self { theme: ThemeChoice::default(), projects_dir: None, code_font_size: DEFAULT_CODE_FONT_SIZE }
+  }
 }
 
 impl Preferences {
@@ -54,6 +68,10 @@ impl Preferences {
     Self {
       theme: root.get("theme").and_then(Value::as_str).map(ThemeChoice::from_name).unwrap_or_default(),
       projects_dir: root.get("projects_dir").and_then(Value::as_str).map(PathBuf::from),
+      code_font_size: root
+        .get("code_font_size")
+        .and_then(Value::as_u64)
+        .map_or(DEFAULT_CODE_FONT_SIZE, |size| size.clamp(*CODE_FONT_SIZES.start() as u64, *CODE_FONT_SIZES.end() as u64) as u32),
     }
   }
 
@@ -64,6 +82,7 @@ impl Preferences {
     let value = json!({
       "theme": self.theme.name(),
       "projects_dir": self.projects_dir.as_ref().map(|path| path.to_string_lossy()),
+      "code_font_size": self.code_font_size,
     });
     fs::write(path, serde_json::to_string_pretty(&value)?)
   }

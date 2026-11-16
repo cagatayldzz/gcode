@@ -16,9 +16,6 @@ pub(crate) const FONT_SIZE: Pixels = px(14.);
 /// Secondary text, such as a changed file's folder.
 pub(crate) const FONT_SIZE_SM: Pixels = px(12.);
 
-/// The code font size of the editor and the diff.
-const MONO_FONT_SIZE: Pixels = px(13.);
-
 /// The interface font (bundled, see `init`).
 const SANS_FONT: &str = "Geist";
 
@@ -142,7 +139,7 @@ pub(crate) fn colors(cx: &App) -> Colors {
 }
 
 /// Applies the chosen appearance (the system's, unless the user picked one) with Vekro's colors and fonts.
-pub(crate) fn apply_theme(choice: ThemeChoice, window: &mut Window, cx: &mut App) {
+pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut Window, cx: &mut App) {
   match choice {
     ThemeChoice::System => Theme::sync_system_appearance(Some(window), cx),
     ThemeChoice::Light => Theme::change(ThemeMode::Light, Some(window), cx),
@@ -153,7 +150,7 @@ pub(crate) fn apply_theme(choice: ThemeChoice, window: &mut Window, cx: &mut App
     theme.font_family = SANS_FONT.into();
     theme.font_size = px(16.);
     theme.mono_font_family = MONO_FONT.into();
-    theme.mono_font_size = MONO_FONT_SIZE;
+    theme.mono_font_size = px(code_font_size as f32);
     let style = &mut std::sync::Arc::make_mut(&mut theme.highlight_theme).style;
     style.editor_active_line = Some(c.selected);
     style.editor_active_line_number = Some(c.text);

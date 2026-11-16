@@ -1,6 +1,6 @@
 //! Git access for Vekro. Never depends on the interface.
 
-use git2::{DiffFormat, DiffOptions, Repository, Status, StatusOptions};
+use git2::{build::CheckoutBuilder, DiffFormat, DiffOptions, Repository, Status, StatusOptions};
 use std::path::{Path, PathBuf};
 
 /// How a file differs from the last commit.
@@ -157,6 +157,34 @@ pub fn file_diff(path: &Path, file: &Path) -> Result<String, String> {
     })
     .map_err(|error| error.message().to_string())?;
   Ok(patch)
+}
+
+/// The absolute path of a file given relative to the repository containing `path`.
+pub fn workdir_file(path: &Path, file: &Path) -> Option<PathBuf> {
+  Repository::discover(path).ok()?.workdir().map(|workdir| workdir.join(file))
+}
+
+/// Throws away every change to one file (staged and unstaged) and cannot be undone. A file that is in the last commit
+/// goes back to its committed content, also when it was deleted; a file that is not (a new one) is removed from the index
+/// and from the disk. `file` is relative to the repository.
+pub fn discard_changes(path: &Path, file: &Path) -> Result<(), String> {
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  let workdir = repository.workdir().ok_or("The repository has no working folder.")?.to_path_buf();
+  let committed = repository.head().ok().and_then(|head| head.peel_to_tree().ok()).is_some_and(|tree| tree.get_path(file).is_ok());
+  if committed {
+    let mut checkout = CheckoutBuilder::new();
+    checkout.path(file).force();
+    return repository.checkout_head(Some(&mut checkout)).map_err(|error| error.message().to_string());
+  }
+  let mut index = repository.index().map_err(|error| error.message().to_string())?;
+  if index.get_path(file, 0).is_some() {
+    index.remove_path(file).map_err(|error| error.message().to_string())?;
+    index.write().map_err(|error| error.message().to_string())?;
+  }
+  match std::fs::remove_file(workdir.join(file)) {
+    Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(format!("Could not remove {}: {error}", file.display())),
+    _ => Ok(()),
+  }
 }
 
 /// The folders directly inside `folder` that are Git repositories, sorted by name. Folders that cannot be read are skipped.

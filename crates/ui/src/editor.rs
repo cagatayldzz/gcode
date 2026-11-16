@@ -1,5 +1,6 @@
 //! The editor area: a code editor for a file, or the diff of a changed file.
 
+use crate::settings::code_font_size;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -233,6 +234,22 @@ impl EditorPanel {
     Ok(())
   }
 
+  /// Drops what the editor remembers about a file whose changes were thrown away: its text (also unsaved edits), and
+  /// the view of it or of its diff, which is named `diff_name`.
+  pub fn forget(&mut self, path: &Path, diff_name: &str, cx: &mut Context<Self>) {
+    self.files.remove(path);
+    self.recent.retain(|recent| recent != path);
+    let shows_it = match &self.content {
+      Content::File(open) => open == path,
+      Content::Diff { name, .. } => name == diff_name,
+      Content::Nothing => false,
+    };
+    if shows_it {
+      self.content = Content::Nothing;
+    }
+    cx.notify();
+  }
+
   /// Writes the open file to disk.
   pub fn save(&mut self, cx: &mut Context<Self>) -> io::Result<bool> {
     let Content::File(path) = &self.content else { return Ok(false) };
@@ -348,7 +365,7 @@ impl Panel for EditorPanel {
 }
 
 impl Render for EditorPanel {
-  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let content = match &self.content {
       Content::Nothing => Empty::new()
         .size_full()
@@ -363,7 +380,7 @@ impl Render for EditorPanel {
         Some(file) => Editor::new(&file.state).appearance(false).bordered(false).size_full().into_any_element(),
         None => div().into_any_element(),
       },
-      Content::Diff { state, .. } => Diff::new(state).soft_wrap(true).border_0().size_full().into_any_element(),
+      Content::Diff { state, .. } => Diff::new(state).soft_wrap(true).border_0().text_size(code_font_size(cx)).size_full().into_any_element(),
     };
     let hidden = self.preview.clone().or_else(|| self.warmup.clone());
     div().relative().size_full().child(content).when_some(hidden, |this, state| {

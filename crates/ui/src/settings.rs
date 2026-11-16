@@ -8,13 +8,13 @@ use gpui_kit::{
     group_box::GroupBoxVariant,
     h_flex,
     label::Label,
-    setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings},
+    setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings},
     ActiveTheme as _, IconName, Sizable as _,
   },
   *,
 };
 use std::path::PathBuf;
-use vekro_storage::{data_dir, Preferences, ThemeChoice};
+use vekro_storage::{data_dir, Preferences, ThemeChoice, CODE_FONT_SIZES};
 
 /// The settings every window shares. Changing `preferences` and notifying makes each window save them and redraw.
 pub(crate) struct SettingsModel {
@@ -40,6 +40,11 @@ pub(crate) fn init_settings(cx: &mut App) -> Entity<SettingsModel> {
 
 fn model(cx: &App) -> Entity<SettingsModel> {
   cx.global::<SettingsGlobal>().0.clone()
+}
+
+/// The size of code in the editor and in changes.
+pub(crate) fn code_font_size(cx: &App) -> Pixels {
+  px(preferences(cx).code_font_size as f32)
 }
 
 fn preferences(cx: &App) -> Preferences {
@@ -96,6 +101,22 @@ pub(crate) fn settings_view(fallback_dir: PathBuf, projects: Entity<ProjectManag
         .description("System follows the macOS appearance."),
       ),
     ]),
+    SettingPage::new("Editor").icon(IconName::File).resettable(false).group(
+      SettingGroup::new().title("Code").item(
+        SettingItem::new(
+          "Font size",
+          SettingField::number_input(
+            NumberFieldOptions { min: *CODE_FONT_SIZES.start() as f64, max: *CODE_FONT_SIZES.end() as f64, step: 1.0 },
+            |cx: &App| preferences(cx).code_font_size as f64,
+            |value: f64, cx: &mut App| {
+              let size = (value.round() as i64).clamp(*CODE_FONT_SIZES.start() as i64, *CODE_FONT_SIZES.end() as i64) as u32;
+              update(cx, |preferences| preferences.code_font_size = size);
+            },
+          ),
+        )
+        .description("The size of code in the editor and in a file's changes, in pixels."),
+      ),
+    ),
     SettingPage::new("Projects").icon(IconName::Folder).resettable(false).groups(vec![
       SettingGroup::new()
         .title("Folder")

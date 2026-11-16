@@ -6,7 +6,8 @@ A Vekro window has four parts:
 - the **sidebar**: two icon tabs. **Explorer** shows the folder tree of the open project, under a row with the project's name and four
   buttons: new file, new folder (created inside the selected folder, next to the selected file, or in the project folder; type the name and
   press Enter, `dir/name.rs` makes the subfolder too), refresh and collapse all folders. **Git** shows the branch
-  and the changed files;
+  and the changed files (click one for its diff; right-click for **Open in Editor** and **Discard changes**, which asks first,
+  throws away every change to that file and deletes it if it is new);
 - the **editor area** in the middle: a file, or the diff of a changed file;
 - the **terminal dock** at the bottom: one or more shells of the open project.
 
@@ -50,6 +51,11 @@ it into one tile that shows the first four projects' initials (outlined when the
 Right-click the folder tile to **Rename…** (an empty name makes it unnamed again) or **Delete category** (the
 projects stay, outside any category). A category that loses its last project goes away. Projects without a
 category come first, then the categories in the order they were created.
+
+### Code size
+
+**Settings → Editor → Font size** sets the size of code in the editor and in a file's changes, from 9 to 24 pixels
+(13 by default). It applies at once. The terminal keeps its own size.
 
 ### Managing the project bar in Settings
 
@@ -135,4 +141,4 @@ Settings are saved as soon as you change them.
 ## Where things are stored
 
 `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_DIR`): `projects.json` holds the
-project list, their categories and the one open last; `preferences.json` holds Settings.
+project list, their categories and the one open last; `preferences.json` holds Settings (theme, projects folder, code font size).
