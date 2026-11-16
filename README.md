@@ -3,6 +3,14 @@
 Projects, a code editor, terminals and Git in one native macOS window, built with Rust and
 [GPUI Kit](https://gpui-kit.com).
 
+| Workspace | Changes |
+| --- | --- |
+| ![Vekro: project bar, Git changes, the editor and a terminal](docs/images/workspace-dark.png) | ![Vekro: the diff of a changed file next to a terminal](docs/images/changes-dark.png) |
+
+| Settings | Light theme |
+| --- | --- |
+| ![Vekro Settings with appearance and the projects folder](docs/images/settings-dark.png) | ![Vekro in the light theme](docs/images/workspace-light.png) |
+
 Vekro is not an IDE and not a replacement for any of the three tools it brings together. It
 exists so a normal day with a project needs one window: open it, run it, ask an AI assistant
 in a second terminal, read or fix some code, look at what changed, commit.

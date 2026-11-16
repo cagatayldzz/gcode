@@ -151,7 +151,9 @@ impl Render for ProjectSetup {
             .gap_2()
             .items_center()
             .child(Label::new("In").text_color(theme.muted_foreground))
-            .child(Label::new(self.location.display().to_string()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+            .child(
+              Label::new(crate::components::display_path(&self.location)).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis(),
+            )
             .child(Button::new("choose-location").label("Change…").small().on_click(cx.listener(|this, _, _, cx| this.choose_folder(cx)))),
         )
       })

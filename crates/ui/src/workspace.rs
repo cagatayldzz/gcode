@@ -1,5 +1,5 @@
 use crate::{
-  components::selected_style,
+  components::{display_path, selected_style},
   editor::EditorPanel,
   explorer,
   project_setup::{ProjectReady, ProjectSetup},
@@ -410,7 +410,7 @@ impl Workspace {
         )
         .left(if git.changed() == 0 { "No changes".to_string() } else { format!("{} changed", git.changed()) });
     }
-    if let Some(project) = self.projects.active.as_ref().map(|path| path.display().to_string()) {
+    if let Some(project) = self.projects.active.as_ref().map(|path| display_path(path)) {
       bar = bar.child(project);
     }
     if let Some(file) = file {
@@ -581,24 +581,11 @@ impl Workspace {
           }
         }))
     });
-    let name = self.projects.active.as_ref().and_then(|path| path.file_name()).map(|name| name.to_string_lossy().into_owned());
     v_flex()
       .flex_1()
       .min_h_0()
       .gap_1()
       .child(Label::new("Explorer").font_weight(FontWeight::MEDIUM).px_2())
-      .when_some(name, |section, name| {
-        section.child(
-          h_flex()
-            .px_2()
-            .py_1()
-            .gap_1p5()
-            .items_center()
-            .child(div().size_4().flex_none())
-            .child(Icon::new(IconName::FolderOpen).size_4().text_color(theme.muted_foreground))
-            .child(Label::new(name)),
-        )
-      })
       .child(v_flex().id("explorer-rows").flex_1().min_h_0().overflow_y_scrollbar().children(rows))
   }
 
@@ -606,11 +593,19 @@ impl Workspace {
   fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let divider = || div().h_px().w_full().bg(theme.sidebar_border);
+    let name = self
+      .projects
+      .active
+      .as_ref()
+      .and_then(|path| path.file_name())
+      .map(|name| SharedString::from(name.to_string_lossy().into_owned()))
+      .unwrap_or_else(|| "Vekro".into());
     v_flex()
       .size_full()
       .p_3()
       .gap_3()
       .bg(theme.sidebar)
+      .child(Label::new(name).font_weight(FontWeight::SEMIBOLD).px_2().whitespace_nowrap().text_ellipsis())
       .when_some(self.render_git(cx), |panel, git| panel.child(git).child(divider()))
       .child(self.render_explorer(cx))
   }
@@ -657,13 +652,6 @@ impl Render for Workspace {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
-    let title = self
-      .projects
-      .active
-      .as_ref()
-      .and_then(|path| path.file_name())
-      .map(|name| name.to_string_lossy().into_owned())
-      .unwrap_or_else(|| "Vekro".into());
     v_flex()
       .id("workspace")
       .key_context("Workspace")
@@ -676,15 +664,7 @@ impl Render for Workspace {
       .bg(theme.background)
       .text_color(theme.foreground)
       .text_size(FONT_SIZE)
-      .child(
-        TitleBar::new()
-          .h(TOOLBAR_HEIGHT)
-          .pl(px(96.))
-          .bg(palette.rail)
-          .border_b_1()
-          .border_color(palette.rail_border)
-          .child(Label::new(title).font_weight(FontWeight::SEMIBOLD)),
-      )
+      .child(TitleBar::new().h(TOOLBAR_HEIGHT).pl(px(96.)).bg(palette.rail).border_b_1().border_color(palette.rail_border))
       .child(
         h_flex().flex_1().min_h_0().child(self.render_rail(cx)).child(
           h_resizable("sidebar-split")

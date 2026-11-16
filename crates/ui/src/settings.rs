@@ -106,7 +106,7 @@ pub(crate) fn settings_view(fallback_dir: PathBuf) -> Settings {
                 .gap_2()
                 .items_center()
                 .child(
-                  Label::new(path.display().to_string())
+                  Label::new(crate::components::display_path(&path))
                     .text_color(cx.theme().muted_foreground)
                     .overflow_hidden()
                     .whitespace_nowrap()
@@ -147,7 +147,7 @@ pub(crate) fn settings_view(fallback_dir: PathBuf) -> Settings {
         .item(SettingItem::new("Version", SettingField::render(|_, _, _| Label::new(env!("CARGO_PKG_VERSION")).text_sm())))
         .item(SettingItem::new(
           "Data folder",
-          SettingField::render(|_, _, cx| Label::new(data_dir().display().to_string()).text_sm().text_color(cx.theme().muted_foreground)),
+          SettingField::render(|_, _, cx| Label::new(crate::components::display_path(&data_dir())).text_sm().text_color(cx.theme().muted_foreground)),
         )),
     ),
   ])

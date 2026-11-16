@@ -55,6 +55,20 @@ Seed `VEKRO_DATA_DIR/projects.json` to start with chosen projects:
 { "projects": ["/path/to/a", "/path/to/b"], "active": "/path/to/a" }
 ```
 
+## README screenshots
+
+The images in `docs/images` show a staged demo project ("atlas") so that no real name, machine name, path or
+terminal history appears. To redo them:
+
+1. Make a scratch home with a few small Git repositories (one with uncommitted changes) in `~/Developer`.
+2. Put a `.zshrc` in a scratch `ZDOTDIR` that clears the screen and sets a plain prompt such as `atlas main $ `,
+   and a `projects.json` and `preferences.json` (`{"theme":"dark"}` or `"light"`) in a scratch `VEKRO_DATA_DIR`.
+3. Run `HOME=<scratch home> ZDOTDIR=<scratch zsh> VEKRO_DATA_DIR=<scratch data> ./target/debug/Vekro`, size the window
+   to about 1040×660, open the file or diff to show, then capture only the window without its shadow
+   (`screencapture -o -l <window id>`).
+
+Check every image for names, paths and dates before committing it; the status bar shows the home folder as `~`.
+
 ## Formatting
 
 2 spaces, LF, final newline, `max_width = 150`. `rustfmt.toml` and `.editorconfig` hold the rules; run
