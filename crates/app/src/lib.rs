@@ -1,7 +1,7 @@
 //! The Vekro application: startup, windows and key bindings. `apps/vekro` only calls [`run`].
 
 use gpui_kit::{component::TitleBar, *};
-use vekro_ui::{Assets, NewWindow, Quit, Workspace, TOOLBAR_HEIGHT};
+use vekro_ui::{Assets, NewWindow, OpenSettings, Quit, Workspace, TOOLBAR_HEIGHT};
 
 /// Starts the application and runs it until it quits.
 pub fn run() {
@@ -10,7 +10,7 @@ pub fn run() {
     gpui_kit::init(cx);
     vekro_ui::init(cx);
     cx.activate(true);
-    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None), KeyBinding::new("cmd-n", NewWindow, None)]);
+    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None), KeyBinding::new("cmd-n", NewWindow, None), KeyBinding::new("cmd-,", OpenSettings, None)]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &NewWindow, cx| open_window(cx));
     cx.on_window_closed(|cx, _| {
@@ -31,5 +31,5 @@ fn open_window(cx: &mut App) {
     titlebar: Some(TitlebarOptions { traffic_light_position: Some(point(px(18.), TOOLBAR_HEIGHT / 2. - px(6.))), ..TitleBar::title_bar_options() }),
     ..TitleBar::window_options()
   };
-  gpui_kit::open_window(options, cx, |_, cx| cx.new(Workspace::new)).expect("Failed to open the Vekro window");
+  gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| Workspace::new(window, cx))).expect("Failed to open the Vekro window");
 }

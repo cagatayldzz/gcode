@@ -29,3 +29,51 @@ pub fn summary(path: &Path) -> Option<Summary> {
     repository.statuses(Some(&mut options)).map(|statuses| statuses.iter().filter(|entry| !entry.status().is_empty()).count()).unwrap_or(0);
   Some(Summary { branch, changed })
 }
+
+/// The folder name `git clone` would pick for `url`: `https://github.com/a/vekro.git` gives `vekro`.
+pub fn repository_name(url: &str) -> Option<String> {
+  let trimmed = url.trim().trim_end_matches('/');
+  let last = trimmed.rsplit(['/', ':']).next()?;
+  let name = last.strip_suffix(".git").unwrap_or(last);
+  (!name.is_empty()).then(|| name.to_string())
+}
+
+/// Creates the folder `parent/name` (it must not exist yet) and starts a repository on `main` in it.
+pub fn create_project(parent: &Path, name: &str) -> Result<std::path::PathBuf, String> {
+  let name = name.trim();
+  if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
+    return Err("Enter a project name without slashes.".into());
+  }
+  let path = parent.join(name);
+  if path.exists() {
+    return Err(format!("{} already exists.", path.display()));
+  }
+  std::fs::create_dir_all(&path).map_err(|error| format!("Could not create {}: {error}", path.display()))?;
+  Repository::init_opts(&path, git2::RepositoryInitOptions::new().initial_head("main")).map_err(|error| error.message().to_string())?;
+  Ok(path)
+}
+
+/// Clones `url` into `parent/<repository name>` with the `git` program, so the user's own SSH keys and
+/// credential helpers apply. It never asks for input: a repository that needs a login fails with git's message.
+pub fn clone(url: &str, parent: &Path) -> Result<std::path::PathBuf, String> {
+  let url = url.trim();
+  let name = repository_name(url).ok_or("Enter a repository URL.")?;
+  let path = parent.join(&name);
+  if path.exists() {
+    return Err(format!("{} already exists.", path.display()));
+  }
+  let output = std::process::Command::new("git")
+    .arg("clone")
+    .arg("--")
+    .arg(url)
+    .arg(&path)
+    .env("GIT_TERMINAL_PROMPT", "0")
+    .output()
+    .map_err(|error| format!("Could not run git: {error}"))?;
+  if output.status.success() {
+    Ok(path)
+  } else {
+    let message = String::from_utf8_lossy(&output.stderr);
+    Err(message.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("git clone failed.").trim().to_string())
+  }
+}
