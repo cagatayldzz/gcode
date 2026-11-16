@@ -31,7 +31,10 @@ opened and the file you had selected), the file or diff in the editor and the te
 project you leave away and brings back what the other one showed. Its shells keep running, so a dev server in
 project A is still running when you come back to it.
 
-Projects are only listed in the rail; nothing Vekro does deletes a project's folder.
+Projects are only listed in the rail; nothing Vekro does deletes a project's folder. The other way round: when a
+project's folder is deleted (in Finder, by a command, by another app), Vekro takes it out of the list on its own, at
+the next start, when the window comes back to the front and every few seconds, and says which it removed. A folder that
+cannot be read (no permission, an unmounted disk) is not counted as deleted.
 
 ### Categories
 
