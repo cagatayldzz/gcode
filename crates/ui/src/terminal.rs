@@ -246,15 +246,11 @@ impl BasePanel for Terminal {
   fn panel_name(&self) -> &'static str {
     "terminal"
   }
-
-  fn zoomable(&self, _: &App) -> bool {
-    false
-  }
 }
 
 impl Panel for Terminal {
   fn zoom_control(&self, _: &App) -> Option<PanelControl> {
-    None
+    Some(PanelControl::Both)
   }
 
   fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {

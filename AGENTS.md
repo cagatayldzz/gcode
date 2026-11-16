@@ -21,8 +21,8 @@ Use GPUI Kit (`gpui-kit`) and its default icons. Reference: <https://gpui-kit.co
 - Keep tasks and subscriptions on their owner; do not detach recurring ones. Retained UI text is `SharedString`. Never store `&mut Window`/`App`/`Context`; store handles.
 - No state changes or focus requests in `render`; use handlers, `defer`, `defer_in`.
 - One command = one `Action` shared by buttons, menus and keys. Bind keys in `crates/app`.
-- Anything the sidebar shows changes through `Workspace::changed`, not a bare `cx.notify()`, because the sidebar is drawn by a dock panel.
 - Show actionable failures in the UI (a notification), not only logs.
+- Speed is a feature: opening a file, switching projects and typing must feel instant. Measure before optimizing (time the step, then the frames after it), never block the interface thread on slow work, and keep dependencies optimized in the dev profile.
 - The interface is verified by running it (`bun run dev`); do not claim a visual change works without looking at it.
 
 # Git

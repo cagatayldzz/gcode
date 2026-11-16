@@ -18,8 +18,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | --- | --- |
 | `apps/vekro/src/main.rs` | executable entry point only; calls `vekro_app::run` |
 | `crates/app/src/lib.rs` | startup: key bindings, quit, opening and closing windows |
-| `crates/ui/src/workspace.rs` | `Workspace` (one per window): projects, the sidebar, the project rail, the status bar, the dock and the terminals of every project |
-| `crates/ui/src/panels.rs` | `ExplorerPanel`: the dock panel that draws the sidebar the workspace holds |
+| `crates/ui/src/workspace.rs` | `Workspace` (one per window): projects, the sidebar, the project rail, the status bar, the sidebar, the dock and the terminals of every project |
 | `crates/ui/src/editor.rs` | `EditorPanel`: the editor for a file, the diff of a changed file, or the empty state |
 | `crates/ui/src/terminal.rs` | `Terminal` (a dock panel): draws a `Session`, handles keys, mouse, selection, scrolling and paste |
 | `crates/ui/src/project_setup.rs` | the Add project dialog (New, Clone, Import) |
@@ -35,29 +34,42 @@ apps/vekro ─► app ─► ui ─► terminal
 
 ## Window layout
 
-The `Workspace` renders the title band, then a row of the **project rail** (fixed, outside the dock),
-the Kit **`DockArea`**, and the status bar below. The dock holds:
+The `Workspace` renders the title band, then a row of the **project rail** (fixed), the **sidebar** (a Kit
+`h_resizable` pane, 200–480 px) and the Kit **`DockArea`**, and the status bar below. The sidebar is plain
+workspace content, not a dock panel, so it has no tab bar. The dock holds:
 
-- left dock: `ExplorerPanel` (not closable, not zoomable);
 - center: `EditorPanel`;
 - bottom dock: one `Terminal` panel per running shell of the open project.
 
-The Kit draws the dock chrome (tab bars, drag and drop, resize handles, the `…` menu). Panels opt out of
-zoom (`zoomable`, `zoom_control`), but the Kit still draws the `…` button.
-
-`ExplorerPanel` and the terminals are separate entities. The panel draws by calling
-`Workspace::render_sidebar`, so the workspace tells it to redraw whenever its data changes
-(`Workspace::changed`); use that instead of a bare `cx.notify()` for anything the sidebar shows.
+The Kit draws the dock chrome (tab bars, drag and drop, resize handles, the `…` menu). The editor and the
+terminals can be zoomed to fill the dock area (`zoom_control` is `PanelControl::Both`: a button and a menu
+entry). The Kit always draws the `…` button of a dock panel.
 
 ## Projects and terminals
 
-- `Workspace.projects` is the `ProjectList`; the active project decides what the sidebar, the editor
+- `Workspace.projects` is the `ProjectList`, shown as the project rail; the active project decides what the sidebar, the editor
   tree, the Git summary and the terminal dock show.
 - `Workspace.terminals` maps each project folder to its terminals. Switching projects removes the old
   project's panels from the dock (`hide_terminals`) and adds the new one's (`show_terminals`); the entities
   stay alive in the map, so their shells keep running. A project with no terminal gets one.
 - A shell that exits sends `TerminalExited`; the workspace removes the panel and, if the project has no
   terminal left, starts another.
+
+## Opening files quickly
+
+Opening a file must feel instant. Measured in a development build, reading and building the editor take a few
+milliseconds; the cost is the first time the highlighter draws a text (up to ~0.1 s for a few tens of KB). So:
+
+- `EditorPanel` keeps the editor of every file it has opened (`files`, up to 24; files with unsaved changes are
+  never dropped). Reopening a file is instant and keeps its unsaved text.
+- When the pointer rests on a file in the Explorer for 120 ms (`HOVER_PREPARE_DELAY`), `EditorPanel::prefetch` reads
+  it and draws its editor out of sight for half a second, so the highlighting is done before the click. Files over
+  100 KB are skipped, because drawing them would stall the window; they open on click and finish highlighting in the
+  background.
+- Shortly after launch the panel draws a few lines of each common language out of sight, one every 250 ms, so the
+  Kit's syntax definitions are loaded before the first file.
+- `Cargo.toml` optimizes all dependencies in the dev profile (`opt-level = 3`); without it the highlighter is about
+  ten times slower.
 
 ## Terminal data flow
 

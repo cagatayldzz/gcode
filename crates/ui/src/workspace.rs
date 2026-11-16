@@ -2,7 +2,6 @@ use crate::{
   components::selected_style,
   editor::EditorPanel,
   explorer,
-  panels::ExplorerPanel,
   project_setup::{ProjectReady, ProjectSetup},
   settings::{PreferencesChanged, Settings},
   terminal::{NewTerminalRequested, Terminal, TerminalExited},
@@ -17,8 +16,10 @@ use gpui_kit::{
     h_flex,
     label::Label,
     notification::Notification,
+    resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement as _,
     status_bar::StatusBar,
+    tooltip::Tooltip,
     v_flex, ActiveTheme, Icon, IconName, Sizable as _, TitleBar, WindowExt as _,
   },
   *,
@@ -34,14 +35,22 @@ use vekro_storage::{Preferences, ProjectList};
 /// Height of the top band: the traffic lights and the title.
 pub const TOOLBAR_HEIGHT: Pixels = px(44.);
 
+/// How long the pointer must rest on a file in the Explorer before it is prepared for opening, so that moving past
+/// files costs nothing.
+const HOVER_PREPARE_DELAY: Duration = Duration::from_millis(120);
+
 /// How often the Git summary and the folder tree are read again while the window is open.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Width of the icon rail on the far left.
 const RAIL_WIDTH: Pixels = px(56.);
 
-/// Width of the left dock when the window opens.
-const LEFT_DOCK_WIDTH: Pixels = px(280.);
+/// Width of the sidebar when the window opens.
+const SIDEBAR_WIDTH: Pixels = px(280.);
+
+/// How narrow and how wide the sidebar can be dragged.
+const SIDEBAR_MIN_WIDTH: Pixels = px(200.);
+const SIDEBAR_MAX_WIDTH: Pixels = px(480.);
 
 /// Height of the bottom dock when the window opens.
 const BOTTOM_DOCK_HEIGHT: Pixels = px(260.);
@@ -59,6 +68,8 @@ pub struct Workspace {
   selected_file: Option<PathBuf>,
   /// The changed file whose diff is open, relative to the repository.
   selected_change: Option<PathBuf>,
+  /// The file in the Explorer the pointer is on.
+  hovered_file: Option<PathBuf>,
   focus_handle: FocusHandle,
   _setup_subscription: Option<Subscription>,
   _settings_subscription: Option<Subscription>,
@@ -66,8 +77,6 @@ pub struct Workspace {
   _activation: Subscription,
   _refresh_task: Task<()>,
   dock: Entity<DockArea>,
-  /// Told to redraw whenever the workspace changes, because it draws the workspace's data.
-  explorer_panel: Entity<ExplorerPanel>,
   editor_panel: Entity<EditorPanel>,
   /// The shells of every project that has been opened, kept alive while another project is shown.
   terminals: HashMap<PathBuf, Vec<Entity<Terminal>>>,
@@ -79,13 +88,9 @@ impl Workspace {
     let preferences = Preferences::load(&Preferences::default_path());
     apply_theme(preferences.theme, window, cx);
     let (dock, _skin) = DockSkin::dock_area("workspace-dock", Some(1), window, cx);
-    let workspace = cx.weak_entity();
-    let explorer_panel = cx.new(|cx| ExplorerPanel::new(workspace, cx));
-    let editor_panel = cx.new(EditorPanel::new);
+    let editor_panel = cx.new(|cx| EditorPanel::new(window, cx));
     dock.update(cx, |area, cx| {
       area.set_center(DockLayout::h_split().child(DockLayout::tabs().panel_view(panel_handle(editor_panel.clone()), cx), None), window, cx);
-      area.set_dock(DockPlacement::Left, DockLayout::tabs().panel_view(panel_handle(explorer_panel.clone()), cx), window, cx);
-      area.set_dock_size(DockPlacement::Left, LEFT_DOCK_WIDTH, window, cx);
     });
     let mut this = Self {
       projects: ProjectList::load(&ProjectList::default_path()),
@@ -95,11 +100,11 @@ impl Workspace {
       rows: Vec::new(),
       selected_file: None,
       selected_change: None,
+      hovered_file: None,
       focus_handle: cx.focus_handle(),
       _setup_subscription: None,
       _settings_subscription: None,
       dock,
-      explorer_panel,
       editor_panel,
       terminals: HashMap::new(),
       _terminal_subscriptions: Vec::new(),
@@ -192,12 +197,6 @@ impl Workspace {
     }
   }
 
-  /// Redraws the window and the sidebar panel, which draws this workspace's data from inside the dock.
-  fn changed(&mut self, cx: &mut Context<Self>) {
-    cx.notify();
-    self.explorer_panel.update(cx, |_, cx| cx.notify());
-  }
-
   /// Opens the Settings dialog.
   pub fn open_settings(&mut self, _: &OpenSettings, window: &mut Window, cx: &mut Context<Self>) {
     let settings = cx.new(|_| Settings::new(self.preferences.clone(), self.new_project_dir()));
@@ -207,7 +206,7 @@ impl Workspace {
         eprintln!("Could not save the settings: {error}");
       }
       apply_theme(this.preferences.theme, window, cx);
-      this.changed(cx);
+      cx.notify();
     }));
     window.open_dialog(cx, move |dialog, _, _| dialog.title("Settings").width(px(520.)).child(settings.clone()));
   }
@@ -240,7 +239,7 @@ impl Workspace {
     self.selected_change = None;
     self.refresh_project();
     self.show_terminals(window, cx);
-    self.changed(cx);
+    cx.notify();
   }
 
   /// Reads the repository summary and the folder tree of the active project.
@@ -272,7 +271,7 @@ impl Workspace {
         if this.projects.active.as_ref() == Some(&root) && this.expanded == expanded && (this.git != git || this.rows != rows) {
           this.git = git;
           this.rows = rows;
-          this.changed(cx);
+          cx.notify();
         }
       });
     })
@@ -284,7 +283,7 @@ impl Workspace {
       self.expanded.insert(path);
     }
     self.refresh_project();
-    self.changed(cx);
+    cx.notify();
   }
 
   /// Opens a file from the Explorer in the editor.
@@ -297,7 +296,7 @@ impl Workspace {
       }
       Err(message) => window.push_notification(Notification::error(message), cx),
     }
-    self.changed(cx);
+    cx.notify();
   }
 
   /// Opens the diff of a changed file in the editor area.
@@ -312,13 +311,13 @@ impl Workspace {
       }
       Err(message) => window.push_notification(Notification::error(message), cx),
     }
-    self.changed(cx);
+    cx.notify();
   }
 
   /// Saves the file open in the editor.
   pub fn save_file(&mut self, _: &SaveFile, window: &mut Window, cx: &mut Context<Self>) {
     match self.editor_panel.update(cx, |editor, cx| editor.save(cx)) {
-      Ok(_) => self.changed(cx),
+      Ok(_) => cx.notify(),
       Err(error) => window.push_notification(Notification::error(format!("Could not save: {error}")), cx),
     }
     // The file's own change shows up in the Git list without waiting for the next read.
@@ -353,6 +352,7 @@ impl Workspace {
 
   fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
+    let palette = colors(cx);
     let selected_style = selected_style(cx);
     let avatars = self.projects.projects.iter().map(|project| {
       let path = project.path.clone();
@@ -379,56 +379,16 @@ impl Workspace {
       .bg(theme.sidebar)
       .border_r_1()
       .border_color(theme.sidebar_border)
-      .child(
-        v_flex().id("rail-projects").flex_1().min_h_0().items_center().gap_2().overflow_y_scroll().children(avatars).child(
-          Button::new("rail-add")
-            .icon(IconName::Plus)
-            .ghost()
-            .w_10()
-            .h_10()
-            .rounded_lg()
-            .tooltip("Add project")
-            .on_click(|_, window, cx| window.dispatch_action(Box::new(AddProject), cx)),
-        ),
-      )
-      .child(
-        Button::new("rail-settings")
-          .icon(IconName::Settings)
-          .ghost()
-          .w_10()
-          .h_10()
-          .rounded_lg()
-          .tooltip("Settings")
-          .on_click(|_, window, cx| window.dispatch_action(Box::new(OpenSettings), cx)),
-      )
-  }
-
-  fn render_projects(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let theme = cx.theme().clone();
-    let palette = colors(cx);
-    let rows = self.projects.projects.iter().map(|project| {
-      let path = project.path.clone();
-      let selected = self.projects.active.as_ref() == Some(&project.path);
-      h_flex()
-        .id(SharedString::from(format!("project-{}", project.path.display())))
-        .gap_2()
-        .px_2()
-        .py_1p5()
-        .rounded_md()
-        .items_center()
-        .cursor_pointer()
-        .when(selected, |row| row.bg(palette.selected))
-        .hover(|row| row.bg(palette.hover))
-        .child(Icon::new(IconName::FolderClosed).size_4().text_color(theme.muted_foreground))
-        .child(Label::new(project.name()))
-        .on_click(cx.listener(move |this, _, window, cx| this.select_project(path.clone(), window, cx)))
-    });
-    v_flex()
-      .gap_1()
-      .child(h_flex().justify_between().items_center().px_2().child(Label::new("Projects").font_weight(FontWeight::MEDIUM)).child(
-        Button::new("add-project").icon(IconName::Plus).ghost().small().on_click(|_, window, cx| window.dispatch_action(Box::new(AddProject), cx)),
-      ))
-      .children(rows)
+      .child(v_flex().id("rail-projects").flex_1().min_h_0().items_center().gap_2().overflow_y_scroll().children(avatars).child(rail_button(
+        "rail-add",
+        IconName::Plus,
+        "Add project",
+        &palette,
+        |_, window, cx| window.dispatch_action(Box::new(AddProject), cx),
+      )))
+      .child(rail_button("rail-settings", IconName::Settings, "Settings", &palette, |_, window, cx| {
+        window.dispatch_action(Box::new(OpenSettings), cx)
+      }))
   }
 
   fn render_git(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
@@ -522,6 +482,28 @@ impl Workspace {
         }))
         .child(Icon::new(icon).size_4().text_color(theme.muted_foreground))
         .child(Label::new(row.name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+        .when(!row.is_dir, |entry| {
+          let hovered_path = path.clone();
+          entry.on_hover(cx.listener(move |this, hovered: &bool, window, cx| {
+            if !*hovered {
+              if this.hovered_file.as_ref() == Some(&hovered_path) {
+                this.hovered_file = None;
+              }
+              return;
+            }
+            this.hovered_file = Some(hovered_path.clone());
+            let wanted = hovered_path.clone();
+            cx.spawn_in(window, async move |this, cx| {
+              cx.background_executor().timer(HOVER_PREPARE_DELAY).await;
+              let _ = this.update_in(cx, |this, window, cx| {
+                if this.hovered_file.as_ref() == Some(&wanted) {
+                  this.editor_panel.update(cx, |editor, cx| editor.prefetch(&wanted, window, cx));
+                }
+              });
+            })
+            .detach();
+          }))
+        })
         .on_click(cx.listener(move |this, _, window, cx| {
           if this.rows.iter().any(|row| row.path == path && row.is_dir) {
             this.toggle_folder(path.clone(), cx);
@@ -551,8 +533,8 @@ impl Workspace {
       .child(v_flex().id("explorer-rows").flex_1().min_h_0().overflow_y_scrollbar().children(rows))
   }
 
-  /// The projects, repository summary and folder tree, drawn by the Explorer panel.
-  pub(crate) fn render_sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
+  /// The repository summary and the folder tree.
+  fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let divider = || div().h_px().w_full().bg(theme.sidebar_border);
     v_flex()
@@ -560,12 +542,35 @@ impl Workspace {
       .p_3()
       .gap_3()
       .bg(theme.sidebar)
-      .child(self.render_projects(cx))
-      .child(divider())
       .when_some(self.render_git(cx), |panel, git| panel.child(git).child(divider()))
       .child(self.render_explorer(cx))
-      .into_any_element()
   }
+}
+
+/// A square icon button for the project rail. The Kit's `Button` fixes its icon at a small size, so this draws the
+/// icon itself at `size_5`.
+fn rail_button(
+  id: &'static str,
+  icon: IconName,
+  tooltip: &'static str,
+  palette: &crate::theme::Colors,
+  on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+  let hover = palette.hover;
+  div()
+    .id(id)
+    .size_10()
+    .flex()
+    .flex_none()
+    .items_center()
+    .justify_center()
+    .rounded_lg()
+    .cursor_pointer()
+    .text_color(palette.text_secondary)
+    .hover(move |button| button.bg(hover))
+    .child(Icon::new(icon).size_5())
+    .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+    .on_click(on_click)
 }
 
 /// The color of a changed file's mark: green for new, red for deleted, amber for modified and so on.
@@ -611,7 +616,13 @@ impl Render for Workspace {
           .border_color(palette.border)
           .child(Label::new(title).font_weight(FontWeight::SEMIBOLD)),
       )
-      .child(h_flex().flex_1().min_h_0().child(self.render_rail(cx)).child(div().flex_1().min_w_0().h_full().child(self.dock.clone())))
+      .child(
+        h_flex().flex_1().min_h_0().child(self.render_rail(cx)).child(
+          h_resizable("sidebar-split")
+            .child(resizable_panel().size(SIDEBAR_WIDTH).size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH).child(self.render_sidebar(cx)))
+            .child(resizable_panel().child(self.dock.clone())),
+        ),
+      )
       .child(self.render_status_bar(cx))
   }
 }

@@ -35,8 +35,11 @@ unimplemented = "deny"
 [profile.release]
 strip = "debuginfo"
 
+# Dependencies (the editor's syntax highlighting above all) are slow without optimization, so they are optimized
+# in development builds too. Only Vekro's own crates stay unoptimized, which keeps rebuilds quick.
 [profile.dev.package."*"]
 debug = false
+opt-level = 3
 
 [profile.dev.package.gpui-pre]
 opt-level = 3

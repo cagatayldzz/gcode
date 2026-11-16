@@ -3,16 +3,18 @@
 A Vekro window has four parts:
 
 - the **project rail** on the far left: one avatar per project, the `+` button, and Settings at the bottom;
-- the **sidebar**: the project list, the Git summary with the changed files, and the folder tree;
+- the **sidebar**: the Git summary with the changed files, and the folder tree;
 - the **editor area** in the middle: a file, or the diff of a changed file;
 - the **terminal dock** at the bottom: one or more shells of the open project.
 
+The editor and each terminal have a zoom button in their title bar (also **Zoom In** in the `…` menu) that
+makes the panel fill the whole dock area; press it again to go back. Drag the edge of the sidebar to resize it. 
 A thin **status bar** shows the branch and the number of changed files on the left, the project
 folder in the middle and the open file with its language on the right.
 
 ## Projects
 
-Press `+` (in the rail or beside **Projects**) to open the **Add project** dialog:
+Press `+` in the project rail to open the **Add project** dialog:
 
 | Tab | Does |
 | --- | --- |
@@ -20,10 +22,10 @@ Press `+` (in the rail or beside **Projects**) to open the **Add project** dialo
 | Clone | Runs `git clone` for a repository URL such as `https://github.com/user/repo.git` into the chosen location, in a folder named after the repository. It uses your own Git login (SSH key or credential helper) and never asks for input; a repository that needs a login you do not have fails with Git's message. |
 | Import | Adds a folder that already exists on this Mac. |
 
-The new or imported project opens at once. Click an avatar, or a name in **Projects**, to switch.
+The new or imported project opens at once. Click an avatar to switch; hover it to see the project's name.
 The shells of the project you leave keep running and are back when you return.
 
-Projects are only listed here; removing one never deletes its folder.
+Projects are only listed in the rail; nothing Vekro does deletes a project's folder.
 
 ## Terminals
 

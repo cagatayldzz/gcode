@@ -4,7 +4,6 @@ mod assets;
 mod components;
 mod editor;
 mod explorer;
-mod panels;
 mod project_setup;
 mod selection;
 mod settings;
