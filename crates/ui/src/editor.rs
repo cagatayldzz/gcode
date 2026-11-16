@@ -3,7 +3,7 @@
 use gpui_kit::{
   component::{
     diff::{Diff, DiffFile, DiffMode, DiffState},
-    dock::{BasePanel, Panel, PanelEvent},
+    dock::{BasePanel, Panel, PanelControl, PanelEvent},
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     input::{Editor, EditorState, InputEvent},
     Icon, IconName,
@@ -121,12 +121,20 @@ impl BasePanel for EditorPanel {
     "editor"
   }
 
+  fn zoomable(&self, _: &App) -> bool {
+    false
+  }
+
   fn closable(&self, _: &App) -> bool {
     false
   }
 }
 
 impl Panel for EditorPanel {
+  fn zoom_control(&self, _: &App) -> Option<PanelControl> {
+    None
+  }
+
   fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
     match &self.content {
       Content::Nothing => "Editor".to_string(),

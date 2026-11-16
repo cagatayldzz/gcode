@@ -2,7 +2,7 @@
 
 use crate::workspace::Workspace;
 use gpui_kit::{
-  component::dock::{BasePanel, Panel, PanelEvent},
+  component::dock::{BasePanel, Panel, PanelControl, PanelEvent},
   *,
 };
 
@@ -31,12 +31,20 @@ impl BasePanel for ExplorerPanel {
     "explorer"
   }
 
+  fn zoomable(&self, _: &App) -> bool {
+    false
+  }
+
   fn closable(&self, _: &App) -> bool {
     false
   }
 }
 
 impl Panel for ExplorerPanel {
+  fn zoom_control(&self, _: &App) -> Option<PanelControl> {
+    None
+  }
+
   fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
     "Explorer"
   }

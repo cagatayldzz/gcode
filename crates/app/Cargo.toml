@@ -15,5 +15,4 @@ doctest = false
 
 [dependencies]
 vekro-ui.workspace = true
-vekro-storage.workspace = true
 gpui-kit.workspace = true

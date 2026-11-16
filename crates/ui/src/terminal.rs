@@ -6,7 +6,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
     button::{Button, ButtonVariants as _},
-    dock::{BasePanel, Panel, PanelEvent},
+    dock::{BasePanel, Panel, PanelControl, PanelEvent},
     scroll::{ScrollableElement as _, ScrollbarHandle},
     ActiveTheme as _, IconName, Sizable as _,
   },
@@ -246,9 +246,17 @@ impl BasePanel for Terminal {
   fn panel_name(&self) -> &'static str {
     "terminal"
   }
+
+  fn zoomable(&self, _: &App) -> bool {
+    false
+  }
 }
 
 impl Panel for Terminal {
+  fn zoom_control(&self, _: &App) -> Option<PanelControl> {
+    None
+  }
+
   fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
     self.title.clone()
   }
