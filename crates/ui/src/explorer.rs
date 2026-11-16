@@ -3,7 +3,7 @@
 use std::{
   collections::HashSet,
   fs,
-  path::{Path, PathBuf},
+  path::{Component, Path, PathBuf},
 };
 
 /// One visible line of the tree.
@@ -44,4 +44,27 @@ fn collect(dir: &Path, depth: usize, expanded: &HashSet<PathBuf>, out: &mut Vec<
       collect(&path, depth + 1, expanded, out);
     }
   }
+}
+
+/// Creates an empty file or a folder called `name` inside `parent`. `name` may hold subfolders (`a/b.rs`); it may not
+/// leave `parent` or replace something that exists. Returns the new path.
+pub(crate) fn create(parent: &Path, name: &str, is_dir: bool) -> Result<PathBuf, String> {
+  let name = name.trim();
+  if name.is_empty() {
+    return Err("Enter a name.".into());
+  }
+  let relative = Path::new(name);
+  if relative.is_absolute() || relative.components().any(|part| !matches!(part, Component::Normal(_))) {
+    return Err("The name must stay inside the folder.".into());
+  }
+  let path = parent.join(relative);
+  if path.exists() {
+    return Err(format!("{name} already exists."));
+  }
+  let made = if is_dir {
+    fs::create_dir_all(&path)
+  } else {
+    path.parent().map_or(Ok(()), fs::create_dir_all).and_then(|()| fs::File::create_new(&path).map(drop))
+  };
+  made.map(|()| path).map_err(|error| format!("Could not create {name}: {error}"))
 }

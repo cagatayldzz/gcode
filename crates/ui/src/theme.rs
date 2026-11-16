@@ -135,6 +135,9 @@ pub(crate) fn apply_theme(choice: ThemeChoice, window: &mut Window, cx: &mut App
     theme.font_size = px(16.);
     theme.mono_font_family = MONO_FONT.into();
     theme.mono_font_size = MONO_FONT_SIZE;
+    let style = &mut std::sync::Arc::make_mut(&mut theme.highlight_theme).style;
+    style.editor_active_line = Some(c.selected);
+    style.editor_active_line_number = Some(c.text);
     let colors = &mut theme.colors;
     colors.background = c.background;
     colors.foreground = c.text;

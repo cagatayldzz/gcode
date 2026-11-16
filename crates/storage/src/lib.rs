@@ -6,4 +6,4 @@ mod projects;
 
 pub use paths::data_dir;
 pub use preferences::{Preferences, ThemeChoice};
-pub use projects::{Project, ProjectList};
+pub use projects::{Category, Project, ProjectList};

@@ -3,14 +3,17 @@
 A Vekro window has four parts:
 
 - the **project rail** on the far left: one avatar per project, the `+` button, and Settings at the bottom;
-- the **sidebar**: the Git summary with the changed files, and the folder tree;
+- the **sidebar**: two icon tabs. **Explorer** shows the folder tree under a header with the project name and four
+  buttons: new file, new folder (created inside the selected folder, next to the selected file, or in the project folder; type the name and
+  press Enter, `dir/name.rs` makes the subfolder too), refresh and collapse all folders. **Git** shows the branch
+  and the changed files;
 - the **editor area** in the middle: a file, or the diff of a changed file;
 - the **terminal dock** at the bottom: one or more shells of the open project.
 
 The editor and each terminal have a zoom button in their title bar (also **Zoom In** in the `…` menu) that
 makes the panel fill the whole dock area; press it again to go back. Drag the edge of the sidebar to resize it. 
 A thin **status bar** shows the branch and the number of changed files on the left, the project
-folder in the middle and the open file with its language on the right.
+folder in the middle and the open file's cursor position, indentation, encoding, line ending and language on the right (`Ln 12, Col 5`, `Spaces: 2`, `UTF-8`, `LF`, `Rust`).
 
 ## Projects
 
@@ -29,6 +32,19 @@ project you leave away and brings back what the other one showed. Its shells kee
 project A is still running when you come back to it.
 
 Projects are only listed in the rail; nothing Vekro does deletes a project's folder.
+
+### Categories
+
+Group projects in the rail the way Discord groups servers into folders. Right-click a project's avatar:
+
+- **New category…** asks for a name, creates the category and puts the project in it;
+- **Move to** lists the categories (the current one is checked); pick one to move the project there;
+- **Remove from category** takes it out again.
+
+An unfolded category is a tinted block: its folder tile on top, its projects below. Click the folder tile to fold
+it into one tile that shows the first four projects' initials (outlined when the open project is inside).
+Right-click the folder tile to **Rename…** or **Delete category** (the projects stay, outside any category).
+Projects without a category come first, then the categories in the order they were created.
 
 ## Terminals
 
@@ -95,4 +111,4 @@ Settings are saved as soon as you change them.
 ## Where things are stored
 
 `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_DIR`): `projects.json` holds the
-project list and the one open last; `preferences.json` holds Settings.
+project list, their categories and the one open last; `preferences.json` holds Settings.

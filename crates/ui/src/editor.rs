@@ -54,7 +54,11 @@ struct ReadyFile {
   dirty: bool,
   /// The editor has been drawn at least once, so its text is already highlighted.
   painted: bool,
+  /// The text uses `\r\n` line endings.
+  crlf: bool,
   _changes: Subscription,
+  /// Repaints the status bar when the cursor moves.
+  _cursor: Subscription,
 }
 
 enum Content {
@@ -175,6 +179,7 @@ impl EditorPanel {
     }
     let text = fs::read_to_string(path).map_err(|_| format!("{} is not a text file.", display_name(path)))?;
     let language = language_for(path);
+    let crlf = text.contains("\r\n");
     let state = cx.new(|cx| EditorState::new(window, cx).language(language).line_number(true).default_value(text));
     let owner = path.to_path_buf();
     let changes = cx.subscribe(&state, move |this, _, event: &InputEvent, cx| {
@@ -185,7 +190,8 @@ impl EditorPanel {
         }
       }
     });
-    self.files.insert(path.to_path_buf(), ReadyFile { state, dirty: false, painted: false, _changes: changes });
+    let cursor = cx.observe(&state, |_, _, cx| cx.notify());
+    self.files.insert(path.to_path_buf(), ReadyFile { state, dirty: false, painted: false, crlf, _changes: changes, _cursor: cursor });
     self.touch(path);
     self.evict();
     Ok(())
@@ -241,15 +247,29 @@ impl EditorPanel {
     self.files.get(path).is_some_and(|file| file.dirty)
   }
 
-  /// What the status bar says about the open file: its name and language.
-  pub fn status(&self) -> Option<String> {
+  /// What the status bar says about the open file, left to right: the cursor, the indentation, the encoding, the line
+  /// ending and the language. A diff only says that it shows changes.
+  pub fn status(&self, cx: &App) -> Vec<String> {
     match &self.content {
-      Content::Nothing => None,
-      Content::File(path) => Some(format!("{}{} · {}", display_name(path), if self.is_dirty(path) { " •" } else { "" }, language_for(path))),
-      Content::Diff { name, .. } => Some(format!("{name} · changes")),
+      Content::Nothing => Vec::new(),
+      Content::File(path) => {
+        let Some(file) = self.files.get(path) else { return Vec::new() };
+        let cursor = file.state.read(cx).cursor_position();
+        vec![
+          format!("Ln {}, Col {}", cursor.line + 1, cursor.character + 1),
+          format!("Spaces: {INDENT_WIDTH}"),
+          "UTF-8".into(),
+          if file.crlf { "CRLF" } else { "LF" }.into(),
+          language_label(path).into(),
+        ]
+      }
+      Content::Diff { name, .. } => vec![format!("{name} · changes")],
     }
   }
 }
+
+/// How many spaces one indent is: the editor's default.
+const INDENT_WIDTH: usize = 2;
 
 fn display_name(path: &Path) -> String {
   path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
@@ -272,6 +292,26 @@ fn language_for(path: &Path) -> &'static str {
     "swift" => "swift",
     "go" => "go",
     _ => "text",
+  }
+}
+
+/// The name of a file's language as the status bar shows it.
+fn language_label(path: &Path) -> &'static str {
+  match language_for(path) {
+    "rust" => "Rust",
+    "toml" => "TOML",
+    "json" => "JSON",
+    "markdown" => "Markdown",
+    "typescript" => "TypeScript",
+    "javascript" => "JavaScript",
+    "html" => "HTML",
+    "css" => "CSS",
+    "python" => "Python",
+    "bash" => "Shell",
+    "yaml" => "YAML",
+    "swift" => "Swift",
+    "go" => "Go",
+    _ => "Plain Text",
   }
 }
 

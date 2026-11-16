@@ -14,11 +14,14 @@ use gpui_kit::{
     button::{Button, ButtonVariants as _},
     dock::{panel_handle, DockArea, DockLayout, DockPlacement, DockSkin},
     h_flex,
+    input::{Input, InputEvent, InputState},
     label::Label,
+    menu::{ContextMenuExt as _, PopupMenuItem},
     notification::Notification,
     resizable::{h_resizable, resizable_panel},
     scroll::ScrollableElement as _,
     status_bar::StatusBar,
+    tab::{Tab, TabBar},
     tooltip::Tooltip,
     v_flex, ActiveTheme, Icon, IconName, Sizable as _, TitleBar, WindowExt as _,
   },
@@ -26,11 +29,11 @@ use gpui_kit::{
 };
 use std::{
   collections::{HashMap, HashSet},
-  path::PathBuf,
+  path::{Path, PathBuf},
   time::Duration,
 };
 use vekro_git::Summary;
-use vekro_storage::{Preferences, ProjectList};
+use vekro_storage::{Category, Preferences, Project, ProjectList};
 
 /// Height of the top band: the traffic lights and the title.
 pub const TOOLBAR_HEIGHT: Pixels = px(40.);
@@ -58,11 +61,37 @@ const BOTTOM_DOCK_HEIGHT: Pixels = px(260.);
 /// Indentation of each tree level.
 const INDENT: Pixels = px(16.);
 
+/// The two views of the sidebar, in tab order.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum SidebarTab {
+  #[default]
+  Explorer,
+  Git,
+}
+
+impl SidebarTab {
+  const ALL: [SidebarTab; 2] = [SidebarTab::Explorer, SidebarTab::Git];
+
+  fn icon(self) -> Icon {
+    match self {
+      SidebarTab::Explorer => Icon::empty().path("icons/folder-tree.svg"),
+      SidebarTab::Git => Icon::empty().path("icons/git-branch.svg"),
+    }
+  }
+
+  fn label(self) -> &'static str {
+    match self {
+      SidebarTab::Explorer => "Explorer",
+      SidebarTab::Git => "Git",
+    }
+  }
+}
+
 /// What the window shows for a project that is not open at the moment.
 #[derive(Default)]
 struct ProjectView {
   expanded: HashSet<PathBuf>,
-  selected_file: Option<PathBuf>,
+  selected_entry: Option<PathBuf>,
   selected_change: Option<PathBuf>,
 }
 
@@ -74,18 +103,25 @@ pub struct Workspace {
   git: Option<Summary>,
   expanded: HashSet<PathBuf>,
   rows: Vec<explorer::Row>,
-  selected_file: Option<PathBuf>,
+  selected_entry: Option<PathBuf>,
   /// The changed file whose diff is open, relative to the repository.
   selected_change: Option<PathBuf>,
   /// The Explorer and Git selections of the projects that are not open.
   views: HashMap<PathBuf, ProjectView>,
+  /// The view the sidebar shows.
+  sidebar_tab: SidebarTab,
   /// The file in the Explorer the pointer is on.
   hovered_file: Option<PathBuf>,
   focus_handle: FocusHandle,
   _setup_subscription: Option<Subscription>,
+  _entry_subscription: Option<Subscription>,
+  /// Whether the Explorer shows its tree or only its header.
+  explorer_open: bool,
   _settings_subscriptions: Vec<Subscription>,
   _appearance: Subscription,
   _activation: Subscription,
+  /// Repaints the window when the editor changes: the status bar shows the cursor.
+  _editor: Subscription,
   _refresh_task: Task<()>,
   dock: Entity<DockArea>,
   editor_panel: Entity<EditorPanel>,
@@ -113,12 +149,15 @@ impl Workspace {
       git: None,
       expanded: HashSet::new(),
       rows: Vec::new(),
-      selected_file: None,
+      selected_entry: None,
       selected_change: None,
+      sidebar_tab: SidebarTab::default(),
       hovered_file: None,
       views: HashMap::new(),
       focus_handle: cx.focus_handle(),
       _setup_subscription: None,
+      _entry_subscription: None,
+      explorer_open: true,
       _settings_subscriptions: vec![
         // Any change to a setting is saved and applied in every window.
         cx.observe_in(&settings, window, |_, settings, window, cx| {
@@ -137,11 +176,12 @@ impl Workspace {
         }),
       ],
       dock,
-      editor_panel,
+      editor_panel: editor_panel.clone(),
       terminals: HashMap::new(),
       _terminal_subscriptions: Vec::new(),
       _appearance: cx.observe_window_appearance(window, |this, window, cx| apply_theme(this.settings.read(cx).preferences.theme, window, cx)),
       // Changes made in another app (an editor, GitHub Desktop, a terminal) show up as soon as the window is back.
+      _editor: cx.observe(&editor_panel, |_, _, cx| cx.notify()),
       _activation: cx.observe_window_activation(window, |this, window, cx| {
         if window.is_window_active() {
           this.refresh_in_background(cx);
@@ -275,6 +315,58 @@ impl Workspace {
     window.open_dialog(cx, move |dialog, _, _| dialog.title("Add project").width(px(480.)).child(setup.clone()));
   }
 
+  /// Writes the project list; a failure is logged, the window keeps working.
+  fn persist_projects(&self) {
+    if let Err(error) = self.projects.save(&ProjectList::default_path()) {
+      eprintln!("Could not save the project list: {error}");
+    }
+  }
+
+  /// Asks for the name of a new category and puts `project`, if given, in it.
+  fn new_category(&mut self, project: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+    self.ask_name("New category", "Category name", "", window, cx, move |this, name, _, cx| {
+      if !this.projects.add_category(name) {
+        return Err("Enter a category name that is not used yet.".into());
+      }
+      if let Some(path) = &project {
+        this.projects.set_category(path, Some(name.trim()));
+      }
+      this.persist_projects();
+      cx.notify();
+      Ok(())
+    });
+  }
+
+  fn rename_category(&mut self, old: String, window: &mut Window, cx: &mut Context<Self>) {
+    let initial = old.clone();
+    self.ask_name("Rename category", "Category name", &initial, window, cx, move |this, name, _, cx| {
+      if !this.projects.rename_category(&old, name) {
+        return Err("Enter a category name that is not used yet.".into());
+      }
+      this.persist_projects();
+      cx.notify();
+      Ok(())
+    });
+  }
+
+  fn delete_category(&mut self, name: &str, cx: &mut Context<Self>) {
+    self.projects.remove_category(name);
+    self.persist_projects();
+    cx.notify();
+  }
+
+  fn toggle_category(&mut self, name: &str, cx: &mut Context<Self>) {
+    self.projects.toggle_category(name);
+    self.persist_projects();
+    cx.notify();
+  }
+
+  fn move_project(&mut self, path: &Path, category: Option<&str>, cx: &mut Context<Self>) {
+    self.projects.set_category(path, category);
+    self.persist_projects();
+    cx.notify();
+  }
+
   fn select_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
     if self.projects.active.as_ref() != Some(&path) {
       self.switch_project(window, cx, move |projects| projects.active = Some(path));
@@ -291,7 +383,7 @@ impl Workspace {
     if let Some(root) = &before {
       let view = ProjectView {
         expanded: std::mem::take(&mut self.expanded),
-        selected_file: self.selected_file.take(),
+        selected_entry: self.selected_entry.take(),
         selected_change: self.selected_change.take(),
       };
       self.views.insert(root.clone(), view);
@@ -303,7 +395,7 @@ impl Workspace {
     let after = self.projects.active.clone();
     let view = after.as_ref().and_then(|root| self.views.remove(root)).unwrap_or_default();
     self.expanded = view.expanded;
-    self.selected_file = view.selected_file;
+    self.selected_entry = view.selected_entry;
     self.selected_change = view.selected_change;
     self.editor_panel.update(cx, |editor, cx| editor.switch_project(before, after, cx));
     self.refresh_project();
@@ -347,6 +439,76 @@ impl Workspace {
     .detach();
   }
 
+  /// Asks for the name of a new file or folder inside the selected folder, next to the selected file, or in the project folder.
+  fn new_entry(&mut self, is_dir: bool, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    let parent = self
+      .selected_entry
+      .as_deref()
+      .map(|entry| if entry.is_dir() { entry } else { entry.parent().unwrap_or(entry) })
+      .filter(|folder| folder.starts_with(&root))
+      .map_or_else(|| root.clone(), Path::to_path_buf);
+    let (kind, placeholder) = if is_dir { ("folder", "Folder name") } else { ("file", "File name") };
+    let place = parent.file_name().map_or_else(|| "project".into(), |name| name.to_string_lossy().into_owned());
+    self.ask_name(format!("New {kind} in {place}"), placeholder, "", window, cx, move |this, name, window, cx| {
+      let path = explorer::create(&parent, name, is_dir)?;
+      this.entry_created(path, is_dir, window, cx);
+      Ok(())
+    });
+  }
+
+  /// Opens a dialog with one text field. Enter hands the text to `submit`; when that succeeds the dialog closes,
+  /// and when it fails the message shows as a notification and the dialog stays.
+  fn ask_name(
+    &mut self,
+    title: impl Into<SharedString>,
+    placeholder: &'static str,
+    initial: &str,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+    submit: impl Fn(&mut Self, &str, &mut Window, &mut Context<Self>) -> Result<(), String> + 'static,
+  ) {
+    let initial = initial.to_owned();
+    let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder).default_value(initial));
+    self._entry_subscription = Some(cx.subscribe_in(&input, window, move |this, input, event: &InputEvent, window, cx| {
+      if let InputEvent::PressEnter { .. } = event {
+        let name = input.read(cx).value().to_string();
+        match submit(this, &name, window, cx) {
+          Ok(()) => window.close_all_dialogs(cx),
+          Err(message) => window.push_notification(Notification::error(message), cx),
+        }
+      }
+    }));
+    let title = title.into();
+    let field = input.clone();
+    window.open_dialog(cx, move |dialog, _, _| dialog.title(title.clone()).width(px(420.)).child(Input::new(&field)));
+    let focus = input.read(cx).focus_handle(cx);
+    window.defer(cx, move |window, cx| focus.focus(window, cx));
+  }
+
+  /// Shows a new file or folder in the tree, and opens a new file.
+  fn entry_created(&mut self, path: PathBuf, is_dir: bool, window: &mut Window, cx: &mut Context<Self>) {
+    if let Some(root) = self.projects.active.clone() {
+      for folder in path.ancestors().skip(1).take_while(|folder| *folder != root && folder.starts_with(&root)) {
+        self.expanded.insert(folder.to_path_buf());
+      }
+    }
+    self.explorer_open = true;
+    self.refresh_project();
+    if is_dir {
+      cx.notify();
+    } else {
+      self.open_file(path, window, cx);
+    }
+  }
+
+  /// Folds every folder of the tree.
+  fn collapse_folders(&mut self, cx: &mut Context<Self>) {
+    self.expanded.clear();
+    self.refresh_project();
+    cx.notify();
+  }
+
   fn toggle_folder(&mut self, path: PathBuf, cx: &mut Context<Self>) {
     if !self.expanded.remove(&path) {
       self.expanded.insert(path);
@@ -360,7 +522,7 @@ impl Workspace {
     let result = self.editor_panel.update(cx, |editor, cx| editor.open_file(path.clone(), window, cx));
     match result {
       Ok(()) => {
-        self.selected_file = Some(path);
+        self.selected_entry = Some(path);
         self.selected_change = None;
       }
       Err(message) => window.push_notification(Notification::error(message), cx),
@@ -376,7 +538,7 @@ impl Workspace {
     match result {
       Ok(()) => {
         self.selected_change = Some(file);
-        self.selected_file = None;
+        self.selected_entry = None;
       }
       Err(message) => window.push_notification(Notification::error(message), cx),
     }
@@ -396,7 +558,7 @@ impl Workspace {
   /// The thin bar at the bottom of the window: the branch and changes on the left, the open file on the right.
   fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
-    let file = self.editor_panel.read(cx).status();
+    let file = self.editor_panel.read(cx).status(cx);
     let mut bar = StatusBar::new().bg(palette.surface_alt).border_color(palette.border).text_color(palette.text_secondary);
     if let Some(git) = &self.git {
       bar = bar
@@ -413,30 +575,140 @@ impl Workspace {
     if let Some(project) = self.projects.active.as_ref().map(|path| display_path(path)) {
       bar = bar.child(project);
     }
-    if let Some(file) = file {
-      bar = bar.right(file);
+    for item in file {
+      bar = bar.right(item);
     }
     bar
   }
 
+  /// One project's avatar. A right click offers the categories to put it in.
+  fn rail_project(&self, project: &Project, cx: &mut Context<Self>) -> impl IntoElement {
+    let selected_style = selected_style(cx);
+    let path = project.path.clone();
+    let name = project.name();
+    let selected = self.projects.active.as_ref() == Some(&project.path);
+    let letter = initial(&name);
+    let workspace = cx.entity();
+    let categories: Vec<SharedString> = self.projects.categories.iter().map(|category| SharedString::from(category.name.clone())).collect();
+    let current = project.category.clone();
+    let owner = path.clone();
+    div()
+      .id(SharedString::from(format!("rail-item-{}", path.display())))
+      .child(
+        Button::new(SharedString::from(format!("rail-{}", path.display())))
+          .label(letter)
+          .w_10()
+          .h_10()
+          .rounded_lg()
+          .when(selected, |button| button.custom(selected_style))
+          .when(!selected, |button| button.ghost())
+          .tooltip(name)
+          .on_click(cx.listener(move |this, _, window, cx| this.select_project(path.clone(), window, cx))),
+      )
+      .context_menu(move |menu, _, _| {
+        let mut menu = menu;
+        if !categories.is_empty() {
+          menu = menu.label("Move to");
+          for category in &categories {
+            let (workspace, owner, target) = (workspace.clone(), owner.clone(), category.clone());
+            let checked = current.as_deref() == Some(category.as_ref());
+            menu = menu.item(
+              PopupMenuItem::new(category.clone())
+                .checked(checked)
+                .on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.move_project(&owner, Some(&target), cx))),
+            );
+          }
+          menu = menu.separator();
+        }
+        let (new_workspace, new_owner) = (workspace.clone(), owner.clone());
+        menu = menu.item(
+          PopupMenuItem::new("New category…")
+            .on_click(move |_, window, cx| new_workspace.update(cx, |this, cx| this.new_category(Some(new_owner.clone()), window, cx))),
+        );
+        if current.is_some() {
+          let (workspace, owner) = (workspace.clone(), owner.clone());
+          menu = menu.item(
+            PopupMenuItem::new("Remove from category").on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.move_project(&owner, None, cx))),
+          );
+        }
+        menu
+      })
+  }
+
+  /// A category in the rail: one tile that folds and unfolds it, and its projects below while it is unfolded.
+  fn rail_category(&self, category: &Category, cx: &mut Context<Self>) -> impl IntoElement {
+    let palette = colors(cx);
+    let members: Vec<&Project> = self.projects.projects_in(Some(&category.name)).collect();
+    let name = SharedString::from(category.name.clone());
+    let has_active = members.iter().any(|project| self.projects.active.as_ref() == Some(&project.path));
+    let folded = category.collapsed;
+    let workspace = cx.entity();
+    let tile = div()
+      .id(SharedString::from(format!("rail-category-{}", category.name)))
+      .size_10()
+      .flex()
+      .flex_none()
+      .items_center()
+      .justify_center()
+      .rounded_lg()
+      .cursor_pointer()
+      .text_color(palette.rail_text)
+      .when(folded, |tile| tile.bg(palette.rail_hover))
+      .when(folded && has_active, |tile| tile.border_1().border_color(palette.accent))
+      .hover(move |tile| tile.bg(palette.rail_hover))
+      .tooltip({
+        let name = name.clone();
+        move |window, cx| Tooltip::new(name.clone()).build(window, cx)
+      })
+      .on_click(cx.listener({
+        let name = category.name.clone();
+        move |this, _, _, cx| this.toggle_category(&name, cx)
+      }))
+      .when(folded && !members.is_empty(), |tile| {
+        // Discord's folded folder: the first four projects as small initials.
+        tile.child(div().size_full().flex().flex_wrap().items_center().justify_center().children(members.iter().take(4).map(|project| {
+          let active = self.projects.active.as_ref() == Some(&project.path);
+          div()
+            .size_4()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_xs()
+            .when(active, |cell| cell.text_color(palette.accent))
+            .child(initial(&project.name()))
+        })))
+      })
+      .when(!(folded && !members.is_empty()), |tile| {
+        tile.child(Icon::empty().path(if folded { "icons/folder.svg" } else { "icons/folder-open.svg" }).size_5())
+      })
+      .context_menu({
+        let name = category.name.clone();
+        move |menu, _, _| {
+          let (rename_workspace, rename_name) = (workspace.clone(), name.clone());
+          let (delete_workspace, delete_name) = (workspace.clone(), name.clone());
+          menu
+            .item(
+              PopupMenuItem::new("Rename…")
+                .on_click(move |_, window, cx| rename_workspace.update(cx, |this, cx| this.rename_category(rename_name.clone(), window, cx))),
+            )
+            .item(
+              PopupMenuItem::new("Delete category")
+                .on_click(move |_, _, cx| delete_workspace.update(cx, |this, cx| this.delete_category(&delete_name, cx))),
+            )
+        }
+      });
+    v_flex()
+      .items_center()
+      .gap_1()
+      .when(!folded, |group| group.bg(palette.rail_hover).rounded_xl().p_1())
+      .child(tile)
+      .when(!folded, |group| group.children(members.into_iter().map(|project| self.rail_project(project, cx))))
+  }
+
   fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
-    let selected_style = selected_style(cx);
-    let avatars = self.projects.projects.iter().map(|project| {
-      let path = project.path.clone();
-      let name = project.name();
-      let selected = self.projects.active.as_ref() == Some(&project.path);
-      let letter: String = name.chars().take(1).flat_map(char::to_uppercase).collect();
-      Button::new(SharedString::from(format!("rail-{}", project.path.display())))
-        .label(letter)
-        .w_10()
-        .h_10()
-        .rounded_lg()
-        .when(selected, |button| button.custom(selected_style))
-        .when(!selected, |button| button.ghost())
-        .tooltip(name)
-        .on_click(cx.listener(move |this, _, window, cx| this.select_project(path.clone(), window, cx)))
-    });
+    let loose: Vec<AnyElement> = self.projects.projects_in(None).map(|project| self.rail_project(project, cx).into_any_element()).collect();
+    let groups: Vec<AnyElement> = self.projects.categories.iter().map(|category| self.rail_category(category, cx).into_any_element()).collect();
     v_flex()
       .w(RAIL_WIDTH)
       .h_full()
@@ -448,13 +720,18 @@ impl Workspace {
       .bg(palette.rail)
       .border_r_1()
       .border_color(palette.rail_border)
-      .child(v_flex().id("rail-projects").flex_1().min_h_0().items_center().gap_2().overflow_y_scroll().children(avatars).child(rail_button(
-        "rail-add",
-        IconName::Plus,
-        "Add project",
-        &palette,
-        |_, window, cx| window.dispatch_action(Box::new(AddProject), cx),
-      )))
+      .child(
+        v_flex()
+          .id("rail-projects")
+          .flex_1()
+          .min_h_0()
+          .items_center()
+          .gap_2()
+          .overflow_y_scroll()
+          .children(loose)
+          .children(groups)
+          .child(rail_button("rail-add", IconName::Plus, "Add project", &palette, |_, window, cx| window.dispatch_action(Box::new(AddProject), cx))),
+      )
       .child(rail_button("rail-settings", IconName::Settings, "Settings", &palette, |_, window, cx| {
         window.dispatch_action(Box::new(OpenSettings), cx)
       }))
@@ -503,7 +780,6 @@ impl Workspace {
     Some(
       v_flex()
         .gap_1()
-        .child(Label::new("Git").font_weight(FontWeight::MEDIUM).px_2())
         .child(
           h_flex()
             .px_2()
@@ -532,7 +808,7 @@ impl Workspace {
     let palette = colors(cx);
     let rows = self.rows.iter().map(|row| {
       let path = row.path.clone();
-      let selected = self.selected_file.as_ref() == Some(&row.path);
+      let selected = self.selected_entry.as_ref() == Some(&row.path);
       let open = self.expanded.contains(&row.path);
       let icon = if row.is_dir { IconName::FolderClosed } else { IconName::File };
       h_flex()
@@ -575,24 +851,13 @@ impl Workspace {
         })
         .on_click(cx.listener(move |this, _, window, cx| {
           if this.rows.iter().any(|row| row.path == path && row.is_dir) {
+            this.selected_entry = Some(path.clone());
             this.toggle_folder(path.clone(), cx);
           } else {
             this.open_file(path.clone(), window, cx);
           }
         }))
     });
-    v_flex()
-      .flex_1()
-      .min_h_0()
-      .gap_1()
-      .child(Label::new("Explorer").font_weight(FontWeight::MEDIUM).px_2())
-      .child(v_flex().id("explorer-rows").flex_1().min_h_0().overflow_y_scrollbar().children(rows))
-  }
-
-  /// The repository summary and the folder tree.
-  fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let theme = cx.theme().clone();
-    let divider = || div().h_px().w_full().bg(theme.sidebar_border);
     let name = self
       .projects
       .active
@@ -600,15 +865,77 @@ impl Workspace {
       .and_then(|path| path.file_name())
       .map(|name| SharedString::from(name.to_string_lossy().into_owned()))
       .unwrap_or_else(|| "Vekro".into());
+    let open = self.explorer_open;
+    let action =
+      |id: &'static str, icon: &'static str, tooltip: &'static str| Button::new(id).ghost().xsmall().icon(Icon::empty().path(icon)).tooltip(tooltip);
+    let header = h_flex()
+      .gap_1()
+      .items_center()
+      .child(
+        h_flex()
+          .id("explorer-title")
+          .flex_1()
+          .min_w_0()
+          .gap_1()
+          .items_center()
+          .cursor_pointer()
+          .child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size_4().text_color(theme.muted_foreground))
+          .child(Label::new(name).font_weight(FontWeight::SEMIBOLD).whitespace_nowrap().text_ellipsis())
+          .on_click(cx.listener(|this, _, _, cx| {
+            this.explorer_open = !this.explorer_open;
+            cx.notify();
+          })),
+      )
+      .child(
+        action("explorer-new-file", "icons/file-plus.svg", "New file").on_click(cx.listener(|this, _, window, cx| this.new_entry(false, window, cx))),
+      )
+      .child(
+        action("explorer-new-folder", "icons/folder-plus.svg", "New folder")
+          .on_click(cx.listener(|this, _, window, cx| this.new_entry(true, window, cx))),
+      )
+      .child(action("explorer-refresh", "icons/refresh-cw.svg", "Refresh").on_click(cx.listener(|this, _, _, cx| {
+        this.refresh_project();
+        cx.notify();
+      })))
+      .child(
+        action("explorer-collapse", "icons/list-chevrons-down-up.svg", "Collapse folders")
+          .on_click(cx.listener(|this, _, _, cx| this.collapse_folders(cx))),
+      );
     v_flex()
-      .size_full()
-      .p_3()
-      .gap_3()
-      .bg(theme.sidebar)
-      .child(Label::new(name).font_weight(FontWeight::SEMIBOLD).px_2().whitespace_nowrap().text_ellipsis())
-      .when_some(self.render_git(cx), |panel, git| panel.child(git).child(divider()))
-      .child(self.render_explorer(cx))
+      .flex_1()
+      .min_h_0()
+      .gap_1()
+      .child(header)
+      .when(open, |section| section.child(v_flex().id("explorer-rows").flex_1().min_h_0().overflow_y_scrollbar().children(rows)))
   }
+
+  /// The repository summary and the folder tree.
+  fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let selected = SidebarTab::ALL.iter().position(|tab| *tab == self.sidebar_tab).unwrap_or(0);
+    let tabs = TabBar::new("sidebar-tabs")
+      .underline()
+      .selected_index(selected)
+      .on_click(cx.listener(|this, index: &usize, _, cx| {
+        if let Some(tab) = SidebarTab::ALL.get(*index) {
+          this.sidebar_tab = *tab;
+          cx.notify();
+        }
+      }))
+      .children(SidebarTab::ALL.map(|tab| Tab::new().icon(tab.icon()).aria_label(tab.label())));
+    let content = match self.sidebar_tab {
+      SidebarTab::Explorer => self.render_explorer(cx).into_any_element(),
+      SidebarTab::Git => match self.render_git(cx) {
+        Some(git) => git.into_any_element(),
+        None => Label::new("Not a Git repository").text_color(cx.theme().muted_foreground).px_2().into_any_element(),
+      },
+    };
+    v_flex().size_full().bg(cx.theme().sidebar).child(div().px_3().pt_2().child(tabs)).child(v_flex().flex_1().min_h_0().p_3().child(content))
+  }
+}
+
+/// The first letter of a project's name, in capitals: its avatar.
+fn initial(name: &str) -> String {
+  name.chars().take(1).flat_map(char::to_uppercase).collect()
 }
 
 /// A square icon button for the project rail. The Kit's `Button` fixes its icon at a small size, so this draws the

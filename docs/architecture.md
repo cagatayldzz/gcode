@@ -34,8 +34,9 @@ apps/vekro ─► app ─► ui ─► terminal
 
 ## Window layout
 
-The `Workspace` renders the title band, then a row of the **project rail** (fixed), the **sidebar** (a Kit
-`h_resizable` pane, 200–480 px) and the Kit **`DockArea`**, and the status bar below. The sidebar is plain
+The `Workspace` renders the title band, then a row of the **project rail** (fixed), the **sidebar** (the project name, an
+icon `TabBar` that switches between Explorer and Git, and the selected view, in a Kit `h_resizable` pane,
+200–480 px) and the Kit **`DockArea`**, and the status bar below. The sidebar is plain
 workspace content, not a dock panel, so it has no tab bar. The dock holds:
 
 - center: `EditorPanel`;
@@ -101,7 +102,7 @@ Data directory `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_
 
 | File | Type | Written |
 | --- | --- | --- |
-| `projects.json` | `ProjectList` (project paths, the active one) | when a project is added or selected |
+| `projects.json` | `ProjectList` (project paths and their categories, the categories and whether each is folded, the active project) | when a project is added or selected, or a category changes |
 | `preferences.json` | `Preferences` (theme, projects folder) | on each settings change |
 
 Not stored yet: window size and position, dock layout, open files, running terminals.

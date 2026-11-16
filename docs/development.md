@@ -49,10 +49,14 @@ Use a scratch data directory so your own project list stays out:
 VEKRO_DATA_DIR=/tmp/vekro-data ./target/debug/Vekro
 ```
 
-Seed `VEKRO_DATA_DIR/projects.json` to start with chosen projects:
+Seed `VEKRO_DATA_DIR/projects.json` to start with chosen projects (a plain list of paths also loads):
 
 ```json
-{ "projects": ["/path/to/a", "/path/to/b"], "active": "/path/to/a" }
+{
+  "projects": [{ "path": "/path/to/a", "category": null }, { "path": "/path/to/b", "category": "Work" }],
+  "categories": [{ "name": "Work", "collapsed": false }],
+  "active": "/path/to/a"
+}
 ```
 
 ## README screenshots
