@@ -31,3 +31,16 @@ fn the_list_survives_a_save_and_load() {
   assert_eq!(ProjectList::load(&dir.join("missing.json")), ProjectList::default());
   std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn adding_many_skips_listed_projects_and_keeps_the_open_one() {
+  let mut list = ProjectList::default();
+  list.add(PathBuf::from("/work/a"));
+  let added = list.add_all([PathBuf::from("/work/a"), PathBuf::from("/work/b"), PathBuf::from("/work/c")]);
+  assert_eq!(added, 2);
+  assert_eq!(list.projects.len(), 3);
+  assert_eq!(list.active, Some(PathBuf::from("/work/a")));
+  let mut empty = ProjectList::default();
+  empty.add_all([PathBuf::from("/work/b")]);
+  assert_eq!(empty.active, Some(PathBuf::from("/work/b")));
+}

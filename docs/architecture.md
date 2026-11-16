@@ -22,14 +22,14 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/editor.rs` | `EditorPanel`: the editor for a file, the diff of a changed file, or the empty state |
 | `crates/ui/src/terminal.rs` | `Terminal` (a dock panel): draws a `Session`, handles keys, mouse, selection, scrolling and paste |
 | `crates/ui/src/project_setup.rs` | the Add project dialog (New, Clone, Import) |
-| `crates/ui/src/settings.rs` | the Settings dialog |
+| `crates/ui/src/settings.rs` | the Settings pages (the Kit `Settings` component) and `SettingsModel`, the settings every window shares |
 | `crates/ui/src/explorer.rs` | the folder tree rows |
 | `crates/ui/src/selection.rs` | terminal selection math (words, extending, arrow keys) |
 | `crates/ui/src/theme.rs` | the light and dark palettes, fonts, applying them to the Kit theme |
 | `crates/ui/src/{components,assets}.rs` | the blue "chosen" button style; Kit icons |
 | `crates/terminal/src/session.rs` | `Session`: PTY, `alacritty_terminal`, shell directory lookup |
 | `crates/terminal/src/{snapshot,palette,keys,mouse,search}.rs` | styled screen snapshot, colors, key and mouse encoding, scrollback search |
-| `crates/git/src/lib.rs` | `summary` (branch and changed files), `file_diff`, `create_project`, `clone`, `repository_name` |
+| `crates/git/src/lib.rs` | `summary` (branch and changed files), `file_diff`, `create_project`, `clone`, `repository_name`, `find_repositories` |
 | `crates/storage/src/` | `paths.rs` (data directory), `projects.rs` (`ProjectList`), `preferences.rs` (`Preferences`) |
 
 ## Window layout
@@ -49,9 +49,13 @@ entry). The Kit always draws the `…` button of a dock panel.
 
 - `Workspace.projects` is the `ProjectList`, shown as the project rail; the active project decides what the sidebar, the editor
   tree, the Git summary and the terminal dock show.
-- `Workspace.terminals` maps each project folder to its terminals. Switching projects removes the old
-  project's panels from the dock (`hide_terminals`) and adds the new one's (`show_terminals`); the entities
-  stay alive in the map, so their shells keep running. A project with no terminal gets one.
+- `Workspace::switch_project` is the only way the open project changes. It hides the old project's terminals
+  (while it is still the open one), puts its Explorer and Git selections away (`Workspace.views`) and its editor
+  content away (`EditorPanel::switch_project`, `saved`), applies the change, restores the new project's views, and
+  shows the new project's terminals. Editors that other projects have open are never evicted from the cache.
+- `Workspace.terminals` maps each project folder to its terminals. The panels of the project being left leave the
+  dock (`hide_terminals`) and the new project's are added (`show_terminals`); the entities stay alive in the map, so
+  their shells keep running. A project with no terminal gets one.
 - A shell that exits sends `TerminalExited`; the workspace removes the panel and, if the project has no
   terminal left, starts another.
 
@@ -98,7 +102,7 @@ Data directory `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_
 | File | Type | Written |
 | --- | --- | --- |
 | `projects.json` | `ProjectList` (project paths, the active one) | when a project is added or selected |
-| `preferences.json` | `Preferences` (theme, folder for new projects) | on each settings change |
+| `preferences.json` | `Preferences` (theme, projects folder) | on each settings change |
 
 Not stored yet: window size and position, dock layout, open files, running terminals.
 

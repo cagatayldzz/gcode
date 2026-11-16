@@ -63,6 +63,21 @@ impl ProjectList {
     self.active = Some(path);
   }
 
+  /// Adds folders that are not listed yet, keeping the project that is open. With none open, the first one opens.
+  /// Returns how many were added.
+  pub fn add_all(&mut self, paths: impl IntoIterator<Item = PathBuf>) -> usize {
+    let before = self.projects.len();
+    for path in paths {
+      if !self.projects.iter().any(|project| project.path == path) {
+        self.projects.push(Project { path });
+      }
+    }
+    if self.active.is_none() {
+      self.active = self.projects.first().map(|project| project.path.clone());
+    }
+    self.projects.len() - before
+  }
+
   /// Removes a project from the list; the folder stays on disk.
   pub fn remove(&mut self, path: &Path) {
     self.projects.retain(|project| project.path != path);

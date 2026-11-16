@@ -86,3 +86,16 @@ fn changes_list_new_modified_and_deleted_files_with_a_diff_for_each() {
   assert!(file_diff(&dir, std::path::Path::new("fresh.txt")).unwrap().contains("+new"));
   fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn repositories_directly_inside_a_folder_are_found_by_name() {
+  let parent = temp_dir("find");
+  vekro_git::create_project(&parent, "beta").unwrap();
+  vekro_git::create_project(&parent, "Alpha").unwrap();
+  fs::create_dir_all(parent.join("plain-folder")).unwrap();
+  fs::write(parent.join("a-file.txt"), "x").unwrap();
+  let found: Vec<_> = vekro_git::find_repositories(&parent).iter().map(|path| path.file_name().unwrap().to_str().unwrap().to_string()).collect();
+  assert_eq!(found, ["Alpha", "beta"]);
+  assert!(vekro_git::find_repositories(&parent.join("missing")).is_empty());
+  fs::remove_dir_all(parent).unwrap();
+}

@@ -67,6 +67,8 @@ pub(crate) struct EditorPanel {
   content: Content,
   /// Editors that are ready, by path. Reopening one is instant and keeps its unsaved text.
   files: HashMap<PathBuf, ReadyFile>,
+  /// What each project that is not open was showing.
+  saved: HashMap<PathBuf, Content>,
   /// Paths in `files`, least recently used first.
   recent: Vec<PathBuf>,
   /// A few lines of code drawn out of sight so the first real file of a language does not pay for its highlighter.
@@ -100,6 +102,7 @@ impl EditorPanel {
     Self {
       content: Content::Nothing,
       files: HashMap::new(),
+      saved: HashMap::new(),
       recent: Vec::new(),
       warmup: None,
       _warmup_task: warmup_task,
@@ -107,6 +110,19 @@ impl EditorPanel {
       preview_epoch: 0,
       focus_handle: cx.focus_handle(),
     }
+  }
+
+  /// Switches to another project's editor area: the file or changes the project being left shows are put away and
+  /// come back with it; a project not seen before starts empty.
+  pub fn switch_project(&mut self, from: Option<PathBuf>, to: Option<PathBuf>, cx: &mut Context<Self>) {
+    let current = std::mem::replace(&mut self.content, Content::Nothing);
+    if let Some(from) = from {
+      self.saved.insert(from, current);
+    }
+    if let Some(content) = to.and_then(|to| self.saved.remove(&to)) {
+      self.content = content;
+    }
+    cx.notify();
   }
 
   /// Opens a text file for editing, at once if its editor is already ready.
@@ -183,14 +199,13 @@ impl EditorPanel {
 
   /// Drops the least recently used editors beyond the limit, never the open file or one with unsaved changes.
   fn evict(&mut self) {
-    let open = match &self.content {
-      Content::File(path) => Some(path.clone()),
-      _ => None,
-    };
+    // The open file and the files other projects have open stay.
+    let shown = std::iter::once(&self.content).chain(self.saved.values());
+    let open: Vec<PathBuf> = shown.filter_map(|content| if let Content::File(path) = content { Some(path.clone()) } else { None }).collect();
     let mut index = 0;
     while self.files.len() > MAX_READY_FILES && index < self.recent.len() {
       let path = self.recent[index].clone();
-      let keep = Some(&path) == open.as_ref() || self.files.get(&path).is_some_and(|file| file.dirty);
+      let keep = open.contains(&path) || self.files.get(&path).is_some_and(|file| file.dirty);
       if keep {
         index += 1;
       } else {

@@ -23,7 +23,10 @@ Press `+` in the project rail to open the **Add project** dialog:
 | Import | Adds a folder that already exists on this Mac. |
 
 The new or imported project opens at once. Click an avatar to switch; hover it to see the project's name.
-The shells of the project you leave keep running and are back when you return.
+Everything in the window belongs to the open project: the Git summary, the folder tree (with the folders you had
+opened and the file you had selected), the file or diff in the editor and the terminals. Switching puts the
+project you leave away and brings back what the other one showed. Its shells keep running, so a dev server in
+project A is still running when you come back to it.
 
 Projects are only listed in the rail; nothing Vekro does deletes a project's folder.
 
@@ -67,11 +70,17 @@ in another app show up by themselves.
 
 ## Settings
 
-`⌘,` or the gear in the rail:
+`⌘,` or the gear in the rail opens Settings, with a page list and a search field on the left:
 
-- **Appearance:** System (follows macOS), Light or Dark.
-- **New projects:** the folder new and cloned projects go into. By default, the folder that contains the
-  open project, else your home folder.
+- **General → Appearance → Theme:** System (follows macOS), Light or Dark. It applies at once in every window.
+- **General → Projects → Projects folder:** where new and cloned projects are created (the Local Path of the Add
+  project dialog starts here). **Change…** chooses it; **Reset** goes back to the default, the folder that contains
+  the open project, else your home folder.
+- **General → Projects → Add every project in the folder:** **Add all** adds every Git repository directly inside
+  the projects folder to the project bar at once (projects already listed are skipped, the open project stays open).
+- **About:** the version and the data folder.
+
+Settings are saved as soon as you change them.
 
 ## Shortcuts
 

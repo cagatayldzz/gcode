@@ -158,3 +158,11 @@ pub fn file_diff(path: &Path, file: &Path) -> Result<String, String> {
     .map_err(|error| error.message().to_string())?;
   Ok(patch)
 }
+
+/// The folders directly inside `folder` that are Git repositories, sorted by name. Folders that cannot be read are skipped.
+pub fn find_repositories(folder: &Path) -> Vec<PathBuf> {
+  let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };
+  let mut found: Vec<PathBuf> = entries.filter_map(Result::ok).map(|entry| entry.path()).filter(|path| path.join(".git").exists()).collect();
+  found.sort_by_key(|path| path.file_name().map(|name| name.to_string_lossy().to_lowercase()));
+  found
+}

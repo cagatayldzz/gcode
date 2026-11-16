@@ -40,6 +40,11 @@ pub(crate) struct Colors {
   /// The row that is chosen.
   pub selected: Hsla,
   pub hover: Hsla,
+  /// The project rail on the far left: the colors of github.com's header and page border, in both appearances.
+  pub rail: Hsla,
+  pub rail_border: Hsla,
+  pub rail_hover: Hsla,
+  pub rail_text: Hsla,
   /// The accent: the blue of the logo.
   pub accent: Hsla,
   pub accent_hover: Hsla,
@@ -67,6 +72,10 @@ impl Colors {
       border: hex(0x222a36),
       selected: hex(0x1f2836),
       hover: hex(0x1a212c),
+      rail: hex(0x010409),
+      rail_border: hex(0x30363d),
+      rail_hover: hex(0x161b22),
+      rail_text: hex(0x848d97),
       accent: hex(0x4d8dff),
       accent_hover: hex(0x6aa0ff),
       link: hex(0x6aa0ff),
@@ -88,6 +97,10 @@ impl Colors {
       border: hex(0xe1e5ec),
       selected: hex(0xe3e9f4),
       hover: hex(0xebeff6),
+      rail: hex(0xf6f8fa),
+      rail_border: hex(0xd1d9e0),
+      rail_hover: hex(0xeaeef2),
+      rail_text: hex(0x59636e),
       accent: hex(0x2f6bff),
       accent_hover: hex(0x4a7fff),
       link: hex(0x2f6bff),

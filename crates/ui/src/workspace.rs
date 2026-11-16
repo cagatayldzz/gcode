@@ -3,7 +3,7 @@ use crate::{
   editor::EditorPanel,
   explorer,
   project_setup::{ProjectReady, ProjectSetup},
-  settings::{PreferencesChanged, Settings},
+  settings::{init_settings, settings_view, AddAllProjectsRequested, SettingsGlobal, SettingsModel},
   terminal::{NewTerminalRequested, Terminal, TerminalExited},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   AddProject, NewTerminal, OpenSettings, SaveFile,
@@ -33,7 +33,7 @@ use vekro_git::Summary;
 use vekro_storage::{Preferences, ProjectList};
 
 /// Height of the top band: the traffic lights and the title.
-pub const TOOLBAR_HEIGHT: Pixels = px(44.);
+pub const TOOLBAR_HEIGHT: Pixels = px(40.);
 
 /// How long the pointer must rest on a file in the Explorer before it is prepared for opening, so that moving past
 /// files costs nothing.
@@ -58,21 +58,32 @@ const BOTTOM_DOCK_HEIGHT: Pixels = px(260.);
 /// Indentation of each tree level.
 const INDENT: Pixels = px(16.);
 
+/// What the window shows for a project that is not open at the moment.
+#[derive(Default)]
+struct ProjectView {
+  expanded: HashSet<PathBuf>,
+  selected_file: Option<PathBuf>,
+  selected_change: Option<PathBuf>,
+}
+
 /// One window: the rail and panel on the left and the open project on the right.
 pub struct Workspace {
   projects: ProjectList,
-  preferences: Preferences,
+  /// The settings every window shares.
+  settings: Entity<SettingsModel>,
   git: Option<Summary>,
   expanded: HashSet<PathBuf>,
   rows: Vec<explorer::Row>,
   selected_file: Option<PathBuf>,
   /// The changed file whose diff is open, relative to the repository.
   selected_change: Option<PathBuf>,
+  /// The Explorer and Git selections of the projects that are not open.
+  views: HashMap<PathBuf, ProjectView>,
   /// The file in the Explorer the pointer is on.
   hovered_file: Option<PathBuf>,
   focus_handle: FocusHandle,
   _setup_subscription: Option<Subscription>,
-  _settings_subscription: Option<Subscription>,
+  _settings_subscriptions: Vec<Subscription>,
   _appearance: Subscription,
   _activation: Subscription,
   _refresh_task: Task<()>,
@@ -85,8 +96,12 @@ pub struct Workspace {
 
 impl Workspace {
   pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-    let preferences = Preferences::load(&Preferences::default_path());
-    apply_theme(preferences.theme, window, cx);
+    // The first window loads the settings; later windows share them.
+    let settings = match cx.try_global::<SettingsGlobal>() {
+      Some(global) => global.0.clone(),
+      None => init_settings(cx),
+    };
+    apply_theme(settings.read(cx).preferences.theme, window, cx);
     let (dock, _skin) = DockSkin::dock_area("workspace-dock", Some(1), window, cx);
     let editor_panel = cx.new(|cx| EditorPanel::new(window, cx));
     dock.update(cx, |area, cx| {
@@ -94,21 +109,38 @@ impl Workspace {
     });
     let mut this = Self {
       projects: ProjectList::load(&ProjectList::default_path()),
-      preferences,
+      settings: settings.clone(),
       git: None,
       expanded: HashSet::new(),
       rows: Vec::new(),
       selected_file: None,
       selected_change: None,
       hovered_file: None,
+      views: HashMap::new(),
       focus_handle: cx.focus_handle(),
       _setup_subscription: None,
-      _settings_subscription: None,
+      _settings_subscriptions: vec![
+        // Any change to a setting is saved and applied in every window.
+        cx.observe_in(&settings, window, |_, settings, window, cx| {
+          let preferences = settings.read(cx).preferences.clone();
+          if let Err(error) = preferences.save(&Preferences::default_path()) {
+            eprintln!("Could not save the settings: {error}");
+          }
+          apply_theme(preferences.theme, window, cx);
+          cx.notify();
+        }),
+        // "Add all" is handled by the window the user is in.
+        cx.subscribe_in(&settings, window, |this, _, _: &AddAllProjectsRequested, window, cx| {
+          if window.is_window_active() {
+            this.add_projects_from_folder(window, cx);
+          }
+        }),
+      ],
       dock,
       editor_panel,
       terminals: HashMap::new(),
       _terminal_subscriptions: Vec::new(),
-      _appearance: cx.observe_window_appearance(window, |this, window, cx| apply_theme(this.preferences.theme, window, cx)),
+      _appearance: cx.observe_window_appearance(window, |this, window, cx| apply_theme(this.settings.read(cx).preferences.theme, window, cx)),
       // Changes made in another app (an editor, GitHub Desktop, a terminal) show up as soon as the window is back.
       _activation: cx.observe_window_activation(window, |this, window, cx| {
         if window.is_window_active() {
@@ -128,8 +160,10 @@ impl Workspace {
   }
 
   /// Where new projects go: the chosen folder, else next to the open project, else home.
-  fn new_project_dir(&self) -> PathBuf {
+  fn new_project_dir(&self, cx: &App) -> PathBuf {
     self
+      .settings
+      .read(cx)
       .preferences
       .projects_dir
       .clone()
@@ -199,44 +233,79 @@ impl Workspace {
 
   /// Opens the Settings dialog.
   pub fn open_settings(&mut self, _: &OpenSettings, window: &mut Window, cx: &mut Context<Self>) {
-    let settings = cx.new(|_| Settings::new(self.preferences.clone(), self.new_project_dir()));
-    self._settings_subscription = Some(cx.subscribe_in(&settings, window, |this, _, event: &PreferencesChanged, window, cx| {
-      this.preferences = event.0.clone();
-      if let Err(error) = this.preferences.save(&Preferences::default_path()) {
-        eprintln!("Could not save the settings: {error}");
+    let fallback = self.new_project_dir(cx);
+    window
+      .open_dialog(cx, move |dialog, _, _| dialog.title("Settings").width(px(720.)).child(div().h(px(500.)).child(settings_view(fallback.clone()))));
+  }
+
+  /// Adds the repositories directly inside the projects folder that are not listed yet, and says how many.
+  fn add_projects_from_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let folder = self.new_project_dir(cx);
+    let found = vekro_git::find_repositories(&folder);
+    let added = self.projects.add_all(found.iter().cloned());
+    let message = match (added, found.len()) {
+      (_, 0) => format!("No Git repositories in {}.", folder.display()),
+      (0, _) => "Every project in that folder is already listed.".to_string(),
+      (1, _) => "Added 1 project.".to_string(),
+      (count, _) => format!("Added {count} projects."),
+    };
+    if added > 0 {
+      if let Err(error) = self.projects.save(&ProjectList::default_path()) {
+        eprintln!("Could not save the project list: {error}");
       }
-      apply_theme(this.preferences.theme, window, cx);
-      cx.notify();
-    }));
-    window.open_dialog(cx, move |dialog, _, _| dialog.title("Settings").width(px(520.)).child(settings.clone()));
+      // With no project open before, the first one just opened.
+      if self.terminals.is_empty() {
+        self.show_terminals(window, cx);
+        self.refresh_project();
+      }
+    }
+    window.push_notification(Notification::info(message), cx);
+    cx.notify();
   }
 
   /// Opens the dialog that creates, clones or imports a project.
   pub fn add_project(&mut self, _: &AddProject, window: &mut Window, cx: &mut Context<Self>) {
-    let location = self.new_project_dir();
+    let location = self.new_project_dir(cx);
     let setup = cx.new(|cx| ProjectSetup::new(location, window, cx));
     self._setup_subscription = Some(cx.subscribe_in(&setup, window, |this, _, event: &ProjectReady, window, cx| {
       window.close_all_dialogs(cx);
-      this.projects.add(event.0.clone());
-      this.project_changed(window, cx);
+      let path = event.0.clone();
+      this.switch_project(window, cx, move |projects| projects.add(path));
     }));
     window.open_dialog(cx, move |dialog, _, _| dialog.title("Add project").width(px(480.)).child(setup.clone()));
   }
 
   fn select_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-    self.projects.active = Some(path);
-    self.project_changed(window, cx);
+    if self.projects.active.as_ref() != Some(&path) {
+      self.switch_project(window, cx, move |projects| projects.active = Some(path));
+    }
   }
 
-  fn project_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    // The shells of the project being left keep running; they just leave the screen.
+  /// Changes the open project. Everything the window shows belongs to one project: the folder tree, the Git
+  /// summary, the file or diff in the editor and the terminals. What the project being left shows is put away
+  /// and comes back when it is opened again; its shells keep running.
+  fn switch_project(&mut self, window: &mut Window, cx: &mut Context<Self>, change: impl FnOnce(&mut ProjectList)) {
+    let before = self.projects.active.clone();
+    // The terminals must leave while the old project is still the open one.
     self.hide_terminals(window, cx);
+    if let Some(root) = &before {
+      let view = ProjectView {
+        expanded: std::mem::take(&mut self.expanded),
+        selected_file: self.selected_file.take(),
+        selected_change: self.selected_change.take(),
+      };
+      self.views.insert(root.clone(), view);
+    }
+    change(&mut self.projects);
     if let Err(error) = self.projects.save(&ProjectList::default_path()) {
       eprintln!("Could not save the project list: {error}");
     }
-    self.expanded.clear();
-    self.selected_file = None;
-    self.selected_change = None;
+    let after = self.projects.active.clone();
+    let view = after.as_ref().and_then(|root| self.views.remove(root)).unwrap_or_default();
+    self.expanded = view.expanded;
+    self.selected_file = view.selected_file;
+    self.selected_change = view.selected_change;
+    self.editor_panel.update(cx, |editor, cx| editor.switch_project(before, after, cx));
     self.refresh_project();
     self.show_terminals(window, cx);
     cx.notify();
@@ -351,7 +420,6 @@ impl Workspace {
   }
 
   fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let theme = cx.theme().clone();
     let palette = colors(cx);
     let selected_style = selected_style(cx);
     let avatars = self.projects.projects.iter().map(|project| {
@@ -374,11 +442,12 @@ impl Workspace {
       .h_full()
       .flex_none()
       .items_center()
-      .py_3()
+      .pt_3()
+      .pb_1p5()
       .gap_2()
-      .bg(theme.sidebar)
+      .bg(palette.rail)
       .border_r_1()
-      .border_color(theme.sidebar_border)
+      .border_color(palette.rail_border)
       .child(v_flex().id("rail-projects").flex_1().min_h_0().items_center().gap_2().overflow_y_scroll().children(avatars).child(rail_button(
         "rail-add",
         IconName::Plus,
@@ -556,7 +625,7 @@ fn rail_button(
   palette: &crate::theme::Colors,
   on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-  let hover = palette.hover;
+  let hover = palette.rail_hover;
   div()
     .id(id)
     .size_10()
@@ -566,7 +635,7 @@ fn rail_button(
     .justify_center()
     .rounded_lg()
     .cursor_pointer()
-    .text_color(palette.text_secondary)
+    .text_color(palette.rail_text)
     .hover(move |button| button.bg(hover))
     .child(Icon::new(icon).size_5())
     .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
@@ -611,9 +680,9 @@ impl Render for Workspace {
         TitleBar::new()
           .h(TOOLBAR_HEIGHT)
           .pl(px(96.))
-          .bg(palette.surface)
+          .bg(palette.rail)
           .border_b_1()
-          .border_color(palette.border)
+          .border_color(palette.rail_border)
           .child(Label::new(title).font_weight(FontWeight::SEMIBOLD)),
       )
       .child(
