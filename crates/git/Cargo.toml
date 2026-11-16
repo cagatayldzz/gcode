@@ -1,0 +1,20 @@
+[package]
+name = "vekro-git"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Vekro Git access through libgit2"
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+git2.workspace = true
+
+[dev-dependencies]
+git2.workspace = true

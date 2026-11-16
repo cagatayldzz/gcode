@@ -1,0 +1,19 @@
+[package]
+name = "vekro-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Vekro application: startup, windows and key bindings"
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+vekro-ui.workspace = true
+vekro-storage.workspace = true
+gpui-kit.workspace = true

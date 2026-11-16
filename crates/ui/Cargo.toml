@@ -1,0 +1,21 @@
+[package]
+name = "vekro-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Vekro interface views built with GPUI Kit"
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+vekro-storage.workspace = true
+vekro-terminal.workspace = true
+vekro-git.workspace = true
+gpui-kit.workspace = true
+gpui-kit-assets.workspace = true

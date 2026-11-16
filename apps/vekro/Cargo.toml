@@ -1,0 +1,19 @@
+[package]
+name = "vekro"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Vekro: editor, terminal and Git in one window"
+default-run = "Vekro"
+
+[lints]
+workspace = true
+
+[dependencies]
+vekro-app.workspace = true
+
+[[bin]]
+name = "Vekro"
+path = "src/main.rs"

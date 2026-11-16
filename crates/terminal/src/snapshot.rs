@@ -1,0 +1,197 @@
+use crate::palette::{Palette, Rgb};
+use std::collections::HashMap;
+use unicode_width::UnicodeWidthChar as _;
+
+/// A run of cells that share one style.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Span {
+  pub text: String,
+  pub foreground: Rgb,
+  /// `None` is the default background.
+  pub background: Option<Rgb>,
+  pub bold: bool,
+  pub italic: bool,
+  pub underline: bool,
+  pub strikeout: bool,
+}
+
+/// How the cursor is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CursorShape {
+  /// Drawn by swapping the colors of its cell, so the snapshot already shows it.
+  #[default]
+  Block,
+  Underline,
+  Beam,
+}
+
+/// Where the cursor is, in viewport cells.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cursor {
+  pub line: usize,
+  pub column: usize,
+  pub shape: CursorShape,
+}
+
+/// The visible screen, one `Vec<Span>` per line.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Snapshot {
+  pub lines: Vec<Vec<Span>>,
+  pub cursor: Option<Cursor>,
+  pub columns: usize,
+  /// Lines scrolled back from the bottom; `0` follows the live output.
+  pub scrolled: usize,
+  /// Number of lines available above the live screen.
+  pub history_size: usize,
+  /// Explicit OSC 8 hyperlink targets by `(line, column)` viewport cell; most screens have none.
+  pub hyperlinks: HashMap<(usize, usize), String>,
+  /// Whether each line continues on the next one because the text wrapped, not because of a newline.
+  pub wrapped: Vec<bool>,
+}
+
+impl Snapshot {
+  /// Returns the explicit or plain link under a viewport cell.
+  pub fn link_at(&self, line: usize, column: usize) -> Option<String> {
+    self.link_range_at(line, column).map(|(target, _, _)| target)
+  }
+
+  /// Returns the link under a viewport cell with the cell range `start..end` it covers.
+  pub fn link_range_at(&self, line: usize, column: usize) -> Option<(String, usize, usize)> {
+    if let Some(link) = self.hyperlinks.get(&(line, column)) {
+      let mut start = column;
+      while start > 0 && self.hyperlinks.get(&(line, start - 1)) == Some(link) {
+        start -= 1;
+      }
+      let mut end = column + 1;
+      while self.hyperlinks.get(&(line, end)) == Some(link) {
+        end += 1;
+      }
+      return Some((link.clone(), start, end));
+    }
+    self.lines.get(line)?;
+    let mut first = line;
+    while first > 0 && self.wrapped.get(first - 1) == Some(&true) {
+      first -= 1;
+    }
+    let mut last = line;
+    while self.wrapped.get(last) == Some(&true) && last + 1 < self.lines.len() {
+      last += 1;
+    }
+    let mut text = String::new();
+    let mut line_start = 0;
+    let mut line_end = 0;
+    let mut width = 0;
+    for index in first..=last {
+      if index == line {
+        line_start = width;
+      }
+      let row = if self.wrapped.get(index) == Some(&true) {
+        self.lines[index].iter().map(|span| span.text.as_str()).collect()
+      } else {
+        self.line_text(index)
+      };
+      width += row.chars().map(|c| c.width().unwrap_or(0)).sum::<usize>();
+      text.push_str(&row);
+      if index == line {
+        line_end = width;
+      }
+    }
+    let column = line_start + column;
+    if column >= line_end {
+      return None;
+    }
+    let mut cell = 0;
+    for word in text.split_whitespace() {
+      let start_byte = text[cell..].find(word)? + cell;
+      let start_column: usize = text[..start_byte].chars().map(|c| c.width().unwrap_or(0)).sum();
+      cell = start_byte + word.len();
+      let prefix = word.find("https://").or_else(|| word.find("http://")).or_else(|| {
+        let trimmed = word.trim_start_matches(['(', '[', '{', '<', '"', '\'']);
+        if trimmed.starts_with('/') || trimmed.starts_with("./") || trimmed.starts_with("../") || trimmed.starts_with("~/") {
+          Some(word.len() - trimmed.len())
+        } else {
+          None
+        }
+      });
+      if let Some(prefix) = prefix {
+        let target = word[prefix..].trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}', '>', '"', '\'']);
+        let link_start = start_column + word[..prefix].chars().map(|c| c.width().unwrap_or(0)).sum::<usize>();
+        let link_end = link_start + target.chars().map(|c| c.width().unwrap_or(0)).sum::<usize>();
+        if column >= link_start && column < link_end {
+          return Some((target.to_owned(), link_start.max(line_start) - line_start, link_end.min(line_end) - line_start));
+        }
+      }
+    }
+    None
+  }
+
+  /// The text of one line without styling, with trailing blanks removed.
+  pub fn line_text(&self, line: usize) -> String {
+    let text: String = self.lines.get(line).map(|spans| spans.iter().map(|span| span.text.as_str()).collect()).unwrap_or_default();
+    text.trim_end().to_owned()
+  }
+
+  /// The whole screen as text.
+  pub fn text(&self) -> String {
+    (0..self.lines.len()).map(|line| self.line_text(line)).collect::<Vec<_>>().join("\n")
+  }
+}
+
+/// A cell reduced to what rendering needs.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Glyph {
+  pub character: char,
+  pub foreground: Rgb,
+  pub background: Option<Rgb>,
+  pub bold: bool,
+  pub italic: bool,
+  pub underline: bool,
+  pub strikeout: bool,
+}
+
+impl Glyph {
+  pub fn blank() -> Self {
+    Self { character: ' ', foreground: Rgb::default(), background: None, bold: false, italic: false, underline: false, strikeout: false }
+  }
+
+  /// Swaps foreground and background, as for inverse video and the cursor.
+  pub fn invert(&mut self, palette: &Palette) {
+    let background = self.background.unwrap_or(palette.background);
+    self.background = Some(self.foreground);
+    self.foreground = background;
+  }
+
+  fn same_style(&self, other: &Glyph) -> bool {
+    self.foreground == other.foreground
+      && self.background == other.background
+      && self.bold == other.bold
+      && self.italic == other.italic
+      && self.underline == other.underline
+      && self.strikeout == other.strikeout
+  }
+}
+
+/// Groups a row of glyphs into spans of equal style.
+pub(crate) fn spans<'a>(row: impl IntoIterator<Item = &'a Glyph>) -> Vec<Span> {
+  let mut spans: Vec<Span> = Vec::new();
+  let mut previous: Option<&Glyph> = None;
+  for glyph in row {
+    if glyph.character == '\u{200b}' {
+      continue;
+    }
+    match (spans.last_mut(), previous) {
+      (Some(span), Some(last)) if last.same_style(glyph) => span.text.push(glyph.character),
+      _ => spans.push(Span {
+        text: glyph.character.to_string(),
+        foreground: glyph.foreground,
+        background: glyph.background,
+        bold: glyph.bold,
+        italic: glyph.italic,
+        underline: glyph.underline,
+        strikeout: glyph.strikeout,
+      }),
+    }
+    previous = Some(glyph);
+  }
+  spans
+}

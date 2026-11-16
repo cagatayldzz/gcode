@@ -1,0 +1,57 @@
+[workspace]
+resolver = "2"
+members = ["apps/*", "crates/*"]
+default-members = ["apps/vekro"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.92"
+publish = false
+license = "UNLICENSED"
+repository = "https://github.com/cagatayldzz/vekro"
+
+[workspace.dependencies]
+vekro-terminal = { path = "crates/terminal" }
+vekro-storage = { path = "crates/storage" }
+vekro-app = { path = "crates/app" }
+vekro-ui = { path = "crates/ui" }
+alacritty_terminal = "0.26.0"
+gpui-kit = { version = "0.10.0", features = ["gpui-fast"] }
+gpui-kit-assets = "0.10.0"
+futures = "0.3"
+serde_json = "1"
+git2 = { version = "0.20", default-features = false }
+vekro-git = { path = "crates/git" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "deny"
+unimplemented = "deny"
+
+[profile.release]
+strip = "debuginfo"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.dev.package.gpui-pre]
+opt-level = 3
+
+[profile.dev.package.gpui-pre-platform]
+opt-level = 3
+
+[profile.dev.package.gpui-fast]
+opt-level = 3
+
+[profile.dev.package.gpui-fast-platform]
+opt-level = 3
+
+[profile.dev.package.gpui-component]
+opt-level = 3
+
+[profile.dev.package.gpui-kit]
+opt-level = 3

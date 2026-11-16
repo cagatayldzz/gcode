@@ -1,0 +1,13 @@
+{
+  "name": "vekro",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "bash scripts/app.sh --dev",
+    "build": "bash scripts/app.sh release --build",
+    "check": "bash scripts/app.sh --check",
+    "icon": "bash scripts/app.sh --icon",
+    "test": "cargo test --locked --workspace",
+    "commit": "git add -A && oco --yes"
+  }
+}
