@@ -21,7 +21,7 @@ use gpui_kit::{
     menu::{ContextMenuExt as _, PopupMenuItem},
     notification::Notification,
     resizable::{h_resizable, resizable_panel},
-    scroll::ScrollableElement as _,
+    scroll::{ScrollableElement as _, Scrollbar, ScrollbarAxis},
     status_bar::StatusBar,
     tab::{Tab, TabBar},
     tooltip::Tooltip,
@@ -31,6 +31,7 @@ use gpui_kit::{
 };
 use std::{
   collections::{HashMap, HashSet},
+  ops::Range,
   path::{Path, PathBuf},
   time::Duration,
 };
@@ -48,7 +49,7 @@ const HOVER_PREPARE_DELAY: Duration = Duration::from_millis(120);
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Width of the icon rail on the far left.
-const RAIL_WIDTH: Pixels = px(72.);
+const RAIL_WIDTH: Pixels = px(60.);
 
 /// Width of the sidebar when the window opens.
 const SIDEBAR_WIDTH: Pixels = px(280.);
@@ -119,6 +120,8 @@ pub struct Workspace {
   _dialog_subscription: Option<Subscription>,
   /// Whether the Explorer shows its tree or only its header.
   explorer_open: bool,
+  /// The scroll position of the folder tree.
+  explorer_scroll: UniformListScrollHandle,
   _settings_subscriptions: Vec<Subscription>,
   _appearance: Subscription,
   _activation: Subscription,
@@ -162,6 +165,7 @@ impl Workspace {
       _setup_subscription: None,
       _dialog_subscription: None,
       explorer_open: true,
+      explorer_scroll: UniformListScrollHandle::default(),
       _settings_subscriptions: vec![
         // Any change to a setting is saved and applied in every window.
         cx.observe_in(&settings, window, |_, settings, window, cx| {
@@ -696,12 +700,16 @@ impl Workspace {
   }
 
   /// One project's avatar. It can be dragged onto another project or a category, and a right click opens its menu.
-  fn rail_project(&self, project: &Project, cx: &mut Context<Self>) -> impl IntoElement {
+  fn rail_project(&self, project: &Project, grouped: bool, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let path = project.path.clone();
     let name = SharedString::from(project.name());
     let look = avatar_look(project, self.projects.active.as_ref() == Some(&project.path), cx);
-    let (fill, text, hover) = (look.fill, look.text, look.hover);
+    let selected = self.projects.active.as_ref() == Some(&project.path);
+    // Inside a category the block is already the hover color, so an uncolored avatar needs a lighter one.
+    let (fill, text) = (look.fill, look.text);
+    let hover = if grouped && !selected && project.color.is_none() { palette.rail_item_hover } else { look.hover };
+    let drag_over = if grouped { palette.rail_item_hover } else { palette.rail_hover };
     let workspace = cx.entity();
     let categories: Vec<(String, SharedString)> = self
       .projects
@@ -714,20 +722,20 @@ impl Workspace {
     let (drag_label, drag_fill, drag_text) = (look.letter.clone(), fill.unwrap_or(palette.rail_hover), text);
     div()
       .id(SharedString::from(format!("rail-{}", path.display())))
-      .size_12()
+      .size_9()
       .flex()
       .flex_none()
       .items_center()
       .justify_center()
       .rounded_lg()
       .cursor_pointer()
-      .text_lg()
+      .text_base()
       .font_weight(FontWeight::MEDIUM)
       .text_color(text)
       .when_some(fill, |avatar, fill| avatar.bg(fill))
       .hover(move |avatar| avatar.bg(hover))
-      .drag_over::<DraggedProject>(move |style, _, _, _| style.bg(palette.rail_hover))
-      .when_some(look.icon.clone(), |avatar, icon| avatar.child(Icon::empty().path(icon).size_6()))
+      .drag_over::<DraggedProject>(move |style, _, _, _| style.bg(drag_over))
+      .when_some(look.icon.clone(), |avatar, icon| avatar.child(Icon::empty().path(icon).size_5()))
       .when(look.icon.is_none(), |avatar| avatar.child(look.letter.clone()))
       .tooltip(move |window, cx| Tooltip::new(name.clone()).build(window, cx))
       .on_drag(DraggedProject(path.clone()), move |_, _, _, cx| {
@@ -787,7 +795,7 @@ impl Workspace {
     let workspace = cx.entity();
     let tile = div()
       .id(SharedString::from(format!("rail-category-{}", category.id)))
-      .size_12()
+      .size_9()
       .flex()
       .flex_none()
       .items_center()
@@ -797,8 +805,8 @@ impl Workspace {
       .text_color(palette.rail_text)
       .when(folded, |tile| tile.bg(palette.rail_hover))
       .when(folded && has_active, |tile| tile.border_1().border_color(palette.accent))
-      .hover(move |tile| tile.bg(palette.rail_hover))
-      .drag_over::<DraggedProject>(move |style, _, _, _| style.bg(palette.rail_hover))
+      .hover(move |tile| tile.bg(palette.rail_item_hover))
+      .drag_over::<DraggedProject>(move |style, _, _, _| style.bg(palette.rail_item_hover))
       .tooltip({
         let label = label.clone();
         move |window, cx| Tooltip::new(label.clone()).build(window, cx)
@@ -813,19 +821,31 @@ impl Workspace {
       }))
       .when(shows_initials, |tile| {
         // Discord's folded folder: the first four projects as small initials.
-        tile.child(div().size_full().flex().flex_wrap().items_center().justify_center().children(members.iter().take(4).map(|project| {
-          let active = self.projects.active.as_ref() == Some(&project.path);
-          div()
-            .size_5()
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_xs()
-            .when(active, |cell| cell.text_color(palette.accent))
-            .child(initial(&project.name()))
-        })))
+        let cells: Vec<AnyElement> = members
+          .iter()
+          .take(4)
+          .map(|project| {
+            let active = self.projects.active.as_ref() == Some(&project.path);
+            div()
+              .size_4()
+              .flex()
+              .flex_none()
+              .items_center()
+              .justify_center()
+              .text_xs()
+              .when(active, |cell| cell.text_color(palette.accent))
+              .child(initial(&project.name()))
+              .into_any_element()
+          })
+          .collect();
+        let mut rows = Vec::new();
+        let mut cells = cells.into_iter();
+        while let Some(first) = cells.next() {
+          rows.push(h_flex().child(first).children(cells.next()));
+        }
+        tile.child(v_flex().items_center().justify_center().children(rows))
       })
-      .when(!shows_initials, |tile| tile.child(Icon::empty().path(if folded { "icons/folder.svg" } else { "icons/folder-open.svg" }).size_6()))
+      .when(!shows_initials, |tile| tile.child(Icon::empty().path(if folded { "icons/folder.svg" } else { "icons/folder-open.svg" }).size_5()))
       .context_menu({
         let id = category.id.clone();
         move |menu, _, _| {
@@ -847,12 +867,12 @@ impl Workspace {
       .gap_1()
       .when(!folded, |group| group.bg(palette.rail_hover).rounded_xl().p_1())
       .child(tile)
-      .when(!folded, |group| group.children(members.into_iter().map(|project| self.rail_project(project, cx))))
+      .when(!folded, |group| group.children(members.into_iter().map(|project| self.rail_project(project, true, cx))))
   }
 
   fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
-    let loose: Vec<AnyElement> = self.projects.projects_in(None).map(|project| self.rail_project(project, cx).into_any_element()).collect();
+    let loose: Vec<AnyElement> = self.projects.projects_in(None).map(|project| self.rail_project(project, false, cx).into_any_element()).collect();
     let groups: Vec<AnyElement> =
       self.projects.categories.iter().enumerate().map(|(index, category)| self.rail_category(index, category, cx).into_any_element()).collect();
     v_flex()
@@ -865,7 +885,7 @@ impl Workspace {
       .gap_2()
       .bg(palette.rail)
       .border_r_1()
-      .border_color(palette.rail_border)
+      .border_color(palette.border)
       .child(
         v_flex()
           .id("rail-projects")
@@ -949,61 +969,81 @@ impl Workspace {
     )
   }
 
-  fn render_explorer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  /// One line of the folder tree.
+  fn explorer_row(&self, row: &explorer::Row, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
-    let rows = self.rows.iter().map(|row| {
-      let path = row.path.clone();
-      let selected = self.selected_entry.as_ref() == Some(&row.path);
-      let open = self.expanded.contains(&row.path);
-      let icon = if row.is_dir { IconName::FolderClosed } else { IconName::File };
-      h_flex()
-        .id(SharedString::from(format!("entry-{}", row.path.display())))
-        .gap_1p5()
-        .pr_2()
-        .py_1()
-        .pl(INDENT * row.depth as f32 + px(8.))
-        .rounded_md()
-        .items_center()
-        .cursor_pointer()
-        .when(selected, |entry| entry.bg(palette.selected))
-        .hover(|entry| entry.bg(palette.hover))
-        .child(div().size_4().flex_none().when(row.is_dir, |chevron| {
-          chevron.child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size_4().text_color(theme.muted_foreground))
-        }))
-        .child(Icon::new(icon).size_4().text_color(theme.muted_foreground))
-        .child(Label::new(row.name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
-        .when(!row.is_dir, |entry| {
-          let hovered_path = path.clone();
-          entry.on_hover(cx.listener(move |this, hovered: &bool, window, cx| {
-            if !*hovered {
-              if this.hovered_file.as_ref() == Some(&hovered_path) {
-                this.hovered_file = None;
-              }
-              return;
+    let path = row.path.clone();
+    let selected = self.selected_entry.as_ref() == Some(&row.path);
+    let open = self.expanded.contains(&row.path);
+    let icon = if row.is_dir { IconName::FolderClosed } else { IconName::File };
+    h_flex()
+      .id(SharedString::from(format!("entry-{}", row.path.display())))
+      .gap_1p5()
+      .pr_2()
+      .py_1()
+      .pl(INDENT * row.depth as f32 + px(8.))
+      .rounded_md()
+      .items_center()
+      .cursor_pointer()
+      .when(selected, |entry| entry.bg(palette.selected))
+      .hover(|entry| entry.bg(palette.hover))
+      .child(div().size_4().flex_none().when(row.is_dir, |chevron| {
+        chevron.child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size_4().text_color(theme.muted_foreground))
+      }))
+      .child(Icon::new(icon).size_4().text_color(theme.muted_foreground))
+      .child(Label::new(row.name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+      .when(!row.is_dir, |entry| {
+        let hovered_path = path.clone();
+        entry.on_hover(cx.listener(move |this, hovered: &bool, window, cx| {
+          if !*hovered {
+            if this.hovered_file.as_ref() == Some(&hovered_path) {
+              this.hovered_file = None;
             }
-            this.hovered_file = Some(hovered_path.clone());
-            let wanted = hovered_path.clone();
-            cx.spawn_in(window, async move |this, cx| {
-              cx.background_executor().timer(HOVER_PREPARE_DELAY).await;
-              let _ = this.update_in(cx, |this, window, cx| {
-                if this.hovered_file.as_ref() == Some(&wanted) {
-                  this.editor_panel.update(cx, |editor, cx| editor.prefetch(&wanted, window, cx));
-                }
-              });
-            })
-            .detach();
-          }))
-        })
-        .on_click(cx.listener(move |this, _, window, cx| {
-          if this.rows.iter().any(|row| row.path == path && row.is_dir) {
-            this.selected_entry = Some(path.clone());
-            this.toggle_folder(path.clone(), cx);
-          } else {
-            this.open_file(path.clone(), window, cx);
+            return;
           }
+          this.hovered_file = Some(hovered_path.clone());
+          let wanted = hovered_path.clone();
+          cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(HOVER_PREPARE_DELAY).await;
+            let _ = this.update_in(cx, |this, window, cx| {
+              if this.hovered_file.as_ref() == Some(&wanted) {
+                this.editor_panel.update(cx, |editor, cx| editor.prefetch(&wanted, window, cx));
+              }
+            });
+          })
+          .detach();
         }))
-    });
+      })
+      .on_click(cx.listener(move |this, _, window, cx| {
+        if this.rows.iter().any(|row| row.path == path && row.is_dir) {
+          this.selected_entry = Some(path.clone());
+          this.toggle_folder(path.clone(), cx);
+        } else {
+          this.open_file(path.clone(), window, cx);
+        }
+      }))
+  }
+
+  fn render_explorer(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let theme = cx.theme().clone();
+    // Only the lines in view are built, laid out and drawn: a project can have thousands of entries.
+    let list = uniform_list(
+      "explorer-rows",
+      self.rows.len(),
+      cx.processor(|this, range: Range<usize>, _, cx| {
+        let rows: Vec<explorer::Row> = this.rows.get(range).map(<[explorer::Row]>::to_vec).unwrap_or_default();
+        rows.iter().map(|row| this.explorer_row(row, cx).into_any_element()).collect::<Vec<_>>()
+      }),
+    )
+    .track_scroll(&self.explorer_scroll)
+    .size_full();
+    let rows = div().relative().flex_1().min_h_0().child(list).child(
+      div()
+        .absolute()
+        .inset_0()
+        .child(Scrollbar::new(&self.explorer_scroll).id("explorer-scrollbar").axis(ScrollbarAxis::Vertical).viewport_from_layout()),
+    );
     let name = self
       .projects
       .projects
@@ -1046,12 +1086,7 @@ impl Workspace {
         action("explorer-collapse", "icons/list-chevrons-down-up.svg", "Collapse folders")
           .on_click(cx.listener(|this, _, _, cx| this.collapse_folders(cx))),
       );
-    v_flex()
-      .flex_1()
-      .min_h_0()
-      .gap_1()
-      .child(header)
-      .when(open, |section| section.child(v_flex().id("explorer-rows").flex_1().min_h_0().overflow_y_scrollbar().children(rows)))
+    v_flex().flex_1().min_h_0().gap_1().child(header).when(open, |section| section.child(rows))
   }
 
   /// The repository summary and the folder tree.
@@ -1101,12 +1136,12 @@ struct DragPreview {
 impl Render for DragPreview {
   fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
     div()
-      .size_12()
+      .size_9()
       .flex()
       .items_center()
       .justify_center()
       .rounded_lg()
-      .text_lg()
+      .text_base()
       .font_weight(FontWeight::MEDIUM)
       .bg(self.fill)
       .text_color(self.text)
@@ -1132,7 +1167,7 @@ fn rail_button(
   let hover = palette.rail_hover;
   div()
     .id(id)
-    .size_12()
+    .size_9()
     .flex()
     .flex_none()
     .items_center()
@@ -1173,7 +1208,7 @@ impl Render for Workspace {
       .bg(theme.background)
       .text_color(theme.foreground)
       .text_size(FONT_SIZE)
-      .child(TitleBar::new().h(TOOLBAR_HEIGHT).pl(px(96.)).bg(palette.rail).border_b_1().border_color(palette.rail_border))
+      .child(TitleBar::new().h(TOOLBAR_HEIGHT).pl(px(96.)).bg(palette.rail).border_b_1().border_color(palette.border))
       .child(
         h_flex().flex_1().min_h_0().child(self.render_rail(cx)).child(
           h_resizable("sidebar-split")

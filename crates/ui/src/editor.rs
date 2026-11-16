@@ -363,7 +363,7 @@ impl Render for EditorPanel {
         Some(file) => Editor::new(&file.state).appearance(false).bordered(false).size_full().into_any_element(),
         None => div().into_any_element(),
       },
-      Content::Diff { state, .. } => Diff::new(state).size_full().into_any_element(),
+      Content::Diff { state, .. } => Diff::new(state).soft_wrap(true).border_0().size_full().into_any_element(),
     };
     let hidden = self.preview.clone().or_else(|| self.warmup.clone());
     div().relative().size_full().child(content).when_some(hidden, |this, state| {
