@@ -16,7 +16,7 @@ A Vekro window has four parts:
 
 The editor and each terminal have a zoom button in their title bar (also **Zoom In** in the `…` menu) that
 makes the panel fill the whole dock area; press it again to go back. Drag the edge of the sidebar to resize it. 
-A thin **status bar** shows the branch and the number of changed files on the left, the project
+A thin **status bar** under the editor and the terminals (the rail and the sidebar run down to the bottom of the window) shows the branch and the number of changed files on the left, the project
 folder in the middle and the open file's cursor position, indentation, encoding, line ending and language on the right (`Ln 12, Col 5`, `Spaces: 2`, `UTF-8`, `LF`, `Rust`).
 
 ## Projects

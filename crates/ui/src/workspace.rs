@@ -1397,9 +1397,12 @@ impl Render for Workspace {
         h_flex().flex_1().min_h_0().child(self.render_rail(cx)).child(
           h_resizable("sidebar-split")
             .child(resizable_panel().size(SIDEBAR_WIDTH).size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH).child(self.render_sidebar(cx)))
-            .child(resizable_panel().child(self.dock.clone())),
+            // The status bar belongs to the editor and the terminals: the rail and the sidebar run down to the bottom of the window.
+            .child(
+              resizable_panel()
+                .child(v_flex().size_full().child(div().flex_1().min_h_0().child(self.dock.clone())).child(self.render_status_bar(cx))),
+            ),
         ),
       )
-      .child(self.render_status_bar(cx))
   }
 }

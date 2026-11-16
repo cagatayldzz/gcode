@@ -36,9 +36,9 @@ apps/vekro ─► app ─► ui ─► terminal
 
 ## Window layout
 
-The `Workspace` renders the title band, then a row of the **project rail** (fixed, 72 px; projects can be dragged onto each other to group them into categories), the **sidebar** (an
+The `Workspace` renders the title band, then a row of the **project rail** (fixed, 60 px; projects can be dragged onto each other to group them into categories), the **sidebar** (an
 icon `TabBar` that switches between Explorer and Git, and the selected view, in a Kit `h_resizable` pane,
-200–480 px) and the Kit **`DockArea`**, and the status bar below. The sidebar is plain
+200–480 px) and, right of it, a column with the Kit **`DockArea`** and the status bar below it, so the rail and the sidebar run down to the bottom of the window. The sidebar is plain
 workspace content, not a dock panel, so it has no tab bar. The dock holds:
 
 - center: `EditorPanel`;
