@@ -1,15 +1,51 @@
 //! Git access for Vekro. Never depends on the interface.
 
-use git2::{Repository, StatusOptions};
-use std::path::Path;
+use git2::{DiffFormat, DiffOptions, Repository, Status, StatusOptions};
+use std::path::{Path, PathBuf};
+
+/// How a file differs from the last commit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChangeKind {
+  New,
+  Modified,
+  Deleted,
+  Renamed,
+  Conflicted,
+}
+
+impl ChangeKind {
+  /// The one-letter mark shown beside the file.
+  pub fn mark(self) -> &'static str {
+    match self {
+      Self::New => "A",
+      Self::Modified => "M",
+      Self::Deleted => "D",
+      Self::Renamed => "R",
+      Self::Conflicted => "!",
+    }
+  }
+}
+
+/// A changed file, with its path relative to the repository.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Change {
+  pub path: PathBuf,
+  pub kind: ChangeKind,
+}
 
 /// What the sidebar shows about a project's repository.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Summary {
   /// The checked-out branch, or a short commit id when HEAD is detached.
   pub branch: String,
-  /// Files with changes in the working tree or the index, including untracked ones.
-  pub changed: usize,
+  /// Files with changes in the working tree or the index, including untracked ones, sorted by path.
+  pub changes: Vec<Change>,
+}
+
+impl Summary {
+  pub fn changed(&self) -> usize {
+    self.changes.len()
+  }
 }
 
 /// Reads the repository containing `path`; `None` when it is not inside one.
@@ -25,9 +61,33 @@ pub fn summary(path: &Path) -> Option<Summary> {
   };
   let mut options = StatusOptions::new();
   options.include_untracked(true).recurse_untracked_dirs(true);
-  let changed =
-    repository.statuses(Some(&mut options)).map(|statuses| statuses.iter().filter(|entry| !entry.status().is_empty()).count()).unwrap_or(0);
-  Some(Summary { branch, changed })
+  let mut changes: Vec<Change> = repository
+    .statuses(Some(&mut options))
+    .map(|statuses| {
+      statuses
+        .iter()
+        .filter_map(|entry| {
+          let status = entry.status();
+          let kind = if status.contains(Status::CONFLICTED) {
+            ChangeKind::Conflicted
+          } else if status.intersects(Status::INDEX_NEW | Status::WT_NEW) {
+            ChangeKind::New
+          } else if status.intersects(Status::INDEX_DELETED | Status::WT_DELETED) {
+            ChangeKind::Deleted
+          } else if status.intersects(Status::INDEX_RENAMED | Status::WT_RENAMED) {
+            ChangeKind::Renamed
+          } else if status.is_empty() || status == Status::IGNORED {
+            return None;
+          } else {
+            ChangeKind::Modified
+          };
+          Some(Change { path: PathBuf::from(entry.path()?), kind })
+        })
+        .collect()
+    })
+    .unwrap_or_default();
+  changes.sort_by(|a, b| a.path.cmp(&b.path));
+  Some(Summary { branch, changes })
 }
 
 /// The folder name `git clone` would pick for `url`: `https://github.com/a/vekro.git` gives `vekro`.
@@ -76,4 +136,25 @@ pub fn clone(url: &str, parent: &Path) -> Result<std::path::PathBuf, String> {
     let message = String::from_utf8_lossy(&output.stderr);
     Err(message.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("git clone failed.").trim().to_string())
   }
+}
+
+/// The unified diff of one file against the last commit (staged and unstaged changes together, untracked
+/// files as new). `file` is relative to the repository.
+pub fn file_diff(path: &Path, file: &Path) -> Result<String, String> {
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  let head = repository.head().ok().and_then(|head| head.peel_to_tree().ok());
+  let mut options = DiffOptions::new();
+  options.pathspec(file).include_untracked(true).show_untracked_content(true).recurse_untracked_dirs(true);
+  let diff = repository.diff_tree_to_workdir_with_index(head.as_ref(), Some(&mut options)).map_err(|error| error.message().to_string())?;
+  let mut patch = String::new();
+  diff
+    .print(DiffFormat::Patch, |_, _, line| {
+      if matches!(line.origin(), '+' | '-' | ' ') {
+        patch.push(line.origin());
+      }
+      patch.push_str(&String::from_utf8_lossy(line.content()));
+      true
+    })
+    .map_err(|error| error.message().to_string())?;
+  Ok(patch)
 }

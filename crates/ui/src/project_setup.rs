@@ -134,6 +134,7 @@ impl Render for ProjectSetup {
     };
     let importing = self.mode == Mode::Import;
     v_flex()
+      .text_size(crate::theme::FONT_SIZE)
       .gap_3()
       .child(
         h_flex().gap_1().child(self.tab("mode-new", "New", Mode::New, cx)).child(self.tab("mode-clone", "Clone", Mode::Clone, cx)).child(self.tab(
@@ -143,18 +144,18 @@ impl Render for ProjectSetup {
           cx,
         )),
       )
-      .child(Label::new(hint).text_sm().text_color(theme.muted_foreground))
+      .child(Label::new(hint).text_color(theme.muted_foreground))
       .when(!importing, |form| {
         form.child(Input::new(&self.input)).child(
           h_flex()
             .gap_2()
             .items_center()
-            .child(Label::new("In").text_sm().text_color(theme.muted_foreground))
-            .child(Label::new(self.location.display().to_string()).text_sm().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+            .child(Label::new("In").text_color(theme.muted_foreground))
+            .child(Label::new(self.location.display().to_string()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
             .child(Button::new("choose-location").label("Change…").small().on_click(cx.listener(|this, _, _, cx| this.choose_folder(cx)))),
         )
       })
-      .when_some(self.error.clone(), |form, error| form.child(Label::new(error).text_sm().text_color(theme.danger)))
+      .when_some(self.error.clone(), |form, error| form.child(Label::new(error).text_color(theme.danger)))
       .child(h_flex().justify_end().child(
         Button::new("submit").label(if self.busy { "Working…" } else { action }).primary().disabled(self.busy).on_click(cx.listener(
           |this, _, _, cx| {

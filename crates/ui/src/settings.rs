@@ -69,7 +69,7 @@ impl Settings {
 
 /// A titled group of settings.
 fn section(title: &'static str, cx: &App) -> Div {
-  v_flex().gap_2().child(Label::new(title).text_sm().font_weight(FontWeight::SEMIBOLD)).text_color(cx.theme().foreground)
+  v_flex().gap_2().child(Label::new(title).font_weight(FontWeight::SEMIBOLD)).text_color(cx.theme().foreground)
 }
 
 impl Render for Settings {
@@ -78,6 +78,7 @@ impl Render for Settings {
     let projects_dir = self.preferences.projects_dir.clone();
     let shown_dir = projects_dir.clone().unwrap_or_else(|| self.fallback_dir.clone());
     v_flex()
+      .text_size(crate::theme::FONT_SIZE)
       .gap_5()
       .child(
         section("Appearance", cx)
@@ -88,14 +89,14 @@ impl Render for Settings {
               .child(self.theme_button("theme-light", "Light", ThemeChoice::Light, cx))
               .child(self.theme_button("theme-dark", "Dark", ThemeChoice::Dark, cx)),
           )
-          .child(Label::new("System follows the macOS appearance.").text_sm().text_color(muted)),
+          .child(Label::new("System follows the macOS appearance.").text_color(muted)),
       )
       .child(
-        section("New projects", cx).child(Label::new("New and cloned projects are created in this folder.").text_sm().text_color(muted)).child(
+        section("New projects", cx).child(Label::new("New and cloned projects are created in this folder.").text_color(muted)).child(
           h_flex()
             .gap_2()
             .items_center()
-            .child(Label::new(shown_dir.display().to_string()).text_sm().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+            .child(Label::new(shown_dir.display().to_string()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
             .child(
               Button::new("choose-projects-dir")
                 .label("Change…")
@@ -112,8 +113,8 @@ impl Render for Settings {
       )
       .child(
         section("About", cx)
-          .child(Label::new(format!("Vekro {}", env!("CARGO_PKG_VERSION"))).text_sm())
-          .child(Label::new(format!("Data: {}", data_dir().display())).text_sm().text_color(muted)),
+          .child(Label::new(format!("Vekro {}", env!("CARGO_PKG_VERSION"))))
+          .child(Label::new(format!("Data: {}", data_dir().display())).text_color(muted)),
       )
   }
 }

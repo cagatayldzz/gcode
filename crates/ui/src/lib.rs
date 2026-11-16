@@ -2,10 +2,13 @@
 
 mod assets;
 mod components;
+mod editor;
 mod explorer;
 mod panels;
 mod project_setup;
+mod selection;
 mod settings;
+mod terminal;
 mod theme;
 mod workspace;
 
@@ -14,9 +17,9 @@ use gpui_kit::*;
 pub use assets::Assets;
 pub use workspace::{Workspace, TOOLBAR_HEIGHT};
 
-actions!(vekro, [Quit, NewWindow, AddProject, OpenSettings]);
+actions!(vekro, [Quit, NewWindow, AddProject, OpenSettings, NewTerminal, SaveFile]);
 
-/// Loads the interface fonts.
+/// Loads the bundled fonts.
 pub fn init(cx: &mut App) {
   if let Err(error) = cx.text_system().add_fonts(vec![
     std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist.ttf")),

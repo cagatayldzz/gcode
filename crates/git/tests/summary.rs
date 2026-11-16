@@ -22,7 +22,7 @@ fn a_new_repository_names_its_branch_and_counts_untracked_files() {
   fs::write(dir.join("a.txt"), "a").unwrap();
   fs::write(dir.join("b.txt"), "b").unwrap();
   let found = summary(&dir).unwrap();
-  assert_eq!((found.branch.as_str(), found.changed), ("main", 2));
+  assert_eq!((found.branch.as_str(), found.changed()), ("main", 2));
   fs::remove_dir_all(dir).unwrap();
 }
 
@@ -55,4 +55,34 @@ fn cloning_copies_a_repository_and_reports_a_missing_one() {
   assert_eq!(cloned, destination.join("source"));
   assert!(vekro_git::clone(parent.join("missing").to_str().unwrap(), &destination).is_err());
   fs::remove_dir_all(parent).unwrap();
+}
+
+#[test]
+fn changes_list_new_modified_and_deleted_files_with_a_diff_for_each() {
+  use vekro_git::{file_diff, ChangeKind};
+  let dir = temp_dir("changes");
+  let repository = git2::Repository::init_opts(&dir, git2::RepositoryInitOptions::new().initial_head("main")).unwrap();
+  fs::write(dir.join("kept.txt"), "one\n").unwrap();
+  fs::write(dir.join("gone.txt"), "bye\n").unwrap();
+  let mut index = repository.index().unwrap();
+  index.add_all(["*"], git2::IndexAddOption::DEFAULT, None).unwrap();
+  index.write().unwrap();
+  let tree = repository.find_tree(index.write_tree().unwrap()).unwrap();
+  let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+  repository.commit(Some("HEAD"), &signature, &signature, "first", &tree, &[]).unwrap();
+
+  fs::write(dir.join("kept.txt"), "one\ntwo\n").unwrap();
+  fs::remove_file(dir.join("gone.txt")).unwrap();
+  fs::write(dir.join("fresh.txt"), "new\n").unwrap();
+
+  let found = summary(&dir).unwrap();
+  let kinds: Vec<_> = found.changes.iter().map(|change| (change.path.to_str().unwrap().to_string(), change.kind)).collect();
+  assert_eq!(
+    kinds,
+    [("fresh.txt".to_string(), ChangeKind::New), ("gone.txt".to_string(), ChangeKind::Deleted), ("kept.txt".to_string(), ChangeKind::Modified)]
+  );
+  let patch = file_diff(&dir, std::path::Path::new("kept.txt")).unwrap();
+  assert!(patch.contains("+two"), "{patch}");
+  assert!(file_diff(&dir, std::path::Path::new("fresh.txt")).unwrap().contains("+new"));
+  fs::remove_dir_all(dir).unwrap();
 }

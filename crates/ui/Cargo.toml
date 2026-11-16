@@ -19,3 +19,5 @@ vekro-terminal.workspace = true
 vekro-git.workspace = true
 gpui-kit.workspace = true
 gpui-kit-assets.workspace = true
+futures.workspace = true
+unicode-width = "0.2"

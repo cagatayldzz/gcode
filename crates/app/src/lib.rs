@@ -1,7 +1,7 @@
 //! The Vekro application: startup, windows and key bindings. `apps/vekro` only calls [`run`].
 
 use gpui_kit::{component::TitleBar, *};
-use vekro_ui::{Assets, NewWindow, OpenSettings, Quit, Workspace, TOOLBAR_HEIGHT};
+use vekro_ui::{Assets, NewTerminal, NewWindow, OpenSettings, Quit, SaveFile, Workspace, TOOLBAR_HEIGHT};
 
 /// Starts the application and runs it until it quits.
 pub fn run() {
@@ -10,7 +10,13 @@ pub fn run() {
     gpui_kit::init(cx);
     vekro_ui::init(cx);
     cx.activate(true);
-    cx.bind_keys([KeyBinding::new("cmd-q", Quit, None), KeyBinding::new("cmd-n", NewWindow, None), KeyBinding::new("cmd-,", OpenSettings, None)]);
+    cx.bind_keys([
+      KeyBinding::new("cmd-q", Quit, None),
+      KeyBinding::new("cmd-n", NewWindow, None),
+      KeyBinding::new("cmd-,", OpenSettings, None),
+      KeyBinding::new("cmd-t", NewTerminal, None),
+      KeyBinding::new("cmd-s", SaveFile, None),
+    ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &NewWindow, cx| open_window(cx));
     cx.on_window_closed(|cx, _| {
