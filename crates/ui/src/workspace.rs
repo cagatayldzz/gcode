@@ -118,8 +118,6 @@ pub struct Workspace {
   focus_handle: FocusHandle,
   _setup_subscription: Option<Subscription>,
   _dialog_subscription: Option<Subscription>,
-  /// Whether the Explorer shows its tree or only its header.
-  explorer_open: bool,
   /// The scroll position of the folder tree.
   explorer_scroll: UniformListScrollHandle,
   _settings_subscriptions: Vec<Subscription>,
@@ -164,7 +162,6 @@ impl Workspace {
       focus_handle: cx.focus_handle(),
       _setup_subscription: None,
       _dialog_subscription: None,
-      explorer_open: true,
       explorer_scroll: UniformListScrollHandle::default(),
       _settings_subscriptions: vec![
         // Any change to a setting is saved and applied in every window.
@@ -611,7 +608,6 @@ impl Workspace {
         self.expanded.insert(folder.to_path_buf());
       }
     }
-    self.explorer_open = true;
     self.refresh_project();
     if is_dir {
       cx.notify();
@@ -976,9 +972,9 @@ impl Workspace {
     let path = row.path.clone();
     let selected = self.selected_entry.as_ref() == Some(&row.path);
     let open = self.expanded.contains(&row.path);
-    let icon = if row.is_dir { IconName::FolderClosed } else { IconName::File };
     h_flex()
       .id(SharedString::from(format!("entry-{}", row.path.display())))
+      .w_full()
       .gap_1p5()
       .pr_2()
       .py_1()
@@ -991,7 +987,8 @@ impl Workspace {
       .child(div().size_4().flex_none().when(row.is_dir, |chevron| {
         chevron.child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size_4().text_color(theme.muted_foreground))
       }))
-      .child(Icon::new(icon).size_4().text_color(theme.muted_foreground))
+      // Only folders get an icon; a file's name starts where a folder's icon does.
+      .when(row.is_dir, |entry| entry.child(Icon::new(IconName::FolderClosed).size_4().text_color(theme.muted_foreground)))
       .child(Label::new(row.name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
       .when(!row.is_dir, |entry| {
         let hovered_path = path.clone();
@@ -1026,7 +1023,6 @@ impl Workspace {
   }
 
   fn render_explorer(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let theme = cx.theme().clone();
     // Only the lines in view are built, laid out and drawn: a project can have thousands of entries.
     let list = uniform_list(
       "explorer-rows",
@@ -1050,27 +1046,13 @@ impl Workspace {
       .iter()
       .find(|project| self.projects.active.as_ref() == Some(&project.path))
       .map_or_else(|| SharedString::from("Vekro"), |project| SharedString::from(project.name()));
-    let open = self.explorer_open;
     let action =
       |id: &'static str, icon: &'static str, tooltip: &'static str| Button::new(id).ghost().xsmall().icon(Icon::empty().path(icon)).tooltip(tooltip);
     let header = h_flex()
       .gap_1()
       .items_center()
-      .child(
-        h_flex()
-          .id("explorer-title")
-          .flex_1()
-          .min_w_0()
-          .gap_1()
-          .items_center()
-          .cursor_pointer()
-          .child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size_4().text_color(theme.muted_foreground))
-          .child(Label::new(name).font_weight(FontWeight::SEMIBOLD).whitespace_nowrap().text_ellipsis())
-          .on_click(cx.listener(|this, _, _, cx| {
-            this.explorer_open = !this.explorer_open;
-            cx.notify();
-          })),
-      )
+      .pl_2()
+      .child(Label::new(name).flex_1().min_w_0().font_weight(FontWeight::SEMIBOLD).whitespace_nowrap().overflow_hidden().text_ellipsis())
       .child(
         action("explorer-new-file", "icons/file-plus.svg", "New file").on_click(cx.listener(|this, _, window, cx| this.new_entry(false, window, cx))),
       )
@@ -1086,7 +1068,7 @@ impl Workspace {
         action("explorer-collapse", "icons/list-chevrons-down-up.svg", "Collapse folders")
           .on_click(cx.listener(|this, _, _, cx| this.collapse_folders(cx))),
       );
-    v_flex().flex_1().min_h_0().gap_1().child(header).when(open, |section| section.child(rows))
+    v_flex().flex_1().min_h_0().gap_1().child(header).child(rows)
   }
 
   /// The repository summary and the folder tree.

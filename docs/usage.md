@@ -3,7 +3,7 @@
 A Vekro window has four parts:
 
 - the **project rail** on the far left: one avatar per project, the `+` button, and Settings at the bottom;
-- the **sidebar**: two icon tabs. **Explorer** shows the folder tree under a header with the project name and four
+- the **sidebar**: two icon tabs. **Explorer** shows the folder tree of the open project, under a row with the project's name and four
   buttons: new file, new folder (created inside the selected folder, next to the selected file, or in the project folder; type the name and
   press Enter, `dir/name.rs` makes the subfolder too), refresh and collapse all folders. **Git** shows the branch
   and the changed files;
