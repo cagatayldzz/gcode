@@ -58,6 +58,7 @@ Required Actions secrets: `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWOR
 | `vekro-terminal` | lib | PTY, emulation, key and mouse encoding |
 | `vekro-git` | lib | repository summary, file diffs, creating and cloning projects |
 | `vekro-storage` | lib | data directory, project list, preferences |
+| `vekro-opencommit` | lib | commit message generation, `~/.opencommit` settings |
 
 Code map and data flow: [architecture](architecture.md).
 

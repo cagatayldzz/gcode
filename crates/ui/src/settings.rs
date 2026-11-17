@@ -14,17 +14,25 @@ use gpui_kit::{
   *,
 };
 use std::path::PathBuf;
+use vekro_opencommit::{config_path, Config};
 use vekro_storage::{data_dir, Preferences, ThemeChoice, CODE_FONT_SIZES};
 
 /// The settings every window shares. Changing `preferences` and notifying makes each window save them and redraw.
 pub(crate) struct SettingsModel {
   pub preferences: Preferences,
+  /// The OpenCommit settings (`~/.opencommit`) that commit message generation uses.
+  pub opencommit: Config,
 }
 
 /// Sent when the user asks to add every project in the projects folder.
 pub(crate) struct AddAllProjectsRequested;
 
 impl EventEmitter<AddAllProjectsRequested> for SettingsModel {}
+
+/// Sent when the user asks to open the OpenCommit settings dialog.
+pub(crate) struct CommitSettingsRequested;
+
+impl EventEmitter<CommitSettingsRequested> for SettingsModel {}
 
 /// The shared model, so the Kit's setting fields (which only get an `App`) can reach it.
 pub(crate) struct SettingsGlobal(pub Entity<SettingsModel>);
@@ -33,7 +41,7 @@ impl Global for SettingsGlobal {}
 
 /// Loads the saved settings into the shared model.
 pub(crate) fn init_settings(cx: &mut App) -> Entity<SettingsModel> {
-  let model = cx.new(|_| SettingsModel { preferences: Preferences::load(&Preferences::default_path()) });
+  let model = cx.new(|_| SettingsModel { preferences: Preferences::load(&Preferences::default_path()), opencommit: Config::load(&config_path()) });
   cx.set_global(SettingsGlobal(model.clone()));
   model
 }
@@ -170,6 +178,21 @@ pub(crate) fn settings_view(fallback_dir: PathBuf, projects: Entity<ProjectManag
         .title("Projects and categories")
         .description("Rename, recolor, reorder and group the projects of the bar on the left, or remove them. Drag a project onto another one in the bar to group them.")
         .item(SettingItem::render(move |_, _, _| projects.clone())),
+    ),
+    SettingPage::new("OpenCommit").icon(IconName::Bot).resettable(false).group(
+      SettingGroup::new().title("Commit messages").item(
+        SettingItem::new(
+          "Generate commit messages",
+          SettingField::render(|_, _, _| {
+            Button::new("open-commit-settings")
+              .label("Configure…")
+              .small()
+              .outline()
+              .on_click(|_, _, cx| model(cx).update(cx, |_, cx| cx.emit(CommitSettingsRequested)))
+          }),
+        )
+        .description("The sparkle button beside a commit's description writes the summary and description with OpenCommit. Choose the model, language and message style here."),
+      ),
     ),
     SettingPage::new("About").icon(IconName::Info).resettable(false).group(
       SettingGroup::new()

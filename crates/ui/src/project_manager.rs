@@ -90,8 +90,7 @@ impl ProjectManager {
       .child(Label::new(format!("{count}")).text_color(theme.muted_foreground).text_size(FONT_SIZE_SM))
       .child(div().flex_1());
     if let Some(category) = category {
-      let (rename, delete, up, down, fold) =
-        (category.id.clone(), category.id.clone(), category.id.clone(), category.id.clone(), category.id.clone());
+      let (rename, delete, up, down) = (category.id.clone(), category.id.clone(), category.id.clone(), category.id.clone());
       row = row
         .child(self.action(format!("category-rename-{}", category.id), "icons/pencil.svg", "Rename", cx, move |workspace, window, cx| {
           workspace.rename_category(rename.clone(), window, cx)
@@ -102,13 +101,6 @@ impl ProjectManager {
         .child(self.action(format!("category-down-{}", category.id), "icons/chevron-down.svg", "Move down", cx, move |workspace, _, cx| {
           workspace.move_category_by(&down, 1, cx)
         }))
-        .child(self.action(
-          format!("category-fold-{}", category.id),
-          if category.collapsed { "icons/folder.svg" } else { "icons/folder-open.svg" },
-          if category.collapsed { "Unfold in the project bar" } else { "Fold in the project bar" },
-          cx,
-          move |workspace, _, cx| workspace.toggle_category(&fold, cx),
-        ))
         .child(self.action(
           format!("category-delete-{}", category.id),
           "icons/trash.svg",

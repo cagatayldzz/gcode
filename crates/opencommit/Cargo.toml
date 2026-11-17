@@ -1,0 +1,18 @@
+[package]
+name = "vekro-opencommit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Vekro commit message generation, compatible with the OpenCommit configuration"
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+serde_json.workspace = true
+ureq.workspace = true

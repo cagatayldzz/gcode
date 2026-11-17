@@ -237,6 +237,100 @@ pub fn commit(path: &Path, files: &[PathBuf], summary: &str, description: &str) 
   Ok(id.to_string().chars().take(7).collect())
 }
 
+/// The local branches of the repository containing `path`, sorted by name (the current one is not moved to the front).
+pub fn branches(path: &Path) -> Result<Vec<String>, String> {
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  let mut names: Vec<String> = repository
+    .branches(Some(git2::BranchType::Local))
+    .map_err(|error| error.message().to_string())?
+    .filter_map(Result::ok)
+    .filter_map(|(branch, _)| branch.name().ok().flatten().map(str::to_string))
+    .collect();
+  names.sort_by_key(|name| name.to_lowercase());
+  Ok(names)
+}
+
+/// Creates a branch at the current commit and switches to it, like `git switch -c`. The changes in the working tree come along.
+/// In a repository without commits the branch just becomes the name of the unborn one.
+pub fn create_branch(path: &Path, name: &str) -> Result<(), String> {
+  let name = name.trim();
+  if name.is_empty() {
+    return Err("Enter a branch name.".into());
+  }
+  if !git2::Branch::name_is_valid(name).unwrap_or(false) {
+    return Err(format!("\"{name}\" is not a valid branch name."));
+  }
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  if repository.find_branch(name, git2::BranchType::Local).is_ok() {
+    return Err(format!("A branch named {name} already exists."));
+  }
+  match repository.head().ok().and_then(|head| head.peel_to_commit().ok()) {
+    Some(commit) => {
+      repository.branch(name, &commit, false).map_err(|error| error.message().to_string())?;
+    }
+    None => return repository.set_head(&format!("refs/heads/{name}")).map_err(|error| error.message().to_string()),
+  }
+  repository.set_head(&format!("refs/heads/{name}")).map_err(|error| error.message().to_string())
+}
+
+/// Switches to an existing local branch, like `git switch`. Changes that the switch would overwrite stop it: nothing is
+/// forced, nothing is lost.
+pub fn switch_branch(path: &Path, name: &str) -> Result<(), String> {
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  let branch = repository.find_branch(name, git2::BranchType::Local).map_err(|_| format!("There is no branch named {name}."))?;
+  let commit = branch.get().peel_to_commit().map_err(|error| error.message().to_string())?;
+  let mut checkout = CheckoutBuilder::new();
+  checkout.safe();
+  repository.checkout_tree(commit.as_object(), Some(&mut checkout)).map_err(|error| {
+    if error.code() == git2::ErrorCode::Conflict {
+      format!("Your changes would be overwritten by switching to {name}. Commit or discard them first.")
+    } else {
+      error.message().to_string()
+    }
+  })?;
+  repository.set_head(&format!("refs/heads/{name}")).map_err(|error| error.message().to_string())
+}
+
+/// The unified diff of several files against the last commit, one file after the other (see [`file_diff`]); the input for a
+/// generated commit message. `files` are relative to the repository.
+pub fn diff_files(path: &Path, files: &[PathBuf]) -> Result<String, String> {
+  let mut diff = String::new();
+  for file in files {
+    diff.push_str(&file_diff(path, file)?);
+    if !diff.ends_with('\n') {
+      diff.push('\n');
+    }
+  }
+  Ok(diff)
+}
+
+/// Pushes the current branch with the `git` program, so the user's own credentials apply; a branch without an upstream is
+/// published to `origin`. It never asks for input. Returns git's last line of output on success.
+pub fn push(path: &Path) -> Result<String, String> {
+  let run = |arguments: &[&str]| {
+    std::process::Command::new("git")
+      .arg("-C")
+      .arg(path)
+      .args(arguments)
+      .env("GIT_TERMINAL_PROMPT", "0")
+      .output()
+      .map_err(|error| format!("Could not run git: {error}"))
+  };
+  let last_line = |bytes: &[u8]| String::from_utf8_lossy(bytes).lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("").trim().to_string();
+  let mut output = run(&["push"])?;
+  if !output.status.success() && String::from_utf8_lossy(&output.stderr).contains("no upstream branch") {
+    output = run(&["push", "--set-upstream", "origin", "HEAD"])?;
+  }
+  if output.status.success() {
+    Ok(last_line(&output.stderr))
+  } else {
+    Err(match last_line(&output.stderr) {
+      message if message.is_empty() => "git push failed.".into(),
+      message => message,
+    })
+  }
+}
+
 /// The folders directly inside `folder` that are Git repositories, sorted by name. Folders that cannot be read are skipped.
 pub fn find_repositories(folder: &Path) -> Vec<PathBuf> {
   let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };

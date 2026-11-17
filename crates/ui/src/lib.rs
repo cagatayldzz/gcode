@@ -1,6 +1,7 @@
 //! The Vekro interface: projects, editor, terminal and Git in one window, built with GPUI Kit.
 
 mod assets;
+mod commit_settings;
 mod components;
 mod editor;
 mod explorer;

@@ -5,11 +5,12 @@ Cargo workspace, one-way dependencies:
 ```text
 apps/vekro ─► app ─► ui ─► terminal
                 │      ├──► git
+                │      ├──► opencommit
                 │      └──► storage
                 └─────────► (ui only)
 ```
 
-`terminal`, `git` and `storage` never depend on the interface and are tested without a window.
+`terminal`, `git`, `opencommit` and `storage` never depend on the interface and are tested without a window.
 `app` depends on `ui` only.
 
 ## Code map
@@ -21,6 +22,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/workspace.rs` | `Workspace` (one per window): projects, the sidebar, the project rail, the status bar, the sidebar, the dock and the terminals of every project |
 | `crates/ui/src/editor.rs` | `EditorPanel`: tabs (`Tabs`) of file editors and file diffs, shown with the Kit default `TabBar` that the panel draws itself (the dock title bar is off), or the empty state |
 | `crates/ui/src/terminal.rs` | `Terminal` (a view): draws a `Session`, handles keys, mouse, selection, scrolling and paste |
+| `crates/ui/src/commit_settings.rs` | the OpenCommit settings dialog (model, diff size, language, message style, instructions, push after commit) |
 | `crates/ui/src/project_setup.rs` | the Add project dialog (New, Clone, Import) |
 | `crates/ui/src/project_settings.rs` | the dialog for a project's name, icon and color |
 | `crates/ui/src/project_manager.rs` | the Project bar page of Settings: every project and category with its actions |
@@ -31,12 +33,13 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/{components,assets}.rs` | the blue "chosen" button style; Kit icons |
 | `crates/terminal/src/session.rs` | `Session`: PTY, `alacritty_terminal`, shell directory lookup |
 | `crates/terminal/src/{snapshot,palette,keys,mouse,search}.rs` | styled screen snapshot, colors, key and mouse encoding, scrollback search |
-| `crates/git/src/lib.rs` | `summary` (branch and changed files), `file_diff`, `create_project`, `clone`, `repository_name`, `find_repositories` |
+| `crates/git/src/lib.rs` | `summary` (branch and changed files), `file_diff`, `diff_files`, `branches`, `create_branch`, `switch_branch`, `commit`, `push`, `create_project`, `clone`, `repository_name`, `find_repositories` |
+| `crates/opencommit/src/` | `config.rs` (`Config`, the `~/.opencommit` file), `prompt.rs` (rules, diff splitting, parsing the answer), `client.rs` (`generate`, the chat API request) |
 | `crates/storage/src/` | `paths.rs` (data directory), `projects.rs` (`ProjectList`), `preferences.rs` (`Preferences`) |
 
 ## Window layout
 
-The `Workspace` renders the title band, then a row of the **project rail** (fixed, 60 px; projects can be dragged onto each other to group them into categories), the **sidebar** (an
+The `Workspace` renders the title band, then a row of the **project rail** (fixed, 60 px; projects can be dragged onto each other to group them into categories; a category is one tile that opens a scrollable, filterable list of its projects beside the rail), the **sidebar** (an
 icon `TabBar` that switches between Explorer, Git and Terminal, and the selected view, in a Kit `h_resizable` pane,
 200–960 px) and, right of it, a column with the Kit **`DockArea`** and the status bar below it, so the rail and the sidebar run down to the bottom of the window. The sidebar is plain
 workspace content, not a dock panel, so it has no tab bar. The dock holds only the center: `EditorPanel`. The terminals are
@@ -97,7 +100,19 @@ milliseconds; the cost is the first time the highlighter draws a text (up to ~0.
 it, with the folder tree read, on a background thread when the window is activated and every 2 seconds
 (`REFRESH_INTERVAL`), and applies the result only if the project and the expanded folders are unchanged and
 the data differs. `file_diff` produces a unified patch that `EditorPanel` hands to the Kit `Diff`.
-`clone` runs the `git` program (not libgit2) so the user's credentials apply.
+`clone` and `push` run the `git` program (not libgit2) so the user's credentials apply. The branch row of the Git tab opens a
+menu of local branches (`branches`, filtered by typing) with a way to create one; `switch_branch` uses a safe checkout, so
+changes it would overwrite stop the switch instead of being lost.
+
+## Commit messages
+
+The sparkle button beside the commit description calls `Workspace::generate_commit_message`: on a background thread it builds the
+diff of the ticked files (`vekro_git::diff_files`) and `vekro_opencommit::generate` asks an OpenAI-compatible chat API for a
+Conventional Commits message, which fills the summary and description fields. A diff over the configured token limit is split per
+file, each part is summarized, and the summaries are merged in a last request. Nothing is committed by generating. The settings
+live in the user's `~/.opencommit` (shared with the `oco` command; unknown lines are kept, the file is mode 0600; the
+`VEKRO_OPENCOMMIT_CONFIG` variable names another file for scratch runs); the commit instructions are in `preferences.json`.
+With "Push after commit" the commit button pushes with the `git` program after committing.
 
 ## Persistence
 
@@ -106,7 +121,7 @@ Data directory `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_
 | File | Type | Written |
 | --- | --- | --- |
 | `projects.json` | `ProjectList` (project paths with their name, icon, color and category; the categories and whether each is folded; the active project) | when a project is added or selected, or a category changes |
-| `preferences.json` | `Preferences` (theme, projects folder) | on each settings change |
+| `preferences.json` | `Preferences` (theme, projects folder, code font size, commit instructions) | on each settings change |
 
 Not stored yet: window size and position, dock layout, open files, running terminals.
 

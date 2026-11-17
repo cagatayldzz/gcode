@@ -5,7 +5,12 @@ use vekro_storage::{Preferences, ThemeChoice};
 fn preferences_survive_a_save_and_load() {
   let dir = std::env::temp_dir().join(format!("vekro-preferences-{}", std::process::id()));
   let file = dir.join("preferences.json");
-  let saved = Preferences { theme: ThemeChoice::Dark, projects_dir: Some(PathBuf::from("/work")), code_font_size: 15 };
+  let saved = Preferences {
+    theme: ThemeChoice::Dark,
+    projects_dir: Some(PathBuf::from("/work")),
+    code_font_size: 15,
+    commit_instructions: Some("Be brief.".into()),
+  };
   saved.save(&file).unwrap();
   assert_eq!(Preferences::load(&file), saved);
   std::fs::remove_dir_all(dir).unwrap();
@@ -34,5 +39,20 @@ fn the_code_font_size_defaults_and_stays_within_its_range() {
   assert_eq!(Preferences::load(&file).code_font_size, 24);
   std::fs::write(&file, r#"{"code_font_size": 2}"#).unwrap();
   assert_eq!(Preferences::load(&file).code_font_size, 9);
+  std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn commit_instructions_distinguish_the_built_in_text_from_none_at_all() {
+  let dir = std::env::temp_dir().join(format!("vekro-preferences-instructions-{}", std::process::id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  let file = dir.join("preferences.json");
+  assert_eq!(Preferences::default().commit_instructions, None);
+
+  for instructions in [None, Some(String::new()), Some("Short subjects.".to_string())] {
+    let saved = Preferences { commit_instructions: instructions, ..Preferences::default() };
+    saved.save(&file).unwrap();
+    assert_eq!(Preferences::load(&file), saved);
+  }
   std::fs::remove_dir_all(dir).unwrap();
 }

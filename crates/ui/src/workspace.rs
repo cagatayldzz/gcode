@@ -1,11 +1,12 @@
 use crate::{
+  commit_settings::{CommitSettings, CommitSettingsSaved},
   components::{avatar_look, display_path},
   editor::{ActiveTab, EditorPanel},
   explorer,
   project_manager::ProjectManager,
   project_settings::{AppearanceChosen, ProjectSettings},
   project_setup::{ProjectReady, ProjectSetup},
-  settings::{init_settings, settings_view, AddAllProjectsRequested, SettingsGlobal, SettingsModel},
+  settings::{init_settings, settings_view, AddAllProjectsRequested, CommitSettingsRequested, SettingsGlobal, SettingsModel},
   terminal::{Terminal, TerminalExited},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   AddProject, NewTerminal, OpenSettings, SaveFile,
@@ -13,14 +14,15 @@ use crate::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonCustomVariant, ButtonVariants as _},
     checkbox::Checkbox,
     dock::{panel_handle, DockArea, DockLayout, DockSkin},
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
     label::Label,
-    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
     notification::Notification,
+    popover::Popover,
     resizable::{h_resizable, resizable_panel},
     scroll::{ScrollableElement as _, Scrollbar, ScrollbarAxis},
     status_bar::StatusBar,
@@ -37,10 +39,20 @@ use std::{
   time::Duration,
 };
 use vekro_git::Summary;
+use vekro_opencommit::DEFAULT_INSTRUCTIONS;
 use vekro_storage::{Category, Preferences, Project, ProjectList};
 
 /// Height of the top band: the traffic lights and the title.
 pub const TOOLBAR_HEIGHT: Pixels = px(40.);
+
+/// The width of the branch menu and of a category's project list.
+const MENU_WIDTH: Pixels = px(280.);
+
+/// How tall the branch list and a category's project list get before they scroll.
+const MENU_LIST_MAX_HEIGHT: Pixels = px(320.);
+
+/// A category with more projects than this gets a filter field in its list.
+const CATEGORY_FILTER_MIN: usize = 8;
 
 /// How long the pointer must rest on a file in the Explorer before it is prepared for opening, so that moving past
 /// files costs nothing.
@@ -127,6 +139,15 @@ pub struct Workspace {
   commit_description: Entity<TextareaState>,
   /// A commit is being made.
   committing: bool,
+  /// A commit message is being generated.
+  generating: bool,
+  /// The branch menu is open, with the local branches it lists and the field that filters them.
+  branch_menu_open: bool,
+  branches: Vec<String>,
+  branch_filter: Entity<InputState>,
+  /// The category whose project list is open in the rail, and the field that filters it.
+  open_category: Option<String>,
+  category_filter: Entity<InputState>,
   _commit_subscriptions: Vec<Subscription>,
   _settings_subscriptions: Vec<Subscription>,
   _appearance: Subscription,
@@ -167,6 +188,8 @@ impl Workspace {
     });
     let commit_summary = cx.new(|cx| InputState::new(window, cx).placeholder("Summary (required)"));
     let commit_description = cx.new(|cx| TextareaState::new(window, cx).placeholder("Description"));
+    let branch_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find or create a branch"));
+    let category_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find a project"));
     let mut this = Self {
       projects: ProjectList::load(&ProjectList::default_path()),
       settings: settings.clone(),
@@ -186,9 +209,18 @@ impl Workspace {
       commit_summary: commit_summary.clone(),
       commit_description: commit_description.clone(),
       committing: false,
+      generating: false,
+      branch_menu_open: false,
+      branches: Vec::new(),
+      branch_filter: branch_filter.clone(),
+      open_category: None,
+      category_filter: category_filter.clone(),
       _commit_subscriptions: vec![
         // The commit button is enabled once there is a summary.
         cx.subscribe(&commit_summary, |_, _, _: &InputEvent, cx| cx.notify()),
+        // The menus list what the filter field matches.
+        cx.subscribe(&branch_filter, |_, _, _: &InputEvent, cx| cx.notify()),
+        cx.subscribe(&category_filter, |_, _, _: &InputEvent, cx| cx.notify()),
       ],
       _settings_subscriptions: vec![
         // Any change to a setting is saved and applied in every window.
@@ -199,6 +231,11 @@ impl Workspace {
           }
           apply_theme(preferences.theme, preferences.code_font_size, window, cx);
           cx.notify();
+        }),
+        cx.subscribe_in(&settings, window, |this, _, _: &CommitSettingsRequested, window, cx| {
+          if window.is_window_active() {
+            this.open_commit_settings(window, cx);
+          }
         }),
         // "Add all" is handled by the window the user is in.
         cx.subscribe_in(&settings, window, |this, _, _: &AddAllProjectsRequested, window, cx| {
@@ -498,12 +535,6 @@ impl Workspace {
 
   pub(crate) fn delete_category(&mut self, id: &str, cx: &mut Context<Self>) {
     self.projects.remove_category(id);
-    self.persist_projects();
-    cx.notify();
-  }
-
-  pub(crate) fn toggle_category(&mut self, id: &str, cx: &mut Context<Self>) {
-    self.projects.toggle_category(id);
     self.persist_projects();
     cx.notify();
   }
@@ -843,16 +874,20 @@ impl Workspace {
     let description = self.commit_description.read(cx).value().to_string();
     self.committing = true;
     cx.notify();
+    let push = self.settings.read(cx).opencommit.git_push;
     let work = cx.background_executor().spawn({
       let (root, files) = (root.clone(), files.clone());
-      async move { vekro_git::commit(&root, &files, &summary, &description) }
+      async move {
+        let id = vekro_git::commit(&root, &files, &summary, &description)?;
+        Ok::<_, String>((id, push.then(|| vekro_git::push(&root))))
+      }
     });
     cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
         this.committing = false;
         match result {
-          Ok(id) => {
+          Ok((id, pushed)) => {
             this.commit_summary.update(cx, |input, cx| input.set_value("", window, cx));
             this.commit_description.update(cx, |input, cx| input.set_value("", window, cx));
             this.excluded.clear();
@@ -864,7 +899,11 @@ impl Workspace {
               this.selected_change = None;
             }
             this.refresh_project();
-            window.push_notification(Notification::info(format!("Committed {id}.")), cx);
+            match pushed {
+              None => window.push_notification(Notification::info(format!("Committed {id}.")), cx),
+              Some(Ok(_)) => window.push_notification(Notification::info(format!("Committed {id} and pushed.")), cx),
+              Some(Err(message)) => window.push_notification(Notification::error(format!("Committed {id}, but the push failed: {message}")), cx),
+            }
           }
           Err(message) => window.push_notification(Notification::error(message), cx),
         }
@@ -872,6 +911,140 @@ impl Workspace {
       });
     })
     .detach();
+  }
+
+  /// Opens the dialog for the commit message generator: the OpenCommit settings and the commit instructions.
+  pub(crate) fn open_commit_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let (config, instructions) = {
+      let model = self.settings.read(cx);
+      (model.opencommit.clone(), model.preferences.commit_instructions.clone())
+    };
+    let form = cx.new(|cx| CommitSettings::new(config, instructions, window, cx));
+    self._dialog_subscription = Some(cx.subscribe_in(&form, window, |this, _, saved: &CommitSettingsSaved, window, cx| {
+      if let Err(error) = saved.config.save(&vekro_opencommit::config_path()) {
+        window.push_notification(Notification::error(format!("Could not save the OpenCommit settings: {error}")), cx);
+        return;
+      }
+      let (config, instructions) = (saved.config.clone(), saved.instructions.clone());
+      this.settings.update(cx, |model, cx| {
+        model.opencommit = config;
+        model.preferences.commit_instructions = instructions;
+        cx.notify();
+      });
+      window.close_dialog(cx);
+    }));
+    window.open_dialog(cx, move |dialog, _, _| dialog.title("OpenCommit settings").width(px(560.)).child(form.clone()));
+  }
+
+  /// Writes the summary and description of the commit from the ticked files' changes, with OpenCommit.
+  fn generate_commit_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
+    if self.generating {
+      return;
+    }
+    let files: Vec<PathBuf> = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).map(|change| change.path.clone()).collect();
+    if files.is_empty() {
+      window.push_notification(Notification::error("Choose at least one changed file to describe."), cx);
+      return;
+    }
+    let (config, instructions) = {
+      let model = self.settings.read(cx);
+      (model.opencommit.clone(), model.preferences.commit_instructions.clone().unwrap_or_else(|| DEFAULT_INSTRUCTIONS.to_string()))
+    };
+    if config.api_key.is_empty() && config.api_url.is_empty() {
+      window.push_notification(Notification::error("Add your API key to generate commit messages."), cx);
+      self.open_commit_settings(window, cx);
+      return;
+    }
+    self.generating = true;
+    cx.notify();
+    let work = cx.background_executor().spawn({
+      let root = root.clone();
+      async move { vekro_opencommit::generate(&config, &instructions, &vekro_git::diff_files(&root, &files)?) }
+    });
+    cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.generating = false;
+        // The user may have moved to another project while the message was being written.
+        if this.projects.active.as_ref() == Some(&root) {
+          match result {
+            Ok(message) => {
+              this.commit_summary.update(cx, |input, cx| input.set_value(message.summary, window, cx));
+              this.commit_description.update(cx, |input, cx| input.set_value(message.description, window, cx));
+            }
+            Err(message) => window.push_notification(Notification::error(message), cx),
+          }
+        }
+        cx.notify();
+      });
+    })
+    .detach();
+  }
+
+  /// Opens or closes the branch menu; opening reads the local branches and clears the filter.
+  fn set_branch_menu(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+    self.branch_menu_open = open;
+    if open {
+      if let Some(root) = &self.projects.active {
+        self.branches = vekro_git::branches(root).unwrap_or_default();
+      }
+      self.branch_filter.update(cx, |input, cx| input.set_value("", window, cx));
+      let focus = self.branch_filter.read(cx).focus_handle(cx);
+      window.defer(cx, move |window, cx| focus.focus(window, cx));
+    }
+    cx.notify();
+  }
+
+  /// Switches the open project's repository to another local branch. Changes the switch would overwrite stop it.
+  fn switch_branch(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+    self.branch_menu_open = false;
+    cx.notify();
+    let Some(root) = self.projects.active.clone() else { return };
+    if self.git.as_ref().is_some_and(|git| git.branch == name) {
+      return;
+    }
+    let work = cx.background_executor().spawn({
+      let (root, name) = (root.clone(), name.clone());
+      async move { vekro_git::switch_branch(&root, &name) }
+    });
+    cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        match result {
+          Ok(()) => {
+            this.refresh_project();
+            window.push_notification(Notification::info(format!("Switched to {name}.")), cx);
+          }
+          Err(message) => window.push_notification(Notification::error(message), cx),
+        }
+        cx.notify();
+      });
+    })
+    .detach();
+  }
+
+  /// Asks for a name, creates a branch at the current commit and switches to it. Uncommitted changes come along.
+  fn new_branch(&mut self, initial: String, window: &mut Window, cx: &mut Context<Self>) {
+    self.branch_menu_open = false;
+    self.ask_name("New branch", "Branch name", &initial, window, cx, move |this, name, window, cx| {
+      let root = this.projects.active.clone().ok_or("Open a project first.")?;
+      vekro_git::create_branch(&root, name)?;
+      this.refresh_project();
+      window.push_notification(Notification::info(format!("Created and switched to {}.", name.trim())), cx);
+      Ok(())
+    });
+  }
+
+  /// Opens or closes the project list of a category in the rail.
+  fn set_category_menu(&mut self, id: &str, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+    if open {
+      self.open_category = Some(id.to_string());
+      self.category_filter.update(cx, |input, cx| input.set_value("", window, cx));
+    } else if self.open_category.as_deref() == Some(id) {
+      self.open_category = None;
+    }
+    cx.notify();
   }
 
   /// Saves the file open in the editor.
@@ -910,25 +1083,27 @@ impl Workspace {
     bar
   }
 
-  /// One project's avatar. It can be dragged onto another project or a category, and a right click opens its menu.
-  fn rail_project(&self, project: &Project, grouped: bool, cx: &mut Context<Self>) -> impl IntoElement {
-    let palette = colors(cx);
-    let path = project.path.clone();
-    let name = SharedString::from(project.name());
-    let look = avatar_look(project, self.projects.active.as_ref() == Some(&project.path), cx);
-    let selected = self.projects.active.as_ref() == Some(&project.path);
-    // Inside a category the block is already the hover color, so an uncolored avatar needs a lighter one.
-    let (fill, text) = (look.fill, look.text);
-    let hover = if grouped && !selected && project.color.is_none() { palette.rail_item_hover } else { look.hover };
-    let drag_over = if grouped { palette.rail_item_hover } else { palette.rail_hover };
-    let workspace = cx.entity();
-    let categories: Vec<(String, SharedString)> = self
+  /// The categories a project can be moved to: their ids and what the menus call them.
+  fn category_choices(&self) -> Vec<(String, SharedString)> {
+    self
       .projects
       .categories
       .iter()
       .enumerate()
       .map(|(index, category)| (category.id.clone(), SharedString::from(category_label(index, category))))
-      .collect();
+      .collect()
+  }
+
+  /// One project's avatar. It can be dragged onto another project or a category, and a right click opens its menu.
+  fn rail_project(&self, project: &Project, cx: &mut Context<Self>) -> impl IntoElement {
+    let palette = colors(cx);
+    let path = project.path.clone();
+    let name = SharedString::from(project.name());
+    let look = avatar_look(project, self.projects.active.as_ref() == Some(&project.path), cx);
+    let (fill, text, hover) = (look.fill, look.text, look.hover);
+    let drag_over = palette.rail_hover;
+    let workspace = cx.entity();
+    let categories = self.category_choices();
     let current = project.category.clone();
     let (drag_label, drag_fill, drag_text) = (look.letter.clone(), fill.unwrap_or(palette.rail_hover), text);
     div()
@@ -960,130 +1135,152 @@ impl Workspace {
         let path = path.clone();
         move |this, _, window, cx| this.select_project(path.clone(), window, cx)
       }))
-      .context_menu(move |menu, _, _| {
-        let (settings_workspace, settings_path) = (workspace.clone(), path.clone());
-        let mut menu = menu.item(
-          PopupMenuItem::new("Settings…")
-            .on_click(move |_, window, cx| settings_workspace.update(cx, |this, cx| this.open_project_settings(&settings_path, window, cx))),
-        );
-        menu = menu.separator();
-        if !categories.is_empty() {
-          menu = menu.label("Move to");
-          for (id, label) in &categories {
-            let (workspace, path, id_owned) = (workspace.clone(), path.clone(), id.clone());
-            let checked = current.as_deref() == Some(id.as_str());
-            menu = menu.item(
-              PopupMenuItem::new(label.clone())
-                .checked(checked)
-                .on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.move_project(&path, Some(&id_owned), cx))),
-            );
-          }
-          menu = menu.separator();
-        }
-        let (new_workspace, new_path) = (workspace.clone(), path.clone());
-        menu = menu.item(
-          PopupMenuItem::new("New category…")
-            .on_click(move |_, window, cx| new_workspace.update(cx, |this, cx| this.new_category(new_path.clone(), window, cx))),
-        );
-        if current.is_some() {
-          let (workspace, path) = (workspace.clone(), path.clone());
-          menu = menu.item(
-            PopupMenuItem::new("Remove from category").on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.move_project(&path, None, cx))),
-          );
-        }
-        menu
-      })
+      .context_menu(move |menu, _, _| project_menu(menu, &workspace, &path, &categories, current.as_deref()))
   }
 
-  /// A category in the rail: one tile that folds and unfolds it, and its projects below while it is unfolded.
+  /// A category in the rail: one tile, always the same size however many projects it holds. Clicking it opens the list of
+  /// its projects beside the rail, which scrolls and can be filtered, so a category of twenty is as easy to use as one of two.
   fn rail_category(&self, index: usize, category: &Category, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
-    let members: Vec<&Project> = self.projects.projects_in(Some(&category.id)).collect();
+    let members: Vec<Project> = self.projects.projects_in(Some(&category.id)).cloned().collect();
+    let count = members.len();
     let label = SharedString::from(category_label(index, category));
     let has_active = members.iter().any(|project| self.projects.active.as_ref() == Some(&project.path));
-    let folded = category.collapsed;
-    let shows_initials = folded && !members.is_empty();
     let workspace = cx.entity();
-    let tile = div()
-      .id(SharedString::from(format!("rail-category-{}", category.id)))
+    let categories = self.category_choices();
+    let id = category.id.clone();
+    let open = self.open_category.as_deref() == Some(id.as_str());
+    // A category shows the first letter of its name, in an outlined tile, so it never looks like a project's filled avatar.
+    let glyph = Label::new(initial(&label)).text_base().font_weight(FontWeight::SEMIBOLD);
+    let tile = Button::new(SharedString::from(format!("rail-category-{id}")))
+      .custom(
+        ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.rail_text).hover(palette.rail_item_hover).active(palette.rail_item_hover),
+      )
       .size_9()
-      .flex()
-      .flex_none()
-      .items_center()
-      .justify_center()
-      .rounded_lg()
-      .cursor_pointer()
-      .text_color(palette.rail_text)
-      .when(folded, |tile| tile.bg(palette.rail_hover))
-      .when(folded && has_active, |tile| tile.border_1().border_color(palette.accent))
-      .hover(move |tile| tile.bg(palette.rail_item_hover))
-      .drag_over::<DraggedProject>(move |style, _, _, _| style.bg(palette.rail_item_hover))
-      .tooltip({
-        let label = label.clone();
-        move |window, cx| Tooltip::new(label.clone()).build(window, cx)
-      })
-      .on_drop(cx.listener({
-        let id = category.id.clone();
-        move |this, dragged: &DraggedProject, _, cx| this.move_project(&dragged.0, Some(&id), cx)
+      .rounded_md()
+      .border_1()
+      .border_color(if has_active { palette.accent } else { palette.control_border })
+      .tooltip(SharedString::from(match count {
+        1 => format!("{label} · 1 project"),
+        count => format!("{label} · {count} projects"),
       }))
-      .on_click(cx.listener({
-        let id = category.id.clone();
-        move |this, _, _, cx| this.toggle_category(&id, cx)
-      }))
-      .when(shows_initials, |tile| {
-        // Discord's folded folder: the first four projects as small initials.
-        let cells: Vec<AnyElement> = members
-          .iter()
-          .take(4)
-          .map(|project| {
-            let active = self.projects.active.as_ref() == Some(&project.path);
-            div()
-              .size_4()
-              .flex()
-              .flex_none()
-              .items_center()
-              .justify_center()
-              .text_xs()
-              .when(active, |cell| cell.text_color(palette.accent))
-              .child(initial(&project.name()))
-              .into_any_element()
-          })
-          .collect();
-        let mut rows = Vec::new();
-        let mut cells = cells.into_iter();
-        while let Some(first) = cells.next() {
-          rows.push(h_flex().child(first).children(cells.next()));
-        }
-        tile.child(v_flex().items_center().justify_center().children(rows))
+      .child(glyph);
+    let menu = Popover::new(SharedString::from(format!("category-menu-{id}")))
+      .anchor(Anchor::LeftCenter)
+      .open(open)
+      .on_open_change({
+        let (workspace, id) = (workspace.clone(), id.clone());
+        move |open, window, cx| workspace.update(cx, |this, cx| this.set_category_menu(&id, *open, window, cx))
       })
-      .when(!shows_initials, |tile| tile.child(Icon::empty().path(if folded { "icons/folder.svg" } else { "icons/folder-open.svg" }).size_5()))
-      .context_menu({
-        let id = category.id.clone();
-        move |menu, _, _| {
-          let (rename_workspace, rename_id) = (workspace.clone(), id.clone());
-          let (delete_workspace, delete_id) = (workspace.clone(), id.clone());
-          menu
-            .item(
-              PopupMenuItem::new("Rename…")
-                .on_click(move |_, window, cx| rename_workspace.update(cx, |this, cx| this.rename_category(rename_id.clone(), window, cx))),
+      .trigger(tile)
+      .content({
+        let (workspace, id, label) = (workspace.clone(), id.clone(), label.clone());
+        move |_, _, cx| {
+          let theme = cx.theme().clone();
+          let palette = colors(cx);
+          let (filter, query, active) = {
+            let this = workspace.read(cx);
+            (this.category_filter.clone(), this.category_filter.read(cx).value().to_lowercase(), this.projects.active.clone())
+          };
+          let rows: Vec<AnyElement> = members
+            .iter()
+            .filter(|project| query.is_empty() || project.name().to_lowercase().contains(&query))
+            .map(|project| {
+              let selected = active.as_ref() == Some(&project.path);
+              let look = avatar_look(project, selected, cx);
+              let (path, name) = (project.path.clone(), SharedString::from(project.name()));
+              let (menu_workspace, menu_path, categories, current) =
+                (workspace.clone(), project.path.clone(), categories.clone(), project.category.clone());
+              h_flex()
+                .id(SharedString::from(format!("category-project-{}", path.display())))
+                .gap_2()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .items_center()
+                .cursor_pointer()
+                .when(selected, |row| row.bg(palette.selected))
+                .hover(|row| row.bg(palette.hover))
+                .child(
+                  div()
+                    .size_6()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .rounded_md()
+                    .text_sm()
+                    .text_color(look.text)
+                    .when_some(look.fill, |avatar, fill| avatar.bg(fill))
+                    .when_some(look.icon.clone(), |avatar, icon| avatar.child(Icon::empty().path(icon).size_4()))
+                    .when(look.icon.is_none(), |avatar| avatar.child(look.letter.clone())),
+                )
+                .child(Label::new(name).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+                .on_click({
+                  let workspace = workspace.clone();
+                  move |_, window, cx| {
+                    workspace.update(cx, |this, cx| {
+                      this.open_category = None;
+                      this.select_project(path.clone(), window, cx);
+                    })
+                  }
+                })
+                .context_menu(move |menu, _, _| project_menu(menu, &menu_workspace, &menu_path, &categories, current.as_deref()))
+                .into_any_element()
+            })
+            .collect();
+          v_flex()
+            .w(MENU_WIDTH)
+            .gap_1()
+            .child(
+              h_flex()
+                .px_2()
+                .py_1()
+                .gap_2()
+                .items_center()
+                .child(Label::new(label.clone()).flex_1().font_weight(FontWeight::SEMIBOLD))
+                .child(Label::new(format!("{count}")).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground)),
             )
-            .item(
-              PopupMenuItem::new("Delete category")
-                .on_click(move |_, _, cx| delete_workspace.update(cx, |this, cx| this.delete_category(&delete_id, cx))),
+            .when(count > CATEGORY_FILTER_MIN, |menu| menu.child(Input::new(&filter)))
+            .child(
+              v_flex()
+                .id(SharedString::from(format!("category-projects-{id}")))
+                .max_h(MENU_LIST_MAX_HEIGHT)
+                .overflow_y_scrollbar()
+                .gap_0p5()
+                .when(rows.is_empty(), |list| list.child(Label::new("No matching projects").px_2().py_1().text_color(theme.muted_foreground)))
+                .children(rows),
             )
         }
       });
-    v_flex()
-      .items_center()
-      .gap_1()
-      .when(!folded, |group| group.bg(palette.rail_hover).rounded_lg().py_1())
-      .child(tile)
-      .when(!folded, |group| group.children(members.into_iter().map(|project| self.rail_project(project, true, cx))))
+    div()
+      .id(SharedString::from(format!("rail-category-drop-{id}")))
+      .flex_none()
+      .rounded_lg()
+      .drag_over::<DraggedProject>(move |style, _, _, _| style.bg(palette.rail_item_hover))
+      .on_drop(cx.listener({
+        let id = id.clone();
+        move |this, dragged: &DraggedProject, _, cx| this.move_project(&dragged.0, Some(&id), cx)
+      }))
+      .child(menu)
+      .context_menu(move |menu, _, _| {
+        let (rename_workspace, rename_id) = (workspace.clone(), id.clone());
+        let (delete_workspace, delete_id) = (workspace.clone(), id.clone());
+        menu
+          .item(
+            PopupMenuItem::new("Rename…")
+              .on_click(move |_, window, cx| rename_workspace.update(cx, |this, cx| this.rename_category(rename_id.clone(), window, cx))),
+          )
+          .item(
+            PopupMenuItem::new("Delete category")
+              .on_click(move |_, _, cx| delete_workspace.update(cx, |this, cx| this.delete_category(&delete_id, cx))),
+          )
+      })
   }
 
   fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
-    let loose: Vec<AnyElement> = self.projects.projects_in(None).map(|project| self.rail_project(project, false, cx).into_any_element()).collect();
+    let loose: Vec<AnyElement> = self.projects.projects_in(None).map(|project| self.rail_project(project, cx).into_any_element()).collect();
     let groups: Vec<AnyElement> =
       self.projects.categories.iter().enumerate().map(|(index, category)| self.rail_category(index, category, cx).into_any_element()).collect();
     v_flex()
@@ -1112,6 +1309,99 @@ impl Workspace {
       .child(rail_button("rail-settings", IconName::Settings, "Settings", &palette, |_, window, cx| {
         window.dispatch_action(Box::new(OpenSettings), cx)
       }))
+  }
+
+  /// The branch name with a menu: the local branches (filtered by typing), and a way to start a new one.
+  fn render_branch_picker(&self, current: &str, cx: &mut Context<Self>) -> impl IntoElement {
+    let workspace = cx.entity();
+    let theme = cx.theme().clone();
+    let current = SharedString::from(current.to_string());
+    let trigger = Button::new("branch-trigger")
+      .ghost()
+      .w_full()
+      .child(
+        h_flex()
+          .w_full()
+          .gap_2()
+          .items_center()
+          .child(Icon::empty().path("icons/git-branch.svg").size_4().text_color(theme.muted_foreground))
+          .child(Label::new(current.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+          .child(Icon::new(IconName::ChevronDown).size_4().text_color(theme.muted_foreground)),
+      )
+      .tooltip("Switch branch");
+    Popover::new("branch-menu")
+      .anchor(Anchor::TopLeft)
+      .open(self.branch_menu_open)
+      .on_open_change({
+        let workspace = workspace.clone();
+        move |open, window, cx| workspace.update(cx, |this, cx| this.set_branch_menu(*open, window, cx))
+      })
+      .trigger(trigger)
+      .content(move |_, _, cx| {
+        let theme = cx.theme().clone();
+        let palette = colors(cx);
+        let (filter, query, branches) = {
+          let this = workspace.read(cx);
+          (this.branch_filter.clone(), this.branch_filter.read(cx).value().to_string(), this.branches.clone())
+        };
+        let lowered = query.trim().to_lowercase();
+        let rows: Vec<AnyElement> = branches
+          .into_iter()
+          .filter(|name| lowered.is_empty() || name.to_lowercase().contains(&lowered))
+          .map(|name| {
+            let selected = name == current.as_ref();
+            let workspace = workspace.clone();
+            h_flex()
+              .id(SharedString::from(format!("branch-{name}")))
+              .gap_2()
+              .px_2()
+              .py_1()
+              .rounded_md()
+              .items_center()
+              .cursor_pointer()
+              .hover(|row| row.bg(palette.hover))
+              .child(div().size_4().flex_none().when(selected, |mark| mark.child(Icon::new(IconName::Check).size_4())))
+              .child(Label::new(name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+              .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.switch_branch(name.clone(), window, cx)))
+              .into_any_element()
+          })
+          .collect();
+        let create = {
+          let workspace = workspace.clone();
+          let suggestion = query.trim().to_string();
+          let label = match suggestion.is_empty() {
+            true => "New branch…".to_string(),
+            false => format!("Create branch \"{suggestion}\""),
+          };
+          h_flex()
+            .id("branch-create")
+            .gap_2()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .items_center()
+            .cursor_pointer()
+            .hover(|row| row.bg(palette.hover))
+            .child(Icon::empty().path("icons/git-branch-plus.svg").size_4().text_color(theme.muted_foreground))
+            .child(Label::new(label).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+            .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.new_branch(suggestion.clone(), window, cx)))
+        };
+        v_flex()
+          .w(MENU_WIDTH)
+          .gap_1()
+          .child(Input::new(&filter))
+          .child(
+            v_flex()
+              .id("branch-list")
+              .max_h(MENU_LIST_MAX_HEIGHT)
+              .overflow_y_scrollbar()
+              .gap_0p5()
+              .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground)))
+              .children(rows),
+          )
+          .child(div().h_px().bg(palette.border))
+          .child(create)
+      })
   }
 
   fn render_git(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
@@ -1210,7 +1500,33 @@ impl Workspace {
       .pb_3()
       .pt_2()
       .child(Input::new(&self.commit_summary))
-      .child(Textarea::new(&self.commit_description).h(px(88.)))
+      .child(
+        div().relative().child(Textarea::new(&self.commit_description).h(px(88.))).child(
+          h_flex()
+            .absolute()
+            .right_1()
+            .bottom_1()
+            .gap_0p5()
+            .child(
+              Button::new("commit-settings")
+                .ghost()
+                .xsmall()
+                .icon(Icon::empty().path("icons/settings-2.svg"))
+                .tooltip("OpenCommit settings")
+                .on_click(cx.listener(|this, _, window, cx| this.open_commit_settings(window, cx))),
+            )
+            .child(
+              Button::new("generate-message")
+                .ghost()
+                .xsmall()
+                .icon(Icon::empty().path("icons/sparkles.svg"))
+                .loading(self.generating)
+                .disabled(chosen == 0 || self.generating)
+                .tooltip("Generate the summary and description with OpenCommit")
+                .on_click(cx.listener(|this, _, window, cx| this.generate_commit_message(window, cx))),
+            ),
+        ),
+      )
       .child(
         Button::new("commit")
           .primary()
@@ -1223,17 +1539,7 @@ impl Workspace {
       v_flex()
         .size_full()
         .gap_1()
-        .child(
-          h_flex()
-            .pl_2()
-            .pr_5()
-            .py_1()
-            .gap_2()
-            .items_center()
-            .child(Icon::empty().path("icons/git-branch.svg").size_4().text_color(theme.muted_foreground))
-            .child(Label::new(git.branch.clone()).flex_1())
-            .child(Icon::new(IconName::ChevronDown).size_4().text_color(theme.muted_foreground)),
-        )
+        .child(div().pl_2().pr_5().child(self.render_branch_picker(&git.branch, cx)))
         .child(
           h_flex()
             .px_2()
@@ -1484,6 +1790,45 @@ impl Workspace {
       })))
       .into_any_element()
   }
+}
+
+/// The right-click menu of a project avatar: its settings, the categories it can move to, and making a new one.
+fn project_menu(
+  menu: PopupMenu,
+  workspace: &Entity<Workspace>,
+  path: &Path,
+  categories: &[(String, SharedString)],
+  current: Option<&str>,
+) -> PopupMenu {
+  let (settings_workspace, settings_path) = (workspace.clone(), path.to_path_buf());
+  let mut menu = menu.item(
+    PopupMenuItem::new("Settings…")
+      .on_click(move |_, window, cx| settings_workspace.update(cx, |this, cx| this.open_project_settings(&settings_path, window, cx))),
+  );
+  menu = menu.separator();
+  if !categories.is_empty() {
+    menu = menu.label("Move to");
+    for (id, label) in categories {
+      let (workspace, path, id_owned) = (workspace.clone(), path.to_path_buf(), id.clone());
+      menu = menu.item(
+        PopupMenuItem::new(label.clone())
+          .checked(current == Some(id.as_str()))
+          .on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.move_project(&path, Some(&id_owned), cx))),
+      );
+    }
+    menu = menu.separator();
+  }
+  let (new_workspace, new_path) = (workspace.clone(), path.to_path_buf());
+  menu = menu.item(
+    PopupMenuItem::new("New category…")
+      .on_click(move |_, window, cx| new_workspace.update(cx, |this, cx| this.new_category(new_path.clone(), window, cx))),
+  );
+  if current.is_some() {
+    let (workspace, path) = (workspace.clone(), path.to_path_buf());
+    menu = menu
+      .item(PopupMenuItem::new("Remove from category").on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.move_project(&path, None, cx))));
+  }
+  menu
 }
 
 /// What a category is called in a menu or a tooltip: its name, or its place in the rail while it has none.
