@@ -1,8 +1,8 @@
 # Usage
 
-A Vekro window has four parts:
+A Vekro window has these parts:
 
-- the **project rail** on the far left: one avatar per project, the `+` button, and Settings at the bottom;
+- the **title bar**: the current project (a menu of every project grouped by category, with a filter and Add) fixed at the left, the `+` button (Add project) right of it, and Settings at the far right;
 - the **sidebar**: three icon tabs. **Explorer** shows the folder tree of the open project, under a row with the project's name and four
   buttons: new file, new folder (created inside the selected folder, next to the selected file, or in the project folder; type the name and
   press Enter, `dir/name.rs` makes the subfolder too), refresh and collapse all folders. **Git** shows the branch
@@ -10,23 +10,22 @@ A Vekro window has four parts:
   **Discard changes**, which asks first, throws away every change to that file and deletes it if it is new). Below the list
   is the commit box: type a **Summary** (required) and, if you like, a **Description**, then **Commit N files to
   <branch>**. Only the ticked files go into the commit; the others (staged or not) stay as they are, so they show up
-  again in the list. A commit needs `user.name` and `user.email` in your Git configuration. **Terminal** holds the
-  shells of the open project (see Terminals below);
-- the **main area**: tabs of files and of the diffs of changed files, or the terminal while the Terminal tab is chosen,
-  filling the rest of the window.
+  again in the list. A commit needs `user.name` and `user.email` in your Git configuration.
+- the **main area**: tabs of files and of the diffs of changed files, filling the rest of the window, with the **terminal panel**
+  at its bottom while it is shown (see Terminals below).
 
 The editor has a zoom button in its title bar (also **Zoom In** in the `…` menu). Drag the edge of the sidebar to resize it
-(up to 960 px). A thin **status bar** under the editor and the terminals (the rail and the sidebar run down to the bottom of the window) shows the branch and the number of changed files on the left, the project
+(up to 960 px). A thin **status bar** under the editor and the terminal panel (the sidebar runs down to the bottom of the window) shows the branch and the number of changed files on the left, the project
 folder in the middle and the open file's cursor position, indentation, encoding, line ending and language on the right (`Ln 12, Col 5`, `Spaces: 2`, `UTF-8`, `LF`, `Rust`).
 
 ## Projects
 
-Press `+` in the project rail to open the **Add project** dialog:
+Press `+` in the title bar to open the **Add project** dialog:
 
 | Tab | Does |
 | --- | --- |
 | New | Creates a folder with the given name in the chosen location and starts an empty Git repository on `main` there. Fails if the folder exists. |
-| Clone | Runs `git clone` for a repository URL such as `https://github.com/user/repo.git` into the chosen location, in a folder named after the repository. It uses your own Git login (SSH key or credential helper) and never asks for input; a repository that needs a login you do not have fails with Git's message. |
+| Clone | Runs `git clone` for a repository URL such as `https://github.com/user/repo.git` into the chosen location, in a folder named after the repository. It uses a connected account's token for its host (see Accounts below), else your own Git login (SSH key or credential helper), and never asks for input; a repository that needs a login you do not have fails with Git's message. With a connected account, **Browse my repositories…** lists the account's repositories (filter by typing) and fills in the address. |
 | Import | Adds a folder that already exists on this Mac. |
 
 The new or imported project opens at once. Click an avatar to switch; hover it to see the project's name.
@@ -35,24 +34,22 @@ opened and the file you had selected), the file or diff in the editor and the te
 project you leave away and brings back what the other one showed. Its shells keep running, so a dev server in
 project A is still running when you come back to it.
 
-Projects are only listed in the rail; nothing Vekro does deletes a project's folder. The other way round: when a
+Projects are only listed in the project menu; nothing Vekro does deletes a project's folder. The other way round: when a
 project's folder is deleted (in Finder, by a command, by another app), Vekro takes it out of the list on its own, at
 the next start, when the window comes back to the front and every few seconds, and says which it removed. A folder that
 cannot be read (no permission, an unmounted disk) is not counted as deleted.
 
 ### Categories
 
-Group projects in the rail the way Discord groups servers into folders.
+Categories group the projects in the project menu of the title bar: each category is a heading, and projects without one
+are under **Other**.
 
-- **Drag a project onto another one.** They become a new, unnamed category. Drag a project onto a project that is
-  already in a category, or onto the category's folder tile, to add it there.
-- Or right-click a project: **New category…** (asks for a name), **Move to** (the current category is checked) and
+- Right-click a project in the menu: **New category…** (asks for a name), **Move to** (the current category is checked) and
   **Remove from category**.
+- Settings → **Project list** shows every project and category with buttons to rename, reorder, move and delete them (deleting a
+  category keeps its projects, outside any category).
 
-An unfolded category is a tinted block: its folder tile on top, its projects below. Click the folder tile to fold
-it into one tile that shows the first four projects' initials (outlined when the open project is inside).
-Right-click the folder tile to **Rename…** (an empty name makes it unnamed again) or **Delete category** (the
-projects stay, outside any category). A category that loses its last project goes away. Projects without a
+A category that loses its last project goes away. Projects without a
 category come first, then the categories in the order they were created.
 
 ### Code size
@@ -80,7 +77,7 @@ The **Projects** page holds the projects folder and **Add all**.
 
 Right-click a project and choose **Settings…** to change how it looks:
 
-- **Name** replaces the folder's name in the rail, the tooltip and the Explorer (the folder itself is not renamed);
+- **Name** replaces the folder's name in the project menu and the Explorer (the folder itself is not renamed);
 - **Color** tints the avatar, and fills it while the project is open;
 - **Icon** shows one of 20 icons instead of the first letter.
 
@@ -88,15 +85,13 @@ Press Save (or Enter in the name field). Clearing the name, choosing **Default**
 
 ## Terminals
 
-The third sidebar tab, with the terminal icon, lists the shells of the open project as **Sessions**. Choosing it also
-puts the terminal in the main area, where the editor is; the other two tabs bring the editor back. Each project starts with
-one `zsh` (your login shell) in the project folder.
+The **terminal button** in the title bar, left of Settings (also `⌘J`), shows or hides the terminal panel at the bottom of the
+window, under the editor and above the status bar. Drag its top edge to make it taller or shorter. Each project starts with
+one `zsh` (your login shell) in the project folder. The shells keep running while the panel is hidden.
 
-- In the list: click a session to show it, **×** on a row kills that shell, **+** on top opens another (also `⌘T`,
-  which switches to the tab). The session beside the shown one in a split is marked lighter.
-- The row above the terminal has its title and these buttons: **+**, **▾** (New terminal, Split terminal, Kill
-  terminal), **Split** (two shells side by side; it starts a second shell if there is only one), **Trash** (stops the
-  shell that is shown) and **×** (back to the editor; the shells keep running).
+The row above the terminal has its title and these buttons: **+** (new terminal, also `⌘T`, which shows the panel), **▾** (the
+sessions of the project, to pick one; New terminal, Split terminal, Kill terminal), **Split** (two shells side by side; it
+starts a second shell if there is only one), **Trash** (stops the shell that is shown) and **×** (hides the panel).
 
 A shell that exits (`exit`, `⌃D`) closes its terminal; a project is never left without one. Each project keeps its own
 shells and which one is shown.
@@ -130,12 +125,21 @@ The sidebar shows the branch and every changed file with a mark: **A** new, **M*
 **D** deleted, **R** renamed, **!** conflicted. Click a file to see its diff against the last commit
 in the editor area (staged and unstaged changes together; a new file is shown as all added).
 
+A bar above the editor holds the **current branch** and a button that keeps the branch in step with its remote (**Publish branch**,
+**Push origin**, **Pull origin** or **Fetch origin**, with the number of commits and the last fetch; while it works it shows git's
+progress). The branch opens a menu with two tabs, like GitHub Desktop's. **Branches** lists the local branches with a filter and a
+**New Branch** button; switching never overwrites changes, it stops with a message. **Pull Requests** (shown when a connected account
+serves the repository's host) lists the open pull requests with a filter and a refresh button (click one to open it in the browser),
+says "You're all set!" when there are none, and has **Create pull request…** for the current branch (title, description, target
+branch and draft; the branch must be published first). The sparkle button beside the commit description writes the summary and
+description with OpenCommit.
+
 The summary refreshes when you return to the window and every 2 seconds while it is open, so changes made
 in another app show up by themselves.
 
 ## Settings
 
-`⌘,` or the gear in the rail opens Settings, with a page list and a search field on the left:
+`⌘,` or the gear in the title bar opens Settings, with a page list and a search field on the left:
 
 - **General → Appearance → Theme:** System (follows macOS), Light or Dark. It applies at once in every window.
 - **General → Projects → Projects folder:** where new and cloned projects are created (the Local Path of the Add
@@ -143,6 +147,17 @@ in another app show up by themselves.
   the open project, else your home folder.
 - **General → Projects → Add every project in the folder:** **Add all** adds every Git repository directly inside
   the projects folder to the project bar at once (projects already listed are skipped, the open project stays open).
+- **Accounts:** connect GitHub, GitLab or Azure DevOps with a personal access token (**Connect an account…**: choose the service,
+  the host of your own server if you have one, or the Azure DevOps organization, and paste the token; the dialog lists the permissions the token needs, named as the service names them: **GitHub**
+  Contents and Pull requests, Read and write (or the `repo` scope of a classic token); **GitLab** the `api` scope; **Azure DevOps** Code,
+  Read & write, with the token's organization set to yours, not "All accessible organizations", which stops working on
+  December 1, 2026). The token is checked with the service and kept in the macOS Keychain, never in a file. After connecting, Vekro reports
+  what it could confirm: GitLab and classic GitHub tokens list their scopes, so a missing one is named; for a fine-grained GitHub token
+  and for Azure DevOps only reading can be tried, so an information notice says that pushing and pull requests were not checked (a warning appears only for a permission that is certainly missing). A refused
+  request later names the permission it needs. A connected
+  account is used to browse and clone your repositories, to list and create pull requests, and to give Git the token for that host
+  over HTTPS (clone, fetch, pull and push; SSH remotes keep using your keys). **Disconnect** removes the account and its token.
+- **OpenCommit:** how commit messages are generated.
 - **About:** the version and the data folder.
 
 Settings are saved as soon as you change them.
@@ -152,12 +167,15 @@ Settings are saved as soon as you change them.
 | Shortcut | Action |
 | --- | --- |
 | `⌘N` | New window |
-| `⌘T` | New terminal |
+| `⌘T` | New terminal (shows the terminal panel) |
+| `⌘J` | Show or hide the terminal panel |
 | `⌘S` | Save the open file |
+| `⌘W` | Close the open tab; pressed again, the remaining tabs from the last to the first (never the window) |
 | `⌘,` | Open Settings |
 | `⌘Q` | Quit |
 
 ## Where things are stored
 
 `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_DIR`): `projects.json` holds the
-project list, their categories and the one open last; `preferences.json` holds Settings (theme, projects folder, code font size).
+project list, their categories and the one open last; `preferences.json` holds Settings (theme, projects folder, code font size, commit instructions);
+`accounts.json` lists the connected accounts (service, host, user name; never a token: those are in the macOS Keychain, service "Vekro").

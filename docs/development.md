@@ -59,6 +59,7 @@ Required Actions secrets: `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWOR
 | `vekro-git` | lib | repository summary, file diffs, creating and cloning projects |
 | `vekro-storage` | lib | data directory, project list, preferences |
 | `vekro-opencommit` | lib | commit message generation, `~/.opencommit` settings |
+| `vekro-hosting` | lib | GitHub, GitLab and Azure DevOps accounts, repositories and pull requests |
 
 Code map and data flow: [architecture](architecture.md).
 

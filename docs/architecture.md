@@ -6,11 +6,12 @@ Cargo workspace, one-way dependencies:
 apps/vekro ─► app ─► ui ─► terminal
                 │      ├──► git
                 │      ├──► opencommit
+                │      ├──► hosting
                 │      └──► storage
                 └─────────► (ui only)
 ```
 
-`terminal`, `git`, `opencommit` and `storage` never depend on the interface and are tested without a window.
+`terminal`, `git`, `opencommit`, `hosting` and `storage` never depend on the interface and are tested without a window.
 `app` depends on `ui` only.
 
 ## Code map
@@ -19,7 +20,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | --- | --- |
 | `apps/vekro/src/main.rs` | executable entry point only; calls `vekro_app::run` |
 | `crates/app/src/lib.rs` | startup: key bindings, quit, opening and closing windows |
-| `crates/ui/src/workspace.rs` | `Workspace` (one per window): projects, the sidebar, the project rail, the status bar, the sidebar, the dock and the terminals of every project |
+| `crates/ui/src/workspace.rs` | `Workspace` (one per window): projects, the title bar (repository switcher, tabs), the sidebar, the status bar, the dock and the terminals of every project |
 | `crates/ui/src/editor.rs` | `EditorPanel`: tabs (`Tabs`) of file editors and file diffs, shown with the Kit default `TabBar` that the panel draws itself (the dock title bar is off), or the empty state |
 | `crates/ui/src/terminal.rs` | `Terminal` (a view): draws a `Session`, handles keys, mouse, selection, scrolling and paste |
 | `crates/ui/src/commit_settings.rs` | the OpenCommit settings dialog (model, diff size, language, message style, instructions, push after commit) |
@@ -33,33 +34,35 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/{components,assets}.rs` | the blue "chosen" button style; Kit icons |
 | `crates/terminal/src/session.rs` | `Session`: PTY, `alacritty_terminal`, shell directory lookup |
 | `crates/terminal/src/{snapshot,palette,keys,mouse,search}.rs` | styled screen snapshot, colors, key and mouse encoding, scrollback search |
-| `crates/git/src/lib.rs` | `summary` (branch and changed files), `file_diff`, `diff_files`, `branches`, `create_branch`, `switch_branch`, `commit`, `push`, `create_project`, `clone`, `repository_name`, `find_repositories` |
+| `crates/git/src/lib.rs` | `summary` (branch, changed files, and `Sync`: remote, ahead/behind, last fetch), `file_diff`, `diff_files`, `branches`, `create_branch`, `switch_branch`, `commit`, `push`, `fetch`, `pull`, `create_project`, `clone`, `repository_name`, `find_repositories` |
+| `crates/hosting/src/` | `accounts.rs` (`Account`, `Accounts`, `TokenStore`: the macOS Keychain through `security`, or memory), `api.rs` (verify, repositories, pull requests per service), `remote.rs` (`RepoRef`: which repository a remote URL names) |
+| `crates/ui/src/{connections,connect_account,repository_picker,pull_request}.rs` | the accounts list in Settings and the helpers that find the login for a remote; the Connect dialog; the repository list of the Clone tab; the Create pull request dialog |
 | `crates/opencommit/src/` | `config.rs` (`Config`, the `~/.opencommit` file), `prompt.rs` (rules, diff splitting, parsing the answer), `client.rs` (`generate`, the chat API request) |
 | `crates/storage/src/` | `paths.rs` (data directory), `projects.rs` (`ProjectList`), `preferences.rs` (`Preferences`) |
 
 ## Window layout
 
-The `Workspace` renders the title band, then a row of the **project rail** (fixed, 60 px; projects can be dragged onto each other to group them into categories; a category is one tile that opens a scrollable, filterable list of its projects beside the rail), the **sidebar** (an
-icon `TabBar` that switches between Explorer, Git and Terminal, and the selected view, in a Kit `h_resizable` pane,
-200–960 px) and, right of it, a column with the Kit **`DockArea`** and the status bar below it, so the rail and the sidebar run down to the bottom of the window. The sidebar is plain
+The `Workspace` renders the title band (right of the traffic lights: the **repository switcher**, a fixed first tab with a filterable, category-grouped menu of every project and an Add button; then the Add and Settings buttons), then a row of the **sidebar** (an
+icon `TabBar` that switches between Explorer and Git, and the selected view, in a Kit `h_resizable` pane,
+200–960 px) and, right of it, a column with the Kit **`DockArea`** and the status bar below it, so the sidebar runs down to the bottom of the window. The sidebar is plain
 workspace content, not a dock panel, so it has no tab bar. The dock holds only the center: `EditorPanel`. The terminals are
-not dock panels: the Terminal tab of the sidebar lists them (`render_terminal_sessions`), and while that tab is chosen the
-main area draws the open project's shell, or two side by side, in place of the dock (`render_terminal_area`: a title row
-with the buttons, then the shells).
+not dock panels: the title bar's terminal button (`ToggleTerminal`, `⌘J`; `terminal_open`) shows a panel under the dock, in a Kit
+`v_resizable` split so its height can be dragged, with the open project's shell, or two side by side (`render_terminal_area`: a
+title row with the buttons, then the shells). Hiding the panel keeps the shells running.
 
 The Kit draws the dock chrome of the editor (the title, zoom button and `…` menu).
 
 ## Projects and terminals
 
-- `Workspace.projects` is the `ProjectList`, shown as the project rail; the active project decides what the sidebar, the editor
-  tree, the Git summary and the Terminal tab show.
+- `Workspace.projects` is the `ProjectList`, shown in the repository menu of the title bar; the active project decides what the sidebar, the editor
+  tree, the Git summary and the terminal panel show.
 - `Workspace::switch_project` is the only way the open project changes. It puts the old project's Explorer and Git
   selections away (`Workspace.views`) and its editor
   tabs away (`EditorPanel::switch_project`, `saved`), applies the change, restores the new project's views, and
   makes sure the new project has a shell (`ensure_terminal`). Editors that other projects have open are never evicted
   from the cache.
 - `Workspace.terminals` maps each project folder to its terminals; the entities stay alive in the map while another
-  project is open, so their shells keep running. `active_terminal` says which one the Terminal tab shows and
+  project is open, so their shells keep running. `active_terminal` says which one the terminal panel shows and
   `split_terminals` which projects show two side by side. A project with no terminal gets one.
 - A shell that exits sends `TerminalExited`, and Kill terminal does the same job (`close_terminal`): the workspace
   removes the terminal and, if the project has none left, starts another.
@@ -100,8 +103,7 @@ milliseconds; the cost is the first time the highlighter draws a text (up to ~0.
 it, with the folder tree read, on a background thread when the window is activated and every 2 seconds
 (`REFRESH_INTERVAL`), and applies the result only if the project and the expanded folders are unchanged and
 the data differs. `file_diff` produces a unified patch that `EditorPanel` hands to the Kit `Diff`.
-`clone` and `push` run the `git` program (not libgit2) so the user's credentials apply. The branch row of the Git tab opens a
-menu of local branches (`branches`, filtered by typing) with a way to create one; `switch_branch` uses a safe checkout, so
+`clone`, `push`, `fetch` and `pull` (`--ff-only`) run the `git` program (not libgit2) so the user's credentials apply. In the Git tab a toolbar above the editor (`render_git_toolbar`) holds the current branch, whose menu has two tabs: the local branches, and the open pull requests when a connected account serves the remote (`branches`, filtered by typing) with a way to create one, and one button that publishes, pushes, pulls or fetches, whichever the branch needs (`sync_remote`); `switch_branch` uses a safe checkout, so
 changes it would overwrite stop the switch instead of being lost.
 
 ## Commit messages
@@ -114,6 +116,17 @@ live in the user's `~/.opencommit` (shared with the `oco` command; unknown lines
 `VEKRO_OPENCOMMIT_CONFIG` variable names another file for scratch runs); the commit instructions are in `preferences.json`.
 With "Push after commit" the commit button pushes with the `git` program after committing.
 
+## Hosting accounts
+
+A connected account (`vekro_hosting::Account`) is listed in `accounts.json`; its personal access token is in the macOS Keychain
+(`KeychainStore`, the `security` program; the token is an argument of that command for a moment, and is never written to a
+file or a log). Everything that touches the network or the Keychain runs on a background thread: verifying a token when an
+account is connected, listing repositories (Clone tab), listing and creating pull requests (`Workspace::load_pull_requests`,
+`PullRequestForm`). For `clone`, `push`, `fetch` and `pull` of an HTTPS remote, `connections::credentials_for_repository` finds
+the account for the remote's host and gives the `git` program the user name and token through environment variables read by a
+one-command credential helper (`vekro_git::CREDENTIAL_HELPER`), so they appear in no command line or file; SSH remotes keep the
+user's keys. Self-hosted GitHub Enterprise and GitLab are reached by naming the host; Azure DevOps uses the organization.
+
 ## Persistence
 
 Data directory `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_DIR`).
@@ -121,6 +134,7 @@ Data directory `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_
 | File | Type | Written |
 | --- | --- | --- |
 | `projects.json` | `ProjectList` (project paths with their name, icon, color and category; the categories and whether each is folded; the active project) | when a project is added or selected, or a category changes |
+| `accounts.json` | `Accounts` (service, host, organization and user name of each connected account; tokens are in the Keychain) | when an account is connected or disconnected |
 | `preferences.json` | `Preferences` (theme, projects folder, code font size, commit instructions) | on each settings change |
 
 Not stored yet: window size and position, dock layout, open files, running terminals.

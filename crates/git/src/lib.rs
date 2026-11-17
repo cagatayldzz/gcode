@@ -40,6 +40,49 @@ pub struct Summary {
   pub branch: String,
   /// Files with changes in the working tree or the index, including untracked ones, sorted by path.
   pub changes: Vec<Change>,
+  /// Where the branch stands against its remote; `None` when the repository has no remote.
+  pub sync: Option<Sync>,
+}
+
+/// How the checked-out branch relates to its remote.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sync {
+  /// The remote the branch follows, or the first remote while the branch has no upstream yet (`origin` when there is one).
+  pub remote: String,
+  /// The remote's address.
+  pub url: String,
+  /// The branch has an upstream branch on the remote.
+  pub upstream: bool,
+  /// Commits only here, to push.
+  pub ahead: usize,
+  /// Commits only on the remote, to pull (as of the last fetch).
+  pub behind: usize,
+  /// When the remote was last fetched, from the time of `FETCH_HEAD`; `None` if never.
+  pub last_fetched: Option<std::time::SystemTime>,
+}
+
+fn sync_status(repository: &Repository) -> Option<Sync> {
+  let remotes = repository.remotes().ok()?;
+  let head = repository.head().ok().filter(|head| head.is_branch());
+  let name = head.as_ref().and_then(|head| head.shorthand()).map(str::to_string);
+  let upstream =
+    name.as_deref().and_then(|name| repository.find_branch(name, git2::BranchType::Local).ok()).and_then(|branch| branch.upstream().ok());
+  let followed = head
+    .as_ref()
+    .and_then(|head| head.name())
+    .and_then(|name| repository.branch_upstream_remote(name).ok())
+    .and_then(|remote| remote.as_str().map(str::to_string));
+  let remote = match followed {
+    Some(remote) => remote,
+    None => remotes.iter().flatten().find(|remote| *remote == "origin").or_else(|| remotes.iter().flatten().next())?.to_string(),
+  };
+  let (ahead, behind) = match (head.as_ref().and_then(|head| head.target()), upstream.as_ref().and_then(|upstream| upstream.get().target())) {
+    (Some(local), Some(remote)) => repository.graph_ahead_behind(local, remote).unwrap_or((0, 0)),
+    _ => (0, 0),
+  };
+  let last_fetched = std::fs::metadata(repository.path().join("FETCH_HEAD")).and_then(|meta| meta.modified()).ok();
+  let url = repository.find_remote(&remote).ok().and_then(|found| found.url().map(str::to_string)).unwrap_or_default();
+  Some(Sync { remote, url, upstream: upstream.is_some(), ahead, behind, last_fetched })
 }
 
 impl Summary {
@@ -87,7 +130,8 @@ pub fn summary(path: &Path) -> Option<Summary> {
     })
     .unwrap_or_default();
   changes.sort_by(|a, b| a.path.cmp(&b.path));
-  Some(Summary { branch, changes })
+  let sync = sync_status(&repository);
+  Some(Summary { branch, changes, sync })
 }
 
 /// The folder name `git clone` would pick for `url`: `https://github.com/a/vekro.git` gives `vekro`.
@@ -115,14 +159,16 @@ pub fn create_project(parent: &Path, name: &str) -> Result<std::path::PathBuf, S
 
 /// Clones `url` into `parent/<repository name>` with the `git` program, so the user's own SSH keys and
 /// credential helpers apply. It never asks for input: a repository that needs a login fails with git's message.
-pub fn clone(url: &str, parent: &Path) -> Result<std::path::PathBuf, String> {
+pub fn clone(url: &str, parent: &Path, credentials: Option<&Credentials>) -> Result<std::path::PathBuf, String> {
   let url = url.trim();
   let name = repository_name(url).ok_or("Enter a repository URL.")?;
   let path = parent.join(&name);
   if path.exists() {
     return Err(format!("{} already exists.", path.display()));
   }
-  let output = std::process::Command::new("git")
+  let mut command = std::process::Command::new("git");
+  credential_options(&mut command, credentials);
+  let output = command
     .arg("clone")
     .arg("--")
     .arg(url)
@@ -304,31 +350,134 @@ pub fn diff_files(path: &Path, files: &[PathBuf]) -> Result<String, String> {
   Ok(diff)
 }
 
+/// A user name and a password (an access token) for Git over HTTPS, given to `git` for one command through a credential
+/// helper that reads them from the environment, so they never appear in a command line or a file.
+#[derive(Clone)]
+pub struct Credentials {
+  pub username: String,
+  pub password: String,
+}
+
+impl std::fmt::Debug for Credentials {
+  fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    formatter.debug_struct("Credentials").field("username", &self.username).field("password", &"…").finish()
+  }
+}
+
+/// The credential helper `git` is given: it answers a `get` with the user name and password from the environment.
+pub const CREDENTIAL_HELPER: &str =
+  "!f() { test \"$1\" = get && printf 'username=%s\\npassword=%s\\n' \"$VEKRO_GIT_USERNAME\" \"$VEKRO_GIT_PASSWORD\"; }; f";
+
+/// The options that make `git` use `credentials` for the command: the user's own helpers are replaced for this command only.
+fn credential_options(command: &mut std::process::Command, credentials: Option<&Credentials>) {
+  let Some(credentials) = credentials else { return };
+  command
+    .args(["-c", "credential.helper=", "-c"])
+    .arg(format!("credential.helper={CREDENTIAL_HELPER}"))
+    .env("VEKRO_GIT_USERNAME", &credentials.username)
+    .env("VEKRO_GIT_PASSWORD", &credentials.password);
+}
+
+/// Runs the `git` program in `path` with `--progress` and hands each line it reports (git redraws progress lines with a carriage
+/// return) to `on_progress` while it runs. It never asks for input, so the user's own credentials apply and a login prompt becomes
+/// git's error message. Returns whether it succeeded and everything it wrote to stderr.
+fn run_git(path: &Path, arguments: &[&str], credentials: Option<&Credentials>, mut on_progress: impl FnMut(&str)) -> Result<(bool, String), String> {
+  use std::io::Read as _;
+  let mut command = std::process::Command::new("git");
+  command.arg("-C").arg(path);
+  credential_options(&mut command, credentials);
+  let mut child = command
+    .args(arguments)
+    .arg("--progress")
+    .env("GIT_TERMINAL_PROMPT", "0")
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::piped())
+    .spawn()
+    .map_err(|error| format!("Could not run git: {error}"))?;
+  let mut stderr = child.stderr.take().ok_or("Could not read git's output.")?;
+  let (mut all, mut line, mut buffer) = (Vec::new(), Vec::new(), [0u8; 512]);
+  loop {
+    let read = stderr.read(&mut buffer).map_err(|error| format!("Could not read git's output: {error}"))?;
+    if read == 0 {
+      break;
+    }
+    all.extend_from_slice(&buffer[..read]);
+    for byte in &buffer[..read] {
+      if matches!(byte, b'\r' | b'\n') {
+        let text = String::from_utf8_lossy(&line).trim().to_string();
+        if !text.is_empty() {
+          on_progress(&text);
+        }
+        line.clear();
+      } else {
+        line.push(*byte);
+      }
+    }
+  }
+  let status = child.wait().map_err(|error| format!("Could not run git: {error}"))?;
+  Ok((status.success(), String::from_utf8_lossy(&all).to_string()))
+}
+
+/// The last line git wrote, ignoring the redrawn progress states (`\r`-separated) before it.
+fn last_line(text: &str) -> String {
+  text.split(['\r', '\n']).rev().find(|line| !line.trim().is_empty()).unwrap_or("").trim().to_string()
+}
+
+fn finish(result: (bool, String), failure: &str) -> Result<String, String> {
+  let (success, stderr) = result;
+  let line = last_line(&stderr);
+  match (success, line.is_empty()) {
+    (true, _) => Ok(line),
+    (false, true) => Err(failure.to_string()),
+    (false, false) => Err(line),
+  }
+}
+
 /// Pushes the current branch with the `git` program, so the user's own credentials apply; a branch without an upstream is
-/// published to `origin`. It never asks for input. Returns git's last line of output on success.
-pub fn push(path: &Path) -> Result<String, String> {
-  let run = |arguments: &[&str]| {
-    std::process::Command::new("git")
-      .arg("-C")
-      .arg(path)
-      .args(arguments)
-      .env("GIT_TERMINAL_PROMPT", "0")
-      .output()
-      .map_err(|error| format!("Could not run git: {error}"))
-  };
-  let last_line = |bytes: &[u8]| String::from_utf8_lossy(bytes).lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("").trim().to_string();
-  let mut output = run(&["push"])?;
-  if !output.status.success() && String::from_utf8_lossy(&output.stderr).contains("no upstream branch") {
-    output = run(&["push", "--set-upstream", "origin", "HEAD"])?;
+/// published to `origin`. `on_progress` gets git's progress lines ("Writing objects: 45% …") while it runs.
+pub fn push(path: &Path, credentials: Option<&Credentials>, mut on_progress: impl FnMut(&str)) -> Result<String, String> {
+  let mut result = run_git(path, &["push"], credentials, &mut on_progress)?;
+  if !result.0 && result.1.contains("no upstream branch") {
+    result = run_git(path, &["push", "--set-upstream", "origin", "HEAD"], credentials, &mut on_progress)?;
   }
-  if output.status.success() {
-    Ok(last_line(&output.stderr))
-  } else {
-    Err(match last_line(&output.stderr) {
-      message if message.is_empty() => "git push failed.".into(),
-      message => message,
-    })
-  }
+  finish(result, "git push failed.")
+}
+
+/// Fetches the remote of the current branch (`git fetch`). Changes nothing in the working tree.
+pub fn fetch(path: &Path, credentials: Option<&Credentials>, on_progress: impl FnMut(&str)) -> Result<String, String> {
+  finish(run_git(path, &["fetch"], credentials, on_progress)?, "git fetch failed.")
+}
+
+/// Brings in the remote's new commits with `git pull --ff-only`: it only moves the branch forward, never creates a merge, and
+/// refuses (with git's message) when the branches have diverged or local changes are in the way.
+pub fn pull(path: &Path, credentials: Option<&Credentials>, on_progress: impl FnMut(&str)) -> Result<String, String> {
+  finish(run_git(path, &["pull", "--ff-only"], credentials, on_progress)?, "git pull failed.")
+}
+
+/// The URL of the remote the current branch follows, else `origin`, else the first remote; `None` without remotes.
+pub fn remote_url(path: &Path) -> Option<String> {
+  let repository = Repository::discover(path).ok()?;
+  let remotes = repository.remotes().ok()?;
+  let followed = repository
+    .head()
+    .ok()
+    .and_then(|head| head.name().map(str::to_string))
+    .and_then(|name| repository.branch_upstream_remote(&name).ok())
+    .and_then(|remote| remote.as_str().map(str::to_string));
+  let name = followed
+    .or_else(|| remotes.iter().flatten().find(|name| *name == "origin").map(str::to_string))
+    .or_else(|| remotes.iter().flatten().next().map(str::to_string))?;
+  let remote = repository.find_remote(&name).ok()?;
+  let url = remote.url().map(str::to_string);
+  url
+}
+
+/// The first line of the last commit's message.
+pub fn head_summary(path: &Path) -> Option<String> {
+  let repository = Repository::discover(path).ok()?;
+  let commit = repository.head().ok()?.peel_to_commit().ok()?;
+  commit.summary().map(str::to_string)
 }
 
 /// The folders directly inside `folder` that are Git repositories, sorted by name. Folders that cannot be read are skipped.

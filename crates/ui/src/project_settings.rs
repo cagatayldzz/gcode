@@ -1,4 +1,4 @@
-//! The dialog that sets how a project looks in the rail: its name, icon and color.
+//! The dialog that sets how a project looks in the project menu: its name, icon and color.
 
 use crate::{
   components::selected_style,

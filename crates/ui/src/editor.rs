@@ -1,6 +1,6 @@
 //! The editor area: tabs of code editors and of the diffs of changed files.
 
-use crate::settings::code_font_size;
+use crate::{close_order::CloseOrder, settings::code_font_size};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -76,6 +76,8 @@ enum OpenTab {
 struct Tabs {
   items: Vec<OpenTab>,
   active: usize,
+  /// Which tab the close shortcut takes next.
+  close_order: CloseOrder,
 }
 
 impl Tabs {
@@ -85,6 +87,7 @@ impl Tabs {
 
   /// Shows the tab for which `same` is true, or adds `tab` and shows it.
   fn show(&mut self, tab: OpenTab, same: impl Fn(&OpenTab) -> bool) {
+    self.close_order.reset();
     match self.items.iter().position(same) {
       Some(index) => {
         self.items[index] = tab;
@@ -196,11 +199,19 @@ impl EditorPanel {
   fn activate(&mut self, index: usize, cx: &mut Context<Self>) {
     if index < self.tabs.items.len() {
       self.tabs.active = index;
+      self.tabs.close_order.reset();
       if let Some(OpenTab::File(path)) = self.tabs.current().cloned() {
         self.touch(&path);
       }
       self.announce(cx);
     }
+  }
+
+  /// The close shortcut: the shown tab first, then the others from the last to the first. Returns false when no tab is open.
+  pub fn close_by_shortcut(&mut self, cx: &mut Context<Self>) -> bool {
+    let Some(index) = self.tabs.close_order.next(self.tabs.items.len(), self.tabs.active) else { return false };
+    self.close_tab(index, cx);
+    true
   }
 
   /// Closes a tab. A file with unsaved text keeps it in memory: opening the file again brings it back.

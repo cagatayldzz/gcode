@@ -1,15 +1,21 @@
 use crate::{
   commit_settings::{CommitSettings, CommitSettingsSaved},
   components::{avatar_look, display_path},
+  connect_account::{AccountConnected, ConnectAccount},
+  connections::{accounts_path, credentials_for_repository, describe, AccountsList},
   editor::{ActiveTab, EditorPanel},
   explorer,
   project_manager::ProjectManager,
   project_settings::{AppearanceChosen, ProjectSettings},
   project_setup::{ProjectReady, ProjectSetup},
-  settings::{init_settings, settings_view, AddAllProjectsRequested, CommitSettingsRequested, SettingsGlobal, SettingsModel},
+  pull_request::{PullRequestForm, PullRequestOpened, PullRequestTarget},
+  settings::{
+    init_settings, settings_view, AccountRemoveRequested, AddAllProjectsRequested, CommitSettingsRequested, ConnectAccountRequested, SettingsGlobal,
+    SettingsModel,
+  },
   terminal::{Terminal, TerminalExited},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
-  AddProject, NewTerminal, OpenSettings, SaveFile,
+  AddProject, CloseTab, NewTerminal, OpenSettings, SaveFile, ToggleTerminal,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -23,8 +29,9 @@ use gpui_kit::{
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
     notification::Notification,
     popover::Popover,
-    resizable::{h_resizable, resizable_panel},
+    resizable::{h_resizable, resizable_panel, v_resizable},
     scroll::{ScrollableElement as _, Scrollbar, ScrollbarAxis},
+    spinner::Spinner,
     status_bar::StatusBar,
     tab::{Tab, TabBar},
     tooltip::Tooltip,
@@ -36,14 +43,21 @@ use std::{
   collections::{HashMap, HashSet},
   ops::Range,
   path::{Path, PathBuf},
+  sync::{Arc, Mutex},
   time::Duration,
 };
 use vekro_git::Summary;
+use vekro_hosting::{KeychainStore, PullRequest, RepoRef};
 use vekro_opencommit::DEFAULT_INSTRUCTIONS;
 use vekro_storage::{Category, Preferences, Project, ProjectList};
 
 /// Height of the top band: the traffic lights and the title.
 pub const TOOLBAR_HEIGHT: Pixels = px(40.);
+
+/// The terminal panel's height when it opens, and how far it can be dragged.
+const TERMINAL_HEIGHT: Pixels = px(260.);
+const TERMINAL_MIN_HEIGHT: Pixels = px(120.);
+const TERMINAL_MAX_HEIGHT: Pixels = px(800.);
 
 /// The width of the branch menu and of a category's project list.
 const MENU_WIDTH: Pixels = px(280.);
@@ -51,8 +65,8 @@ const MENU_WIDTH: Pixels = px(280.);
 /// How tall the branch list and a category's project list get before they scroll.
 const MENU_LIST_MAX_HEIGHT: Pixels = px(320.);
 
-/// A category with more projects than this gets a filter field in its list.
-const CATEGORY_FILTER_MIN: usize = 8;
+/// How often the toolbar redraws while git reports its progress.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
 
 /// How long the pointer must rest on a file in the Explorer before it is prepared for opening, so that moving past
 /// files costs nothing.
@@ -60,9 +74,6 @@ const HOVER_PREPARE_DELAY: Duration = Duration::from_millis(120);
 
 /// How often the Git summary and the folder tree are read again while the window is open.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
-
-/// Width of the icon rail on the far left.
-const RAIL_WIDTH: Pixels = px(60.);
 
 /// Width of the sidebar when the window opens.
 const SIDEBAR_WIDTH: Pixels = px(280.);
@@ -80,17 +91,15 @@ enum SidebarTab {
   #[default]
   Explorer,
   Git,
-  Terminal,
 }
 
 impl SidebarTab {
-  const ALL: [SidebarTab; 3] = [SidebarTab::Explorer, SidebarTab::Git, SidebarTab::Terminal];
+  const ALL: [SidebarTab; 2] = [SidebarTab::Explorer, SidebarTab::Git];
 
   fn icon(self) -> Icon {
     match self {
       SidebarTab::Explorer => Icon::empty().path("icons/folder-tree.svg"),
       SidebarTab::Git => Icon::empty().path("icons/git-branch.svg"),
-      SidebarTab::Terminal => Icon::empty().path("icons/terminal.svg"),
     }
   }
 
@@ -98,7 +107,6 @@ impl SidebarTab {
     match self {
       SidebarTab::Explorer => "Explorer",
       SidebarTab::Git => "Git",
-      SidebarTab::Terminal => "Terminal",
     }
   }
 }
@@ -111,7 +119,29 @@ struct ProjectView {
   selected_change: Option<PathBuf>,
 }
 
-/// One window: the rail and panel on the left and the open project on the right.
+/// A push, pull or fetch that is running: what the toolbar button says, and the last progress line git reported.
+struct RemoteWork {
+  title: SharedString,
+  progress: Arc<Mutex<String>>,
+}
+
+/// The open pull requests of the repository, as the toolbar's menu knows them.
+#[derive(Clone)]
+enum PullRequests {
+  Idle,
+  Loading,
+  Loaded(Vec<PullRequest>),
+  Failed(SharedString),
+}
+
+/// The two tabs of the branch menu.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BranchTab {
+  Branches,
+  PullRequests,
+}
+
+/// One window: the title bar, the sidebar on the left and the open project on the right.
 pub struct Workspace {
   projects: ProjectList,
   /// The settings every window shares.
@@ -139,15 +169,25 @@ pub struct Workspace {
   commit_description: Entity<TextareaState>,
   /// A commit is being made.
   committing: bool,
+  /// The open pull requests the branch menu lists.
+  /// Which tab of the branch menu is shown.
+  branch_tab: BranchTab,
+  pull_requests: PullRequests,
+  /// Which load the listed pull requests belong to, so a slow answer for another project is ignored.
+  pr_epoch: u64,
+  /// The terminal panel at the bottom of the window is shown.
+  terminal_open: bool,
   /// A commit message is being generated.
   generating: bool,
+  /// The push, pull or fetch that is running.
+  remote_work: Option<RemoteWork>,
   /// The branch menu is open, with the local branches it lists and the field that filters them.
   branch_menu_open: bool,
   branches: Vec<String>,
   branch_filter: Entity<InputState>,
-  /// The category whose project list is open in the rail, and the field that filters it.
-  open_category: Option<String>,
-  category_filter: Entity<InputState>,
+  /// The repository menu of the title bar is open.
+  projects_menu_open: bool,
+  project_filter: Entity<InputState>,
   _commit_subscriptions: Vec<Subscription>,
   _settings_subscriptions: Vec<Subscription>,
   _appearance: Subscription,
@@ -163,9 +203,9 @@ pub struct Workspace {
   editor_panel: Entity<EditorPanel>,
   /// The shells of every project that has been opened, kept alive while another project is shown.
   terminals: HashMap<PathBuf, Vec<Entity<Terminal>>>,
-  /// Which of a project's shells the Terminal tab shows.
+  /// Which of a project's shells the terminal panel shows.
   active_terminal: HashMap<PathBuf, usize>,
-  /// The projects whose Terminal tab shows two shells side by side.
+  /// The projects whose terminal panel shows two shells side by side.
   split_terminals: HashSet<PathBuf>,
   _terminal_subscriptions: Vec<Subscription>,
 }
@@ -189,7 +229,7 @@ impl Workspace {
     let commit_summary = cx.new(|cx| InputState::new(window, cx).placeholder("Summary (required)"));
     let commit_description = cx.new(|cx| TextareaState::new(window, cx).placeholder("Description"));
     let branch_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find or create a branch"));
-    let category_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find a project"));
+    let project_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find a project"));
     let mut this = Self {
       projects: ProjectList::load(&ProjectList::default_path()),
       settings: settings.clone(),
@@ -209,18 +249,23 @@ impl Workspace {
       commit_summary: commit_summary.clone(),
       commit_description: commit_description.clone(),
       committing: false,
+      branch_tab: BranchTab::Branches,
+      pull_requests: PullRequests::Idle,
+      pr_epoch: 0,
+      terminal_open: false,
       generating: false,
+      remote_work: None,
       branch_menu_open: false,
       branches: Vec::new(),
       branch_filter: branch_filter.clone(),
-      open_category: None,
-      category_filter: category_filter.clone(),
+      projects_menu_open: false,
+      project_filter: project_filter.clone(),
       _commit_subscriptions: vec![
         // The commit button is enabled once there is a summary.
         cx.subscribe(&commit_summary, |_, _, _: &InputEvent, cx| cx.notify()),
         // The menus list what the filter field matches.
         cx.subscribe(&branch_filter, |_, _, _: &InputEvent, cx| cx.notify()),
-        cx.subscribe(&category_filter, |_, _, _: &InputEvent, cx| cx.notify()),
+        cx.subscribe(&project_filter, |_, _, _: &InputEvent, cx| cx.notify()),
       ],
       _settings_subscriptions: vec![
         // Any change to a setting is saved and applied in every window.
@@ -231,6 +276,16 @@ impl Workspace {
           }
           apply_theme(preferences.theme, preferences.code_font_size, window, cx);
           cx.notify();
+        }),
+        cx.subscribe_in(&settings, window, |this, _, _: &ConnectAccountRequested, window, cx| {
+          if window.is_window_active() {
+            this.open_connect_account(window, cx);
+          }
+        }),
+        cx.subscribe_in(&settings, window, |this, _, event: &AccountRemoveRequested, window, cx| {
+          if window.is_window_active() {
+            this.remove_account(event.0.clone(), window, cx);
+          }
         }),
         cx.subscribe_in(&settings, window, |this, _, _: &CommitSettingsRequested, window, cx| {
           if window.is_window_active() {
@@ -256,7 +311,7 @@ impl Workspace {
       }),
       // Changes made in another app (an editor, GitHub Desktop, a terminal) show up as soon as the window is back.
       _editor: cx.observe(&editor_panel, |_, _, cx| cx.notify()),
-      _active_tab: cx.subscribe(&editor_panel, |this, _, shown: &ActiveTab, cx| {
+      _active_tab: cx.subscribe_in(&editor_panel, window, |this, _, shown: &ActiveTab, window, cx| {
         match shown {
           ActiveTab::File(path) => {
             this.selected_entry = Some(path.clone());
@@ -270,6 +325,10 @@ impl Workspace {
             this.selected_entry = None;
             this.selected_change = None;
           }
+        }
+        // Closing the tab that held the focus leaves nothing focused, and then no shortcut (⌘W, ⌘S) reaches the window.
+        if window.focused(cx).is_none() {
+          this.focus_handle.focus(window, cx);
         }
         cx.notify();
       }),
@@ -335,7 +394,7 @@ impl Workspace {
     Some(terminal)
   }
 
-  /// The shells of the open project and the position of the one the Terminal tab is on.
+  /// The shells of the open project and the position of the one the terminal panel is on.
   fn open_terminals(&self) -> (Vec<Entity<Terminal>>, usize) {
     let Some(root) = &self.projects.active else { return (Vec::new(), 0) };
     let list = self.terminals.get(root).cloned().unwrap_or_default();
@@ -343,7 +402,7 @@ impl Workspace {
     (list, active)
   }
 
-  /// Gives the keyboard to the shell the Terminal tab is on, once the tab is drawn.
+  /// Gives the keyboard to the shell the terminal panel is on, once it is drawn.
   fn focus_terminal(&self, window: &mut Window, cx: &mut Context<Self>) {
     let (list, active) = self.open_terminals();
     if let Some(terminal) = list.get(active) {
@@ -352,11 +411,21 @@ impl Workspace {
     }
   }
 
-  /// Switches to the Terminal tab and puts the keyboard in the shell.
-  fn show_terminal_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    self.sidebar_tab = SidebarTab::Terminal;
+  /// Shows the terminal panel and puts the keyboard in the shell.
+  fn show_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.terminal_open = true;
+    self.ensure_terminal(window, cx);
     self.focus_terminal(window, cx);
     cx.notify();
+  }
+
+  /// The title bar's terminal button and its shortcut: shows or hides the terminal panel. The shells keep running.
+  pub fn toggle_terminal(&mut self, _: &ToggleTerminal, window: &mut Window, cx: &mut Context<Self>) {
+    if self.terminal_open {
+      self.hide_terminal(window, cx);
+    } else {
+      self.show_terminal(window, cx);
+    }
   }
 
   /// Opens another shell in the open project and shows it.
@@ -367,7 +436,7 @@ impl Workspace {
     }
     let last = self.terminals.get(&root).map_or(0, |list| list.len().saturating_sub(1));
     self.active_terminal.insert(root, last);
-    self.show_terminal_tab(window, cx);
+    self.show_terminal(window, cx);
   }
 
   /// Shows two shells side by side, starting a second one if the project has only one.
@@ -377,7 +446,7 @@ impl Workspace {
       return;
     }
     self.split_terminals.insert(root);
-    self.show_terminal_tab(window, cx);
+    self.show_terminal(window, cx);
   }
 
   /// Stops the shell the tab is on and takes it away. The last one is replaced by a fresh shell.
@@ -386,14 +455,6 @@ impl Workspace {
     if let Some(terminal) = list.get(active) {
       self.close_terminal(terminal.clone(), window, cx);
       self.focus_terminal(window, cx);
-    }
-  }
-
-  /// Stops the shell at `index` of the open project and takes it away.
-  pub(crate) fn kill_terminal_at(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-    let (list, _) = self.open_terminals();
-    if let Some(terminal) = list.get(index) {
-      self.close_terminal(terminal.clone(), window, cx);
     }
   }
 
@@ -406,10 +467,16 @@ impl Workspace {
     cx.notify();
   }
 
-  /// Leaves the Terminal tab; the shells keep running.
-  pub(crate) fn hide_terminal_tab(&mut self, cx: &mut Context<Self>) {
-    self.sidebar_tab = SidebarTab::Explorer;
+  /// Hides the terminal panel; the shells keep running. The keyboard goes back to the window, so shortcuts keep working.
+  pub(crate) fn hide_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.terminal_open = false;
+    self.focus_handle.focus(window, cx);
     cx.notify();
+  }
+
+  /// A shell has the keyboard.
+  fn terminal_focused(&self, window: &Window, cx: &App) -> bool {
+    self.open_terminals().0.iter().any(|terminal| terminal.read(cx).focus_handle(cx).contains_focused(window, cx))
   }
 
   /// Removes a terminal, whose shell has exited or was killed; a project never stays without one.
@@ -434,6 +501,7 @@ impl Workspace {
     let fallback = self.new_project_dir(cx);
     let workspace = cx.entity();
     let projects = cx.new(|cx| ProjectManager::new(workspace, cx));
+    let accounts = cx.new(AccountsList::new);
     window.open_dialog(cx, move |dialog, _, _| {
       // The dialog's own padding is removed so that the page list reaches the edges of the window.
       dialog.p_0().width(px(820.)).child(
@@ -441,7 +509,7 @@ impl Workspace {
           .rounded_b_lg()
           .overflow_hidden()
           .child(Label::new("Settings").text_lg().font_weight(FontWeight::SEMIBOLD).px_6().py_4())
-          .child(div().h(px(520.)).child(settings_view(fallback.clone(), projects.clone()))),
+          .child(div().h(px(520.)).child(settings_view(fallback.clone(), projects.clone(), accounts.clone()))),
       )
     });
   }
@@ -474,7 +542,8 @@ impl Workspace {
   /// Opens the dialog that creates, clones or imports a project.
   pub fn add_project(&mut self, _: &AddProject, window: &mut Window, cx: &mut Context<Self>) {
     let location = self.new_project_dir(cx);
-    let setup = cx.new(|cx| ProjectSetup::new(location, window, cx));
+    let accounts = self.settings.read(cx).accounts.clone();
+    let setup = cx.new(|cx| ProjectSetup::new(location, accounts, window, cx));
     self._setup_subscription = Some(cx.subscribe_in(&setup, window, |this, _, event: &ProjectReady, window, cx| {
       window.close_all_dialogs(cx);
       let path = event.0.clone();
@@ -545,15 +614,7 @@ impl Workspace {
     cx.notify();
   }
 
-  /// A project was dropped on another one: they share a category now, a new unnamed one if there was none.
-  fn group_projects(&mut self, dragged: &Path, target: &Path, cx: &mut Context<Self>) {
-    if self.projects.group(dragged, target).is_some() {
-      self.persist_projects();
-      cx.notify();
-    }
-  }
-
-  /// The projects and categories the rail shows.
+  /// The projects and categories the project menu shows.
   pub(crate) fn project_list(&self) -> &ProjectList {
     &self.projects
   }
@@ -565,7 +626,7 @@ impl Workspace {
     cx.notify();
   }
 
-  /// Moves a category up or down in the rail.
+  /// Moves a category up or down in the menu.
   pub(crate) fn move_category_by(&mut self, id: &str, delta: isize, cx: &mut Context<Self>) {
     self.projects.move_category_by(id, delta);
     self.persist_projects();
@@ -874,12 +935,16 @@ impl Workspace {
     let description = self.commit_description.read(cx).value().to_string();
     self.committing = true;
     cx.notify();
-    let push = self.settings.read(cx).opencommit.git_push;
+    let (push, accounts) = {
+      let model = self.settings.read(cx);
+      (model.opencommit.git_push, model.accounts.clone())
+    };
     let work = cx.background_executor().spawn({
       let (root, files) = (root.clone(), files.clone());
       async move {
         let id = vekro_git::commit(&root, &files, &summary, &description)?;
-        Ok::<_, String>((id, push.then(|| vekro_git::push(&root))))
+        let pushed = push.then(|| vekro_git::push(&root, credentials_for_repository(&accounts, &root).as_ref(), |_| {}));
+        Ok::<_, String>((id, pushed))
       }
     });
     cx.spawn_in(window, async move |this, cx| {
@@ -911,6 +976,51 @@ impl Workspace {
       });
     })
     .detach();
+  }
+
+  /// Opens the dialog that connects a GitHub, GitLab or Azure DevOps account.
+  pub(crate) fn open_connect_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let form = cx.new(|cx| ConnectAccount::new(window, cx));
+    self._dialog_subscription = Some(cx.subscribe_in(&form, window, |this, _, connected: &AccountConnected, window, cx| {
+      let (account, warnings, unchecked) = (connected.0.clone(), connected.1.clone(), connected.2.clone());
+      let described = describe(&account);
+      this.settings.update(cx, |model, cx| {
+        model.accounts.add(account);
+        if let Err(error) = model.accounts.save(&accounts_path()) {
+          eprintln!("Could not save the accounts: {error}");
+        }
+        cx.notify();
+      });
+      window.close_dialog(cx);
+      if !warnings.is_empty() {
+        window.push_notification(Notification::warning(format!("Connected {described}, but: {}", warnings.join(" "))), cx);
+      } else if let Some(note) = unchecked {
+        window.push_notification(Notification::info(format!("Connected {described}. {note}")), cx);
+      } else {
+        window.push_notification(Notification::info(format!("Connected {described}.")), cx);
+      }
+    }));
+    window.open_dialog(cx, move |dialog, _, _| dialog.title("Connect an account").width(px(540.)).child(form.clone()));
+  }
+
+  /// Disconnects an account: it leaves the list and its token leaves the Keychain.
+  fn remove_account(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
+    let described = self.settings.read(cx).accounts.items.iter().find(|account| account.key() == key).map(describe);
+    let work = cx.background_executor().spawn({
+      let key = key.clone();
+      async move { vekro_hosting::TokenStore::delete(&vekro_hosting::KeychainStore, &key) }
+    });
+    self.settings.update(cx, |model, cx| {
+      model.accounts.items.retain(|account| account.key() != key);
+      if let Err(error) = model.accounts.save(&accounts_path()) {
+        eprintln!("Could not save the accounts: {error}");
+      }
+      cx.notify();
+    });
+    cx.spawn(async move |_, _| work.await).detach();
+    if let Some(described) = described {
+      window.push_notification(Notification::info(format!("Disconnected {described}.")), cx);
+    }
   }
 
   /// Opens the dialog for the commit message generator: the OpenCommit settings and the commit instructions.
@@ -982,10 +1092,153 @@ impl Workspace {
     .detach();
   }
 
+  /// Does what the toolbar's button says: pulls when the remote is ahead, pushes (or publishes) when the branch is, else fetches.
+  /// The button shows what git reports while it works.
+  fn sync_remote(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let (Some(root), Some(sync)) = (self.projects.active.clone(), self.git.as_ref().and_then(|git| git.sync.clone())) else { return };
+    if self.remote_work.is_some() {
+      return;
+    }
+    let remote = sync.remote.clone();
+    let (title, done) = if sync.behind > 0 {
+      (format!("Pulling from {remote}"), "Pulled")
+    } else if !sync.upstream {
+      ("Publishing branch".to_string(), "Published")
+    } else if sync.ahead > 0 {
+      (format!("Pushing to {remote}"), "Pushed")
+    } else {
+      (format!("Fetching {remote}"), "Fetched")
+    };
+    let progress = Arc::new(Mutex::new(String::from("Connecting…")));
+    self.remote_work = Some(RemoteWork { title: title.into(), progress: progress.clone() });
+    cx.notify();
+    let accounts = self.settings.read(cx).accounts.clone();
+    let work = cx.background_executor().spawn({
+      let root = root.clone();
+      let report = move |line: &str| *progress.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = line.to_string();
+      async move {
+        let credentials = credentials_for_repository(&accounts, &root);
+        if sync.behind > 0 {
+          vekro_git::pull(&root, credentials.as_ref(), report)
+        } else if sync.ahead > 0 || !sync.upstream {
+          vekro_git::push(&root, credentials.as_ref(), report)
+        } else {
+          vekro_git::fetch(&root, credentials.as_ref(), report)
+        }
+      }
+    });
+    // Redraw a few times a second while git reports, so the progress text moves.
+    let ticker = cx.spawn(async move |this, cx| loop {
+      cx.background_executor().timer(PROGRESS_INTERVAL).await;
+      if this
+        .update(cx, |this, cx| {
+          if this.remote_work.is_some() {
+            cx.notify();
+          }
+          this.remote_work.is_some()
+        })
+        .unwrap_or(false)
+      {
+        continue;
+      }
+      break;
+    });
+    cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.remote_work = None;
+        this.refresh_project();
+        match result {
+          Ok(_) => window.push_notification(Notification::info(format!("{done} {remote}.")), cx),
+          Err(message) => window.push_notification(Notification::error(message), cx),
+        }
+        cx.notify();
+      });
+      drop(ticker);
+    })
+    .detach();
+  }
+
+  /// The address of the repository's remote and the repository it names, when a connected account serves its host: pull requests
+  /// can be used.
+  fn hosted_remote(&self, cx: &App) -> Option<(String, RepoRef)> {
+    let url = self.git.as_ref()?.sync.as_ref()?.url.clone();
+    let accounts = &self.settings.read(cx).accounts;
+    accounts.items.iter().find_map(|account| RepoRef::for_account(account, &url)).map(|repository| (url, repository))
+  }
+
+  /// Shows a tab of the branch menu, with an empty filter.
+  fn set_branch_tab(&mut self, tab: BranchTab, window: &mut Window, cx: &mut Context<Self>) {
+    if self.branch_tab == tab {
+      return;
+    }
+    self.branch_tab = tab;
+    self.branch_filter.update(cx, |input, cx| input.set_value("", window, cx));
+    let focus = self.branch_filter.read(cx).focus_handle(cx);
+    window.defer(cx, move |window, cx| focus.focus(window, cx));
+    if tab == BranchTab::PullRequests {
+      self.load_pull_requests(cx);
+    }
+    cx.notify();
+  }
+
+  /// Reads the open pull requests of the repository off the interface thread.
+  fn load_pull_requests(&mut self, cx: &mut Context<Self>) {
+    let (Some((url, _)), Some(root)) = (self.hosted_remote(cx), self.projects.active.clone()) else { return };
+    let accounts = self.settings.read(cx).accounts.clone();
+    self.pull_requests = PullRequests::Loading;
+    self.pr_epoch += 1;
+    let epoch = self.pr_epoch;
+    let work = cx.background_executor().spawn(async move {
+      let (connection, repository) = accounts
+        .for_remote(&url, &KeychainStore)
+        .ok_or("The token for this account is not in the Keychain. Connect the account again in Settings → Accounts.")?;
+      vekro_hosting::pull_requests(&connection, &repository)
+    });
+    cx.spawn(async move |this, cx| {
+      let result = work.await;
+      let _ = this.update(cx, |this, cx| {
+        if this.pr_epoch == epoch && this.projects.active.as_ref() == Some(&root) {
+          this.pull_requests = match result {
+            Ok(found) => PullRequests::Loaded(found),
+            Err(message) => PullRequests::Failed(message.into()),
+          };
+          cx.notify();
+        }
+      });
+    })
+    .detach();
+  }
+
+  /// Opens the dialog that creates a pull request for the current branch.
+  fn open_pull_request_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.branch_menu_open = false;
+    cx.notify();
+    let (Some(root), Some(git), Some((url, _))) = (self.projects.active.clone(), self.git.as_ref(), self.hosted_remote(cx)) else { return };
+    let Some(sync) = git.sync.as_ref() else { return };
+    let target = PullRequestTarget {
+      remote_url: url,
+      source: git.branch.clone(),
+      unpushed: sync.ahead,
+      published: sync.upstream,
+      suggested_title: vekro_git::head_summary(&root).unwrap_or_else(|| git.branch.clone()),
+    };
+    let accounts = self.settings.read(cx).accounts.clone();
+    let form = cx.new(|cx| PullRequestForm::new(accounts, target, window, cx));
+    self._dialog_subscription = Some(cx.subscribe_in(&form, window, |this, _, opened: &PullRequestOpened, window, cx| {
+      window.close_dialog(cx);
+      window.push_notification(Notification::info(format!("Opened pull request #{}: {}", opened.0.number, opened.0.title)), cx);
+      cx.open_url(&opened.0.url);
+      this.load_pull_requests(cx);
+    }));
+    window.open_dialog(cx, move |dialog, _, _| dialog.title("Create a pull request").width(px(560.)).child(form.clone()));
+  }
+
   /// Opens or closes the branch menu; opening reads the local branches and clears the filter.
   fn set_branch_menu(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
     self.branch_menu_open = open;
     if open {
+      self.branch_tab = BranchTab::Branches;
       if let Some(root) = &self.projects.active {
         self.branches = vekro_git::branches(root).unwrap_or_default();
       }
@@ -1036,15 +1289,24 @@ impl Workspace {
     });
   }
 
-  /// Opens or closes the project list of a category in the rail.
-  fn set_category_menu(&mut self, id: &str, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+  /// Opens or closes the repository menu of the title bar; opening clears the filter and focuses it.
+  fn set_projects_menu(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+    self.projects_menu_open = open;
     if open {
-      self.open_category = Some(id.to_string());
-      self.category_filter.update(cx, |input, cx| input.set_value("", window, cx));
-    } else if self.open_category.as_deref() == Some(id) {
-      self.open_category = None;
+      self.project_filter.update(cx, |input, cx| input.set_value("", window, cx));
+      let focus = self.project_filter.read(cx).focus_handle(cx);
+      window.defer(cx, move |window, cx| focus.focus(window, cx));
     }
     cx.notify();
+  }
+
+  /// ⌘W: closes the open tab of the editor, then the others from the last to the first, and keeps the focus in the window so
+  /// the shortcut keeps working. It never closes the window, and does nothing while a terminal has the keyboard.
+  pub fn close_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
+    if !self.terminal_focused(window, cx) && self.editor_panel.update(cx, |editor, cx| editor.close_by_shortcut(cx)) {
+      // The closed tab held the focus; without a focused element in the window the next ⌘W would reach nothing.
+      self.focus_handle.focus(window, cx);
+    }
   }
 
   /// Saves the file open in the editor.
@@ -1083,249 +1345,34 @@ impl Workspace {
     bar
   }
 
-  /// The categories a project can be moved to: their ids and what the menus call them.
-  fn category_choices(&self) -> Vec<(String, SharedString)> {
-    self
-      .projects
-      .categories
-      .iter()
-      .enumerate()
-      .map(|(index, category)| (category.id.clone(), SharedString::from(category_label(index, category))))
-      .collect()
-  }
-
-  /// One project's avatar. It can be dragged onto another project or a category, and a right click opens its menu.
-  fn rail_project(&self, project: &Project, cx: &mut Context<Self>) -> impl IntoElement {
-    let palette = colors(cx);
-    let path = project.path.clone();
-    let name = SharedString::from(project.name());
-    let look = avatar_look(project, self.projects.active.as_ref() == Some(&project.path), cx);
-    let (fill, text, hover) = (look.fill, look.text, look.hover);
-    let drag_over = palette.rail_hover;
-    let workspace = cx.entity();
-    let categories = self.category_choices();
-    let current = project.category.clone();
-    let (drag_label, drag_fill, drag_text) = (look.letter.clone(), fill.unwrap_or(palette.rail_hover), text);
-    div()
-      .id(SharedString::from(format!("rail-{}", path.display())))
-      .size_9()
-      .flex()
-      .flex_none()
-      .items_center()
-      .justify_center()
-      .rounded_lg()
-      .cursor_pointer()
-      .text_base()
-      .font_weight(FontWeight::MEDIUM)
-      .text_color(text)
-      .when_some(fill, |avatar, fill| avatar.bg(fill))
-      .hover(move |avatar| avatar.bg(hover))
-      .drag_over::<DraggedProject>(move |style, _, _, _| style.bg(drag_over))
-      .when_some(look.icon.clone(), |avatar, icon| avatar.child(Icon::empty().path(icon).size_5()))
-      .when(look.icon.is_none(), |avatar| avatar.child(look.letter.clone()))
-      .tooltip(move |window, cx| Tooltip::new(name.clone()).build(window, cx))
-      .on_drag(DraggedProject(path.clone()), move |_, _, _, cx| {
-        cx.new(|_| DragPreview { label: drag_label.clone().into(), fill: drag_fill, text: drag_text })
-      })
-      .on_drop(cx.listener({
-        let target = path.clone();
-        move |this, dragged: &DraggedProject, _, cx| this.group_projects(&dragged.0, &target, cx)
-      }))
-      .on_click(cx.listener({
-        let path = path.clone();
-        move |this, _, window, cx| this.select_project(path.clone(), window, cx)
-      }))
-      .context_menu(move |menu, _, _| project_menu(menu, &workspace, &path, &categories, current.as_deref()))
-  }
-
-  /// A category in the rail: one tile, always the same size however many projects it holds. Clicking it opens the list of
-  /// its projects beside the rail, which scrolls and can be filtered, so a category of twenty is as easy to use as one of two.
-  fn rail_category(&self, index: usize, category: &Category, cx: &mut Context<Self>) -> impl IntoElement {
-    let palette = colors(cx);
-    let members: Vec<Project> = self.projects.projects_in(Some(&category.id)).cloned().collect();
-    let count = members.len();
-    let label = SharedString::from(category_label(index, category));
-    let has_active = members.iter().any(|project| self.projects.active.as_ref() == Some(&project.path));
-    let workspace = cx.entity();
-    let categories = self.category_choices();
-    let id = category.id.clone();
-    let open = self.open_category.as_deref() == Some(id.as_str());
-    // A category shows the first letter of its name, in an outlined tile, so it never looks like a project's filled avatar.
-    let glyph = Label::new(initial(&label)).text_base().font_weight(FontWeight::SEMIBOLD);
-    let tile = Button::new(SharedString::from(format!("rail-category-{id}")))
-      .custom(
-        ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.rail_text).hover(palette.rail_item_hover).active(palette.rail_item_hover),
-      )
-      .size_9()
-      .rounded_md()
-      .border_1()
-      .border_color(if has_active { palette.accent } else { palette.control_border })
-      .tooltip(SharedString::from(match count {
-        1 => format!("{label} · 1 project"),
-        count => format!("{label} · {count} projects"),
-      }))
-      .child(glyph);
-    let menu = Popover::new(SharedString::from(format!("category-menu-{id}")))
-      .anchor(Anchor::LeftCenter)
-      .open(open)
-      .on_open_change({
-        let (workspace, id) = (workspace.clone(), id.clone());
-        move |open, window, cx| workspace.update(cx, |this, cx| this.set_category_menu(&id, *open, window, cx))
-      })
-      .trigger(tile)
-      .content({
-        let (workspace, id, label) = (workspace.clone(), id.clone(), label.clone());
-        move |_, _, cx| {
-          let theme = cx.theme().clone();
-          let palette = colors(cx);
-          let (filter, query, active) = {
-            let this = workspace.read(cx);
-            (this.category_filter.clone(), this.category_filter.read(cx).value().to_lowercase(), this.projects.active.clone())
-          };
-          let rows: Vec<AnyElement> = members
-            .iter()
-            .filter(|project| query.is_empty() || project.name().to_lowercase().contains(&query))
-            .map(|project| {
-              let selected = active.as_ref() == Some(&project.path);
-              let look = avatar_look(project, selected, cx);
-              let (path, name) = (project.path.clone(), SharedString::from(project.name()));
-              let (menu_workspace, menu_path, categories, current) =
-                (workspace.clone(), project.path.clone(), categories.clone(), project.category.clone());
-              h_flex()
-                .id(SharedString::from(format!("category-project-{}", path.display())))
-                .gap_2()
-                .px_2()
-                .py_1()
-                .rounded_md()
-                .items_center()
-                .cursor_pointer()
-                .when(selected, |row| row.bg(palette.selected))
-                .hover(|row| row.bg(palette.hover))
-                .child(
-                  div()
-                    .size_6()
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .justify_center()
-                    .rounded_md()
-                    .text_sm()
-                    .text_color(look.text)
-                    .when_some(look.fill, |avatar, fill| avatar.bg(fill))
-                    .when_some(look.icon.clone(), |avatar, icon| avatar.child(Icon::empty().path(icon).size_4()))
-                    .when(look.icon.is_none(), |avatar| avatar.child(look.letter.clone())),
-                )
-                .child(Label::new(name).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
-                .on_click({
-                  let workspace = workspace.clone();
-                  move |_, window, cx| {
-                    workspace.update(cx, |this, cx| {
-                      this.open_category = None;
-                      this.select_project(path.clone(), window, cx);
-                    })
-                  }
-                })
-                .context_menu(move |menu, _, _| project_menu(menu, &menu_workspace, &menu_path, &categories, current.as_deref()))
-                .into_any_element()
-            })
-            .collect();
-          v_flex()
-            .w(MENU_WIDTH)
-            .gap_1()
-            .child(
-              h_flex()
-                .px_2()
-                .py_1()
-                .gap_2()
-                .items_center()
-                .child(Label::new(label.clone()).flex_1().font_weight(FontWeight::SEMIBOLD))
-                .child(Label::new(format!("{count}")).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground)),
-            )
-            .when(count > CATEGORY_FILTER_MIN, |menu| menu.child(Input::new(&filter)))
-            .child(
-              v_flex()
-                .id(SharedString::from(format!("category-projects-{id}")))
-                .max_h(MENU_LIST_MAX_HEIGHT)
-                .overflow_y_scrollbar()
-                .gap_0p5()
-                .when(rows.is_empty(), |list| list.child(Label::new("No matching projects").px_2().py_1().text_color(theme.muted_foreground)))
-                .children(rows),
-            )
-        }
-      });
-    div()
-      .id(SharedString::from(format!("rail-category-drop-{id}")))
-      .flex_none()
-      .rounded_lg()
-      .drag_over::<DraggedProject>(move |style, _, _, _| style.bg(palette.rail_item_hover))
-      .on_drop(cx.listener({
-        let id = id.clone();
-        move |this, dragged: &DraggedProject, _, cx| this.move_project(&dragged.0, Some(&id), cx)
-      }))
-      .child(menu)
-      .context_menu(move |menu, _, _| {
-        let (rename_workspace, rename_id) = (workspace.clone(), id.clone());
-        let (delete_workspace, delete_id) = (workspace.clone(), id.clone());
-        menu
-          .item(
-            PopupMenuItem::new("Rename…")
-              .on_click(move |_, window, cx| rename_workspace.update(cx, |this, cx| this.rename_category(rename_id.clone(), window, cx))),
-          )
-          .item(
-            PopupMenuItem::new("Delete category")
-              .on_click(move |_, _, cx| delete_workspace.update(cx, |this, cx| this.delete_category(&delete_id, cx))),
-          )
-      })
-  }
-
-  fn render_rail(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let palette = colors(cx);
-    let loose: Vec<AnyElement> = self.projects.projects_in(None).map(|project| self.rail_project(project, cx).into_any_element()).collect();
-    let groups: Vec<AnyElement> =
-      self.projects.categories.iter().enumerate().map(|(index, category)| self.rail_category(index, category, cx).into_any_element()).collect();
-    v_flex()
-      .w(RAIL_WIDTH)
-      .h_full()
-      .flex_none()
-      .items_center()
-      .pt_3()
-      .pb_1p5()
-      .gap_2()
-      .bg(palette.rail)
-      .border_r_1()
-      .border_color(palette.border)
-      .child(
-        v_flex()
-          .id("rail-projects")
-          .flex_1()
-          .min_h_0()
-          .items_center()
-          .gap_2()
-          .overflow_y_scroll()
-          .children(loose)
-          .children(groups)
-          .child(rail_button("rail-add", IconName::Plus, "Add project", &palette, |_, window, cx| window.dispatch_action(Box::new(AddProject), cx))),
-      )
-      .child(rail_button("rail-settings", IconName::Settings, "Settings", &palette, |_, window, cx| {
-        window.dispatch_action(Box::new(OpenSettings), cx)
-      }))
-  }
-
   /// The branch name with a menu: the local branches (filtered by typing), and a way to start a new one.
   fn render_branch_picker(&self, current: &str, cx: &mut Context<Self>) -> impl IntoElement {
     let workspace = cx.entity();
     let theme = cx.theme().clone();
+    let palette = colors(cx);
     let current = SharedString::from(current.to_string());
     let trigger = Button::new("branch-trigger")
-      .ghost()
-      .w_full()
+      .custom(ButtonCustomVariant::new(cx).color(palette.surface_alt).foreground(palette.text).hover(palette.hover).active(palette.selected))
+      .border_0()
+      .h_12()
+      .w_48()
+      .rounded_none()
       .child(
         h_flex()
           .w_full()
           .gap_2()
           .items_center()
-          .child(Icon::empty().path("icons/git-branch.svg").size_4().text_color(theme.muted_foreground))
-          .child(Label::new(current.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+          .child(Icon::empty().path("icons/git-branch.svg").size_5().text_color(theme.muted_foreground))
+          .child(
+            v_flex()
+              .flex_1()
+              .min_w_0()
+              .items_start()
+              .child(Label::new("Current branch").text_size(FONT_SIZE_SM).text_color(theme.muted_foreground))
+              .child(
+                Label::new(current.clone()).font_weight(FontWeight::SEMIBOLD).max_w_full().overflow_hidden().whitespace_nowrap().text_ellipsis(),
+              ),
+          )
           .child(Icon::new(IconName::ChevronDown).size_4().text_color(theme.muted_foreground)),
       )
       .tooltip("Switch branch");
@@ -1340,68 +1387,370 @@ impl Workspace {
       .content(move |_, _, cx| {
         let theme = cx.theme().clone();
         let palette = colors(cx);
-        let (filter, query, branches) = {
+        let (filter, query, branches, tab, hosted, state) = {
           let this = workspace.read(cx);
-          (this.branch_filter.clone(), this.branch_filter.read(cx).value().to_string(), this.branches.clone())
+          (
+            this.branch_filter.clone(),
+            this.branch_filter.read(cx).value().to_string(),
+            this.branches.clone(),
+            this.branch_tab,
+            this.hosted_remote(cx).map(|(_, repository)| repository.full_name()),
+            this.pull_requests.clone(),
+          )
         };
         let lowered = query.trim().to_lowercase();
-        let rows: Vec<AnyElement> = branches
-          .into_iter()
-          .filter(|name| lowered.is_empty() || name.to_lowercase().contains(&lowered))
-          .map(|name| {
-            let selected = name == current.as_ref();
-            let workspace = workspace.clone();
-            h_flex()
-              .id(SharedString::from(format!("branch-{name}")))
+        let tab = if hosted.is_some() { tab } else { BranchTab::Branches };
+
+        // The tabs: Branches, and Pull Requests when a connected account serves the repository.
+        let count = match &state {
+          PullRequests::Loaded(found) if !found.is_empty() => format!(" ({})", found.len()),
+          _ => String::new(),
+        };
+        let tabs = hosted.as_ref().map(|_| {
+          let workspace = workspace.clone();
+          TabBar::new("branch-menu-tabs")
+            .underline()
+            .selected_index(usize::from(tab == BranchTab::PullRequests))
+            .on_click(move |index: &usize, window, cx| {
+              let tab = if *index == 1 { BranchTab::PullRequests } else { BranchTab::Branches };
+              workspace.update(cx, |this, cx| this.set_branch_tab(tab, window, cx));
+            })
+            .children([Tab::new().label("Branches"), Tab::new().label(format!("Pull Requests{count}"))])
+        });
+
+        let body = match tab {
+          BranchTab::Branches => {
+            let rows: Vec<AnyElement> = branches
+              .into_iter()
+              .filter(|name| lowered.is_empty() || name.to_lowercase().contains(&lowered))
+              .map(|name| {
+                let selected = name == current.as_ref();
+                let workspace = workspace.clone();
+                h_flex()
+                  .id(SharedString::from(format!("branch-{name}")))
+                  .gap_2()
+                  .px_2()
+                  .py_1()
+                  .rounded_md()
+                  .items_center()
+                  .cursor_pointer()
+                  .hover(|row| row.bg(palette.hover))
+                  .child(div().size_4().flex_none().when(selected, |mark| mark.child(Icon::new(IconName::Check).size_4())))
+                  .child(Label::new(name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+                  .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.switch_branch(name.clone(), window, cx)))
+                  .into_any_element()
+              })
+              .collect();
+            let new_branch = {
+              let (workspace, suggestion) = (workspace.clone(), query.trim().to_string());
+              Button::new("branch-create")
+                .outline()
+                .label("New Branch")
+                .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.new_branch(suggestion.clone(), window, cx)))
+            };
+            v_flex()
               .gap_2()
-              .px_2()
-              .py_1()
-              .rounded_md()
-              .items_center()
-              .cursor_pointer()
-              .hover(|row| row.bg(palette.hover))
-              .child(div().size_4().flex_none().when(selected, |mark| mark.child(Icon::new(IconName::Check).size_4())))
-              .child(Label::new(name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
-              .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.switch_branch(name.clone(), window, cx)))
+              .child(h_flex().gap_2().items_center().child(div().flex_1().child(Input::new(&filter))).child(new_branch))
+              .child(
+                v_flex()
+                  .id("branch-list")
+                  .max_h(MENU_LIST_MAX_HEIGHT)
+                  .overflow_y_scrollbar()
+                  .gap_0p5()
+                  .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground)))
+                  .children(rows),
+              )
               .into_any_element()
+          }
+          BranchTab::PullRequests => {
+            let refresh = {
+              let workspace = workspace.clone();
+              Button::new("pull-requests-refresh")
+                .outline()
+                .icon(Icon::empty().path("icons/refresh-cw.svg"))
+                .tooltip("Refresh")
+                .on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.load_pull_requests(cx)))
+            };
+            let list = match state {
+              PullRequests::Idle | PullRequests::Loading => h_flex()
+                .gap_2()
+                .p_3()
+                .items_center()
+                .justify_center()
+                .child(Spinner::new().small())
+                .child(Label::new("Loading pull requests…").text_color(theme.muted_foreground))
+                .into_any_element(),
+              PullRequests::Failed(message) => Label::new(message).p_2().text_color(theme.danger).into_any_element(),
+              PullRequests::Loaded(found) => {
+                let shown: Vec<_> = found
+                  .iter()
+                  .filter(|request| {
+                    lowered.is_empty()
+                      || request.title.to_lowercase().contains(&lowered)
+                      || request.author.to_lowercase().contains(&lowered)
+                      || format!("#{}", request.number).contains(&lowered)
+                  })
+                  .cloned()
+                  .collect();
+                if found.is_empty() {
+                  // GitHub Desktop's empty state: nothing to do here, and a way to get going.
+                  let workspace = workspace.clone();
+                  v_flex()
+                    .items_center()
+                    .gap_1()
+                    .py_4()
+                    .child(Icon::empty().path("icons/circle-check.svg").size_8().text_color(palette.accent))
+                    .child(Label::new("You're all set!").font_weight(FontWeight::SEMIBOLD))
+                    .child(Label::new(format!("No open pull requests in {}", hosted.clone().unwrap_or_default())).text_color(theme.muted_foreground))
+                    .child(
+                      Label::new("Would you like to create a new branch and get going on your next project?")
+                        .text_size(FONT_SIZE_SM)
+                        .text_color(theme.muted_foreground)
+                        .text_center()
+                        .px_3(),
+                    )
+                    .child(
+                      Button::new("pull-requests-new-branch")
+                        .ghost()
+                        .small()
+                        .label("Create a new branch")
+                        .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.new_branch(String::new(), window, cx))),
+                    )
+                    .into_any_element()
+                } else if shown.is_empty() {
+                  Label::new("No matching pull requests").px_2().py_1().text_color(theme.muted_foreground).into_any_element()
+                } else {
+                  v_flex()
+                    .id("pull-request-list")
+                    .max_h(MENU_LIST_MAX_HEIGHT)
+                    .overflow_y_scrollbar()
+                    .gap_0p5()
+                    .children(shown.into_iter().map(|request| {
+                      let url = request.url.clone();
+                      v_flex()
+                        .id(SharedString::from(format!("pull-request-{}", request.url)))
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .cursor_pointer()
+                        .hover(|row| row.bg(palette.hover))
+                        .child(
+                          Label::new(if request.draft { format!("{} (draft)", request.title) } else { request.title.clone() })
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis(),
+                        )
+                        .child(
+                          Label::new(format!("#{} · {} · {} → {}", request.number, request.author, request.source, request.target))
+                            .text_size(FONT_SIZE_SM)
+                            .text_color(theme.muted_foreground)
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis(),
+                        )
+                        .on_click(move |_, _, cx| cx.open_url(&url))
+                    }))
+                    .into_any_element()
+                }
+              }
+            };
+            let create = {
+              let workspace = workspace.clone();
+              Button::new("pull-request-create")
+                .outline()
+                .w_full()
+                .icon(Icon::empty().path("icons/git-pull-request-create.svg"))
+                .label("Create pull request…")
+                .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.open_pull_request_form(window, cx)))
+            };
+            v_flex()
+              .gap_2()
+              .child(h_flex().gap_2().items_center().child(div().flex_1().child(Input::new(&filter))).child(refresh))
+              .child(list)
+              .child(div().h_px().bg(palette.border))
+              .child(create)
+              .into_any_element()
+          }
+        };
+        v_flex().w(MENU_WIDTH).gap_2().children(tabs).child(body)
+      })
+  }
+
+  /// The title bar's first tab, fixed at the left: the name of the open project with a menu of every project, grouped by category and
+  /// filtered by typing, and a way to add one.
+  fn render_repository_switcher(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let workspace = cx.entity();
+    let theme = cx.theme().clone();
+    let palette = colors(cx);
+    let name = self.projects.active.as_ref().and_then(|path| self.projects.projects.iter().find(|project| &project.path == path)).map(Project::name);
+    let trigger = Button::new("repository-trigger")
+      .custom(ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.rail_item_hover).active(palette.selected))
+      .border_0()
+      .h_8()
+      .max_w_56()
+      .rounded_md()
+      .child(
+        h_flex()
+          .gap_2()
+          .items_center()
+          .child(Icon::empty().path("icons/folder-git-2.svg").size_5().text_color(theme.muted_foreground))
+          .child(
+            Label::new(name.unwrap_or_else(|| "No project".to_string()))
+              .min_w_0()
+              .font_weight(FontWeight::SEMIBOLD)
+              .overflow_hidden()
+              .whitespace_nowrap()
+              .text_ellipsis(),
+          )
+          .child(
+            Icon::new(if self.projects_menu_open { IconName::ChevronUp } else { IconName::ChevronDown }).size_4().text_color(theme.muted_foreground),
+          ),
+      );
+    Popover::new("repository-menu")
+      .anchor(Anchor::TopLeft)
+      .open(self.projects_menu_open)
+      .on_open_change({
+        let workspace = workspace.clone();
+        move |open, window, cx| workspace.update(cx, |this, cx| this.set_projects_menu(*open, window, cx))
+      })
+      .trigger(trigger)
+      .content(move |_, _, cx| {
+        let theme = cx.theme().clone();
+        let (filter, query, list) = {
+          let this = workspace.read(cx);
+          (this.project_filter.clone(), this.project_filter.read(cx).value().to_lowercase(), this.projects.clone())
+        };
+        let active = list.active.clone();
+        let categories: Vec<(String, SharedString)> = list
+          .categories
+          .iter()
+          .enumerate()
+          .map(|(index, category)| (category.id.clone(), SharedString::from(category_label(index, category))))
+          .collect();
+        let matches = |project: &&Project| query.is_empty() || project.name().to_lowercase().contains(&query);
+        let mut groups: Vec<(SharedString, Vec<&Project>)> = list
+          .categories
+          .iter()
+          .enumerate()
+          .map(|(index, category)| {
+            (SharedString::from(category_label(index, category)), list.projects_in(Some(&category.id)).filter(matches).collect())
           })
           .collect();
-        let create = {
+        groups.push((SharedString::from("Other"), list.projects_in(None).filter(matches).collect()));
+        groups.retain(|(_, projects)| !projects.is_empty());
+        let named = groups.len() > 1 || !list.categories.is_empty();
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for (label, projects) in groups {
+          if named {
+            rows.push(
+              Label::new(label)
+                .px_2()
+                .pt_2()
+                .text_size(FONT_SIZE_SM)
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme.muted_foreground)
+                .into_any_element(),
+            );
+          }
+          rows.extend(
+            projects.into_iter().map(|project| project_list_row(&workspace, project, active.as_ref() == Some(&project.path), &categories, cx)),
+          );
+        }
+        let add = {
           let workspace = workspace.clone();
-          let suggestion = query.trim().to_string();
-          let label = match suggestion.is_empty() {
-            true => "New branch…".to_string(),
-            false => format!("Create branch \"{suggestion}\""),
-          };
-          h_flex()
-            .id("branch-create")
-            .gap_2()
-            .px_2()
-            .py_1()
-            .rounded_md()
-            .items_center()
-            .cursor_pointer()
-            .hover(|row| row.bg(palette.hover))
-            .child(Icon::empty().path("icons/git-branch-plus.svg").size_4().text_color(theme.muted_foreground))
-            .child(Label::new(label).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
-            .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.new_branch(suggestion.clone(), window, cx)))
+          Button::new("repository-add").outline().label("Add").icon(IconName::Plus).on_click(move |_, window, cx| {
+            workspace.update(cx, |this, cx| {
+              this.projects_menu_open = false;
+              cx.notify();
+            });
+            window.dispatch_action(Box::new(AddProject), cx);
+          })
         };
-        v_flex()
-          .w(MENU_WIDTH)
-          .gap_1()
-          .child(Input::new(&filter))
-          .child(
-            v_flex()
-              .id("branch-list")
-              .max_h(MENU_LIST_MAX_HEIGHT)
-              .overflow_y_scrollbar()
-              .gap_0p5()
-              .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground)))
-              .children(rows),
-          )
-          .child(div().h_px().bg(palette.border))
-          .child(create)
+        v_flex().w(MENU_WIDTH).gap_1().child(h_flex().gap_2().items_center().child(div().flex_1().child(Input::new(&filter))).child(add)).child(
+          v_flex()
+            .id("repository-list")
+            .max_h(MENU_LIST_MAX_HEIGHT)
+            .overflow_y_scrollbar()
+            .gap_0p5()
+            .when(rows.is_empty(), |list| list.child(Label::new("No matching projects").px_2().py_1().text_color(theme.muted_foreground)))
+            .children(rows),
+        )
       })
+  }
+
+  /// The bar above the editor in the Git tab: the branch with its menu, and the one button that keeps the branch in step with
+  /// its remote: publish, push, pull or fetch, whichever the branch needs.
+  fn render_git_toolbar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let git = self.git.as_ref()?;
+    let theme = cx.theme().clone();
+    let palette = colors(cx);
+    let picker = self.render_branch_picker(&git.branch, cx);
+    let sync = git.sync.as_ref().map(|sync| {
+      let (icon, title, count) = if !sync.upstream {
+        ("icons/upload.svg", "Publish branch".to_string(), 0)
+      } else if sync.behind > 0 {
+        ("icons/arrow-down.svg", format!("Pull {}", sync.remote), sync.behind)
+      } else if sync.ahead > 0 {
+        ("icons/arrow-up.svg", format!("Push {}", sync.remote), sync.ahead)
+      } else {
+        ("icons/refresh-cw.svg", format!("Fetch {}", sync.remote), 0)
+      };
+      let detail = if let Some(work) = &self.remote_work {
+        work.progress.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+      } else if !sync.upstream {
+        format!("Send it to {}", sync.remote)
+      } else {
+        match sync.last_fetched {
+          Some(time) => format!("Last fetched {}", time_ago(time)),
+          None => "Never fetched".to_string(),
+        }
+      };
+      Button::new("sync-remote")
+        .custom(ButtonCustomVariant::new(cx).color(palette.surface_alt).foreground(palette.text).hover(palette.hover).active(palette.selected))
+        .border_0()
+        .h_12()
+        .w_56()
+        .rounded_none()
+        .disabled(self.remote_work.is_some())
+        .child(
+          h_flex()
+            .w_full()
+            .gap_2()
+            .items_center()
+            .child(match &self.remote_work {
+              Some(_) => Spinner::new().small().into_any_element(),
+              None => Icon::empty().path(icon).size_5().text_color(theme.muted_foreground).into_any_element(),
+            })
+            .child(
+              v_flex()
+                .flex_1()
+                .min_w_0()
+                .items_start()
+                .child(Label::new(self.remote_work.as_ref().map_or(title.into(), |work| work.title.clone())).font_weight(FontWeight::SEMIBOLD))
+                .child(
+                  Label::new(detail)
+                    .text_size(FONT_SIZE_SM)
+                    .text_color(theme.muted_foreground)
+                    .max_w_full()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis(),
+                ),
+            )
+            .when(count > 0, |row| row.child(div().px_1p5().rounded_full().bg(palette.selected).text_size(FONT_SIZE_SM).child(count.to_string()))),
+        )
+        .on_click(cx.listener(|this, _, window, cx| this.sync_remote(window, cx)))
+    });
+    Some(
+      h_flex()
+        .flex_none()
+        .h_12()
+        .bg(palette.surface_alt)
+        .border_b_1()
+        .border_color(palette.border)
+        .child(div().h_12().border_r_1().border_color(palette.border).child(picker))
+        .children(sync.map(|button| div().h_12().border_r_1().border_color(palette.border).child(button))),
+    )
   }
 
   fn render_git(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
@@ -1539,7 +1888,6 @@ impl Workspace {
       v_flex()
         .size_full()
         .gap_1()
-        .child(div().pl_2().pr_5().child(self.render_branch_picker(&git.branch, cx)))
         .child(
           h_flex()
             .px_2()
@@ -1668,12 +2016,9 @@ impl Workspace {
     let tabs = TabBar::new("sidebar-tabs")
       .underline()
       .selected_index(selected)
-      .on_click(cx.listener(|this, index: &usize, window, cx| {
+      .on_click(cx.listener(|this, index: &usize, _, cx| {
         if let Some(tab) = SidebarTab::ALL.get(*index) {
           this.sidebar_tab = *tab;
-          if *tab == SidebarTab::Terminal {
-            this.focus_terminal(window, cx);
-          }
           cx.notify();
         }
       }))
@@ -1684,61 +2029,11 @@ impl Workspace {
         Some(git) => git.into_any_element(),
         None => Label::new("Not a Git repository").text_color(cx.theme().muted_foreground).px_2().into_any_element(),
       },
-      SidebarTab::Terminal => self.render_terminal_sessions(cx).into_any_element(),
     };
     v_flex().size_full().bg(cx.theme().sidebar).child(div().px_3().pt_2().child(tabs)).child(v_flex().flex_1().min_h_0().pl_3().pt_3().child(content))
   }
 
-  /// The Terminal tab of the sidebar: the shells of the project as a list. The terminal itself is drawn in the main area.
-  fn render_terminal_sessions(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let theme = cx.theme().clone();
-    let palette = colors(cx);
-    let (list, active) = self.open_terminals();
-    let split = list.len() >= 2 && self.projects.active.as_ref().is_some_and(|root| self.split_terminals.contains(root));
-    let partner = (active + 1) % list.len().max(1);
-    let rows = list.iter().enumerate().map(|(index, terminal)| {
-      let shown_beside = split && index == partner;
-      h_flex()
-        .id(("session", index))
-        .gap_2()
-        .pl_2()
-        .pr_1()
-        .py_1()
-        .items_center()
-        .rounded_md()
-        .cursor_pointer()
-        .when(index == active, |row| row.bg(palette.selected))
-        .when(shown_beside, |row| row.bg(palette.hover))
-        .hover(|row| row.bg(palette.hover))
-        .child(Icon::empty().path("icons/terminal.svg").size_4().flex_none().text_color(theme.muted_foreground))
-        .child(Label::new(terminal.read(cx).title()).flex_1().min_w_0().whitespace_nowrap().overflow_hidden().text_ellipsis())
-        .child(Label::new(format!("{}", index + 1)).text_color(theme.muted_foreground).text_size(FONT_SIZE_SM))
-        .child(Button::new(("session-kill", index)).ghost().xsmall().icon(Icon::empty().path("icons/x.svg")).tooltip("Kill terminal").on_click(
-          cx.listener(move |this, _, window, cx| {
-            // The click must not also select the session.
-            cx.stop_propagation();
-            this.kill_terminal_at(index, window, cx);
-          }),
-        ))
-        .on_click(cx.listener(move |this, _, window, cx| this.select_terminal(index, window, cx)))
-    });
-    v_flex()
-      .size_full()
-      .gap_1()
-      .child(
-        h_flex().gap_1().items_center().pl_2().pr_3().child(Label::new("Sessions").font_weight(FontWeight::SEMIBOLD).flex_1()).child(
-          Button::new("session-new")
-            .ghost()
-            .xsmall()
-            .icon(Icon::empty().path("icons/plus.svg"))
-            .tooltip("New terminal")
-            .on_click(cx.listener(|this, _, window, cx| this.new_terminal(&NewTerminal, window, cx))),
-        ),
-      )
-      .child(v_flex().id("sessions").flex_1().min_h_0().pr_3().overflow_y_scrollbar().children(rows))
-  }
-
-  /// The terminal in the main area: a title row with the buttons, then the shell (or two of them side by side).
+  /// The terminal panel at the bottom of the window: a title row with the buttons, then the shell (or two of them side by side).
   fn render_terminal_area(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let (list, active) = self.open_terminals();
@@ -1748,6 +2043,7 @@ impl Workspace {
     let split = list.len() >= 2 && self.projects.active.as_ref().is_some_and(|root| self.split_terminals.contains(root));
     let shown: Vec<Entity<Terminal>> = if split { vec![current.clone(), list[(active + 1) % list.len()].clone()] } else { vec![current.clone()] };
     let workspace = cx.entity();
+    let sessions: Vec<(usize, SharedString)> = list.iter().enumerate().map(|(index, terminal)| (index, terminal.read(cx).title())).collect();
     let button =
       |id: &'static str, icon: &'static str, tooltip: &'static str| Button::new(id).ghost().xsmall().icon(Icon::empty().path(icon)).tooltip(tooltip);
     let header = h_flex()
@@ -1765,6 +2061,19 @@ impl Workspace {
       )
       .child(button("terminal-menu", "icons/chevron-down.svg", "More").dropdown_menu(move |menu, _, _| {
         let (new, split, kill) = (workspace.clone(), workspace.clone(), workspace.clone());
+        let mut menu = menu;
+        if sessions.len() > 1 {
+          menu = menu.label("Sessions");
+          for (index, title) in &sessions {
+            let (workspace, index) = (workspace.clone(), *index);
+            menu = menu.item(
+              PopupMenuItem::new(format!("{} · {}", index + 1, title))
+                .checked(index == active)
+                .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.select_terminal(index, window, cx))),
+            );
+          }
+          menu = menu.separator();
+        }
         menu
           .item(
             PopupMenuItem::new("New terminal").on_click(move |_, window, cx| new.update(cx, |this, cx| this.new_terminal(&NewTerminal, window, cx))),
@@ -1779,8 +2088,8 @@ impl Workspace {
       )
       .child(button("terminal-kill", "icons/trash.svg", "Kill terminal").on_click(cx.listener(|this, _, window, cx| this.kill_terminal(window, cx))))
       .child(
-        button("terminal-close", "icons/x.svg", "Back to the editor (shells keep running)")
-          .on_click(cx.listener(|this, _, _, cx| this.hide_terminal_tab(cx))),
+        button("terminal-close", "icons/x.svg", "Hide the terminal (shells keep running)")
+          .on_click(cx.listener(|this, _, window, cx| this.hide_terminal(window, cx))),
       );
     v_flex()
       .size_full()
@@ -1790,6 +2099,51 @@ impl Workspace {
       })))
       .into_any_element()
   }
+}
+
+/// One project in a list (a category's list, the repository menu): its avatar and name; a click opens it and closes the list,
+/// a right click opens the project's menu.
+fn project_list_row(workspace: &Entity<Workspace>, project: &Project, selected: bool, categories: &[(String, SharedString)], cx: &App) -> AnyElement {
+  let palette = colors(cx);
+  let look = avatar_look(project, selected, cx);
+  let (path, name) = (project.path.clone(), SharedString::from(project.name()));
+  let (menu_workspace, menu_path, categories, current) = (workspace.clone(), project.path.clone(), categories.to_vec(), project.category.clone());
+  h_flex()
+    .id(SharedString::from(format!("project-row-{}", path.display())))
+    .gap_2()
+    .px_2()
+    .py_1()
+    .rounded_md()
+    .items_center()
+    .cursor_pointer()
+    .when(selected, |row| row.bg(palette.selected))
+    .hover(|row| row.bg(palette.hover))
+    .child(
+      div()
+        .size_6()
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded_md()
+        .text_sm()
+        .text_color(look.text)
+        .when_some(look.fill, |avatar, fill| avatar.bg(fill))
+        .when_some(look.icon.clone(), |avatar, icon| avatar.child(Icon::empty().path(icon).size_4()))
+        .when(look.icon.is_none(), |avatar| avatar.child(look.letter.clone())),
+    )
+    .child(Label::new(name).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+    .on_click({
+      let workspace = workspace.clone();
+      move |_, window, cx| {
+        workspace.update(cx, |this, cx| {
+          this.projects_menu_open = false;
+          this.select_project(path.clone(), window, cx);
+        })
+      }
+    })
+    .context_menu(move |menu, _, _| project_menu(menu, &menu_workspace, &menu_path, &categories, current.as_deref()))
+    .into_any_element()
 }
 
 /// The right-click menu of a project avatar: its settings, the categories it can move to, and making a new one.
@@ -1831,7 +2185,18 @@ fn project_menu(
   menu
 }
 
-/// What a category is called in a menu or a tooltip: its name, or its place in the rail while it has none.
+/// How long ago `time` was, for a label: "just now", "5m ago", "3h ago", "2d ago".
+fn time_ago(time: std::time::SystemTime) -> String {
+  let seconds = time.elapsed().map_or(0, |elapsed| elapsed.as_secs());
+  match seconds {
+    0..=59 => "just now".to_string(),
+    60..=3599 => format!("{}m ago", seconds / 60),
+    3600..=86399 => format!("{}h ago", seconds / 3600),
+    _ => format!("{}d ago", seconds / 86400),
+  }
+}
+
+/// What a category is called in a menu or a tooltip: its name, or its number while it has none.
 fn category_label(index: usize, category: &Category) -> String {
   if category.name.is_empty() {
     format!("Category {}", index + 1)
@@ -1840,61 +2205,30 @@ fn category_label(index: usize, category: &Category) -> String {
   }
 }
 
-/// A project avatar being dragged in the rail.
-#[derive(Clone)]
-struct DraggedProject(PathBuf);
-
-/// What follows the pointer while a project is dragged.
-struct DragPreview {
-  label: SharedString,
-  fill: Hsla,
-  text: Hsla,
-}
-
-impl Render for DragPreview {
-  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-    div()
-      .size_9()
-      .flex()
-      .items_center()
-      .justify_center()
-      .rounded_lg()
-      .text_base()
-      .font_weight(FontWeight::MEDIUM)
-      .bg(self.fill)
-      .text_color(self.text)
-      .opacity(0.9)
-      .child(self.label.clone())
-  }
-}
-
-/// The first letter of a project's name, in capitals: its avatar.
-fn initial(name: &str) -> String {
-  name.chars().take(1).flat_map(char::to_uppercase).collect()
-}
-
-/// A square icon button for the project rail. The Kit's `Button` fixes its icon at a small size, so this draws the
-/// icon itself at `size_5`.
+/// A square icon button for the title bar, as tall as the repository switcher. The Kit's `Button` fixes its icon at a small
+/// size, so this draws the icon itself at `size_5`.
 fn rail_button(
   id: &'static str,
-  icon: IconName,
+  icon: Icon,
   tooltip: &'static str,
+  selected: bool,
   palette: &crate::theme::Colors,
   on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
   let hover = palette.rail_hover;
   div()
     .id(id)
-    .size_9()
+    .size_8()
     .flex()
     .flex_none()
     .items_center()
     .justify_center()
-    .rounded_lg()
+    .rounded_md()
     .cursor_pointer()
     .text_color(palette.rail_text)
+    .when(selected, |button| button.bg(hover))
     .hover(move |button| button.bg(hover))
-    .child(Icon::new(icon).size_5())
+    .child(icon.size_5())
     .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
     .on_click(on_click)
 }
@@ -1914,9 +2248,15 @@ impl Render for Workspace {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
-    // The terminal tab of the sidebar puts the terminal in the main area, where the editor otherwise is.
-    let main_area =
-      if self.sidebar_tab == SidebarTab::Terminal { self.render_terminal_area(cx).into_any_element() } else { self.dock.clone().into_any_element() };
+    // The terminal panel sits under the editor, above the status bar, and can be dragged taller or shorter.
+    let main_area = if self.terminal_open {
+      v_resizable("editor-terminal-split")
+        .child(resizable_panel().child(self.dock.clone()))
+        .child(resizable_panel().size(TERMINAL_HEIGHT).size_range(TERMINAL_MIN_HEIGHT..TERMINAL_MAX_HEIGHT).child(self.render_terminal_area(cx)))
+        .into_any_element()
+    } else {
+      self.dock.clone().into_any_element()
+    };
     v_flex()
       .id("workspace")
       .key_context("Workspace")
@@ -1924,18 +2264,52 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::add_project))
       .on_action(cx.listener(Self::open_settings))
       .on_action(cx.listener(Self::new_terminal))
+      .on_action(cx.listener(Self::toggle_terminal))
       .on_action(cx.listener(Self::save_file))
+      .on_action(cx.listener(Self::close_tab))
       .size_full()
       .bg(theme.background)
       .text_color(theme.foreground)
       .text_size(FONT_SIZE)
-      .child(TitleBar::new().h(TOOLBAR_HEIGHT).pl(px(96.)).bg(palette.rail).border_b_1().border_color(palette.border))
       .child(
-        h_flex().flex_1().min_h_0().child(self.render_rail(cx)).child(
+        TitleBar::new().h(TOOLBAR_HEIGHT).pl(px(96.)).bg(palette.rail).border_b_1().border_color(palette.border).child(
+          h_flex()
+            .size_full()
+            .items_center()
+            .gap_2()
+            .pr_3()
+            .child(self.render_repository_switcher(cx))
+            .child(rail_button("title-add", Icon::new(IconName::Plus), "Add project", false, &palette, |_, window, cx| {
+              window.dispatch_action(Box::new(AddProject), cx)
+            }))
+            .child(div().flex_1())
+            .child(rail_button(
+              "title-terminal",
+              Icon::empty().path("icons/terminal.svg"),
+              "Terminal",
+              self.terminal_open,
+              &palette,
+              |_, window, cx| window.dispatch_action(Box::new(ToggleTerminal), cx),
+            ))
+            .child(rail_button("title-settings", Icon::new(IconName::Settings), "Settings", false, &palette, |_, window, cx| {
+              window.dispatch_action(Box::new(OpenSettings), cx)
+            })),
+        ),
+      )
+      .child(
+        h_flex().flex_1().min_h_0().child(
           h_resizable("sidebar-split")
             .child(resizable_panel().size(SIDEBAR_WIDTH).size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH).child(self.render_sidebar(cx)))
-            // The status bar belongs to the editor and the terminals: the rail and the sidebar run down to the bottom of the window.
-            .child(resizable_panel().child(v_flex().size_full().child(div().flex_1().min_h_0().child(main_area)).child(self.render_status_bar(cx)))),
+            // The status bar belongs to the editor and the terminals: the sidebar runs down to the bottom of the window.
+            .child(
+              resizable_panel().child(
+                v_flex()
+                  .size_full()
+                  .when(self.sidebar_tab == SidebarTab::Git, |column| column.children(self.render_git_toolbar(cx)))
+                  .child(div().flex_1().min_h_0().child(main_area))
+                  .child(self.render_status_bar(cx)),
+              ),
+            ),
         ),
       )
   }

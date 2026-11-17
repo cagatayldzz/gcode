@@ -1,4 +1,4 @@
-//! The project list in Settings: every project and category of the rail, with what can be done to each.
+//! The project list in Settings: every project and category, with what can be done to each.
 
 use crate::{
   components::{avatar_look, display_path},
@@ -40,7 +40,7 @@ pub(crate) struct ProjectManager {
 
 impl ProjectManager {
   pub fn new(workspace: Entity<Workspace>, cx: &mut Context<Self>) -> Self {
-    // The rail changes whenever the workspace does (a drag, a menu, this list), so the list redraws with it.
+    // The menus change whenever the workspace does (a menu, this list), so the list redraws with it.
     let observer = cx.observe(&workspace, |_, _, cx| cx.notify());
     Self { workspace, _observer: observer }
   }
@@ -255,7 +255,7 @@ impl Render for ProjectManager {
           .child(new_category),
       )
       .when(list.projects.is_empty(), |column| {
-        column.child(Label::new("No projects yet. Add one with + in the project bar.").text_color(theme.muted_foreground).py_2())
+        column.child(Label::new("No projects yet. Add one with + in the title bar.").text_color(theme.muted_foreground).py_2())
       })
       .when(!loose.is_empty() || !list.categories.is_empty(), |column| {
         column.child(self.group_header(0, None, loose.len(), cx)).children(loose.iter().map(|project| self.project_row(project, &categories, cx)))

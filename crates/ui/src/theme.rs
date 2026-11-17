@@ -1,6 +1,6 @@
 //! Vekro's light and dark colors and fonts, switched with the system appearance.
 //!
-//! Both palettes follow Google Chrome: a gray (light) or near-black (dark) frame around the rail and title band,
+//! Both palettes follow Google Chrome: a gray (light) or near-black (dark) frame around the title band,
 //! white or dark-gray pages, and one blue accent.
 
 use gpui_kit::{
@@ -29,7 +29,7 @@ pub(crate) struct Colors {
   pub background: Hsla,
   pub text: Hsla,
   pub text_secondary: Hsla,
-  /// The sidebar, the project rail and the title band.
+  /// The sidebar and the title band.
   pub surface: Hsla,
   /// A slightly raised surface: the status bar, empty-state icons.
   pub surface_alt: Hsla,
@@ -39,7 +39,7 @@ pub(crate) struct Colors {
   /// The row that is chosen.
   pub selected: Hsla,
   pub hover: Hsla,
-  /// The project rail on the far left and the title band: Chrome's window frame.
+  /// The title band: Chrome's window frame.
   pub rail: Hsla,
   pub rail_hover: Hsla,
   /// The hover color of an item on a `rail_hover` background, such as the inside of a category.

@@ -1,5 +1,9 @@
 //! The "Add project" dialog: create a new project, clone a repository or import an existing folder.
 
+use crate::{
+  connections::credentials_for_url,
+  repository_picker::{RepositoryChosen, RepositoryPicker},
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -13,6 +17,7 @@ use gpui_kit::{
   *,
 };
 use std::path::PathBuf;
+use vekro_hosting::Accounts;
 
 /// Sent when a project is ready to be added to the list.
 pub(crate) struct ProjectReady(pub PathBuf);
@@ -49,7 +54,7 @@ impl Mode {
   fn hint(self) -> &'static str {
     match self {
       Mode::New => "Creates a new folder with an empty Git repository.",
-      Mode::Clone => "Downloads a repository with your Git login (SSH key or credential helper).",
+      Mode::Clone => "Downloads a repository, with a connected account or with your own Git login (SSH key, credential helper).",
       Mode::Import => "Adds a folder that already exists on this Mac. The folder stays where it is.",
     }
   }
@@ -63,19 +68,23 @@ pub(crate) struct ProjectSetup {
   location: PathBuf,
   busy: bool,
   error: Option<SharedString>,
+  /// The connected accounts: their repositories can be browsed, and their tokens are used to clone.
+  accounts: Accounts,
+  /// The list of repositories of the connected accounts, while it is open.
+  picker: Option<(Entity<RepositoryPicker>, Subscription)>,
   _subscription: Subscription,
 }
 
 impl ProjectSetup {
   /// `location` is where new and cloned projects go unless the user picks another folder.
-  pub fn new(location: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
+  pub fn new(location: PathBuf, accounts: Accounts, window: &mut Window, cx: &mut Context<Self>) -> Self {
     let input = cx.new(|cx| InputState::new(window, cx).placeholder("Project name"));
     let subscription = cx.subscribe_in(&input, window, |this, _, event: &InputEvent, _, cx| {
       if let InputEvent::PressEnter { .. } = event {
         this.submit(cx);
       }
     });
-    Self { mode: Mode::New, input, location, busy: false, error: None, _subscription: subscription }
+    Self { mode: Mode::New, input, location, busy: false, error: None, accounts, picker: None, _subscription: subscription }
   }
 
   fn set_mode(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
@@ -84,6 +93,7 @@ impl ProjectSetup {
     }
     self.mode = mode;
     self.error = None;
+    self.picker = None;
     let placeholder = if mode == Mode::Clone { "https://github.com/user/repository.git" } else { "Project name" };
     self.input.update(cx, |input, cx| {
       input.set_value("", window, cx);
@@ -114,18 +124,34 @@ impl ProjectSetup {
     .detach();
   }
 
+  /// Shows or hides the list of the connected accounts' repositories.
+  fn toggle_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if self.picker.take().is_some() {
+      cx.notify();
+      return;
+    }
+    let picker = cx.new(|cx| RepositoryPicker::new(self.accounts.items.clone(), window, cx));
+    let subscription = cx.subscribe_in(&picker, window, |this, _, chosen: &RepositoryChosen, window, cx| {
+      this.input.update(cx, |input, cx| input.set_value(chosen.0.clone(), window, cx));
+      this.picker = None;
+      cx.notify();
+    });
+    self.picker = Some((picker, subscription));
+    cx.notify();
+  }
+
   fn submit(&mut self, cx: &mut Context<Self>) {
     if self.busy || self.mode == Mode::Import {
       return;
     }
     let text = self.input.read(cx).value().to_string();
-    let (mode, location) = (self.mode, self.location.clone());
+    let (mode, location, accounts) = (self.mode, self.location.clone(), self.accounts.clone());
     self.busy = true;
     self.error = None;
     cx.notify();
     let work = cx.background_executor().spawn(async move {
       match mode {
-        Mode::Clone => vekro_git::clone(&text, &location),
+        Mode::Clone => vekro_git::clone(&text, &location, credentials_for_url(&accounts, &text).as_ref()),
         _ => vekro_git::create_project(&location, &text),
       }
     });
@@ -200,6 +226,28 @@ impl Render for ProjectSetup {
       .child(Label::new(self.mode.hint()).text_color(theme.muted_foreground))
       .when(!importing, |form| {
         form.child(field(caption, theme.muted_foreground, Input::new(&self.input))).child(field("Location", theme.muted_foreground, location))
+      })
+      .when(self.mode == Mode::Clone && !self.accounts.items.is_empty(), |form| {
+        let browsing = self.picker.is_some();
+        form
+          .child(
+            h_flex().child(
+              Button::new("browse-repositories")
+                .label(if browsing { "Hide repositories" } else { "Browse my repositories…" })
+                .icon(Icon::empty().path("icons/git-fork.svg"))
+                .small()
+                .outline()
+                .on_click(cx.listener(|this, _, window, cx| this.toggle_picker(window, cx))),
+            ),
+          )
+          .children(self.picker.as_ref().map(|(picker, _)| picker.clone()))
+      })
+      .when(self.mode == Mode::Clone && self.accounts.items.is_empty(), |form| {
+        form.child(
+          Label::new("Connect GitHub, GitLab or Azure DevOps in Settings → Accounts to browse your repositories and clone private ones.")
+            .text_size(crate::theme::FONT_SIZE_SM)
+            .text_color(theme.muted_foreground),
+        )
       })
       .when(importing, |form| form.child(choose))
       .when_some(self.error.clone(), |form, error| form.child(Label::new(error).text_color(theme.danger)))

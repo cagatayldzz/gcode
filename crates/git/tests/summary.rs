@@ -51,9 +51,9 @@ fn cloning_copies_a_repository_and_reports_a_missing_one() {
   let source = vekro_git::create_project(&parent, "source").unwrap();
   let destination = parent.join("elsewhere");
   fs::create_dir_all(&destination).unwrap();
-  let cloned = vekro_git::clone(source.to_str().unwrap(), &destination).unwrap();
+  let cloned = vekro_git::clone(source.to_str().unwrap(), &destination, None).unwrap();
   assert_eq!(cloned, destination.join("source"));
-  assert!(vekro_git::clone(parent.join("missing").to_str().unwrap(), &destination).is_err());
+  assert!(vekro_git::clone(parent.join("missing").to_str().unwrap(), &destination, None).is_err());
   fs::remove_dir_all(parent).unwrap();
 }
 

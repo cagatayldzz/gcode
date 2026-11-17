@@ -1,6 +1,9 @@
 //! The Settings dialog, built with the Kit's `Settings` component, and the model that holds the settings.
 
-use crate::project_manager::ProjectManager;
+use crate::{
+  connections::{accounts_path, AccountsList},
+  project_manager::ProjectManager,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -14,6 +17,7 @@ use gpui_kit::{
   *,
 };
 use std::path::PathBuf;
+use vekro_hosting::Accounts;
 use vekro_opencommit::{config_path, Config};
 use vekro_storage::{data_dir, Preferences, ThemeChoice, CODE_FONT_SIZES};
 
@@ -22,12 +26,24 @@ pub(crate) struct SettingsModel {
   pub preferences: Preferences,
   /// The OpenCommit settings (`~/.opencommit`) that commit message generation uses.
   pub opencommit: Config,
+  /// The connected hosting accounts (`accounts.json`); their tokens are in the Keychain.
+  pub accounts: Accounts,
 }
 
 /// Sent when the user asks to add every project in the projects folder.
 pub(crate) struct AddAllProjectsRequested;
 
 impl EventEmitter<AddAllProjectsRequested> for SettingsModel {}
+
+/// Sent when the user asks to connect a hosting account.
+pub(crate) struct ConnectAccountRequested;
+
+impl EventEmitter<ConnectAccountRequested> for SettingsModel {}
+
+/// Sent when the user disconnects the account with this key.
+pub(crate) struct AccountRemoveRequested(pub String);
+
+impl EventEmitter<AccountRemoveRequested> for SettingsModel {}
 
 /// Sent when the user asks to open the OpenCommit settings dialog.
 pub(crate) struct CommitSettingsRequested;
@@ -41,7 +57,11 @@ impl Global for SettingsGlobal {}
 
 /// Loads the saved settings into the shared model.
 pub(crate) fn init_settings(cx: &mut App) -> Entity<SettingsModel> {
-  let model = cx.new(|_| SettingsModel { preferences: Preferences::load(&Preferences::default_path()), opencommit: Config::load(&config_path()) });
+  let model = cx.new(|_| SettingsModel {
+    preferences: Preferences::load(&Preferences::default_path()),
+    opencommit: Config::load(&config_path()),
+    accounts: Accounts::load(&accounts_path()),
+  });
   cx.set_global(SettingsGlobal(model.clone()));
   model
 }
@@ -79,7 +99,7 @@ fn choose_projects_folder(cx: &mut App) {
 }
 
 /// The Settings pages. `fallback_dir` is the projects folder shown while none is chosen.
-pub(crate) fn settings_view(fallback_dir: PathBuf, projects: Entity<ProjectManager>) -> Settings {
+pub(crate) fn settings_view(fallback_dir: PathBuf, projects: Entity<ProjectManager>, accounts: Entity<AccountsList>) -> Settings {
   let shown_dir = fallback_dir.clone();
   Settings::new("vekro-settings").with_group_variant(GroupBoxVariant::Outline).sidebar_width(px(180.)).pages(vec![
     SettingPage::new("General").icon(IconName::Settings).default_open(true).resettable(false).groups(vec![
@@ -170,14 +190,20 @@ pub(crate) fn settings_view(fallback_dir: PathBuf, projects: Entity<ProjectManag
                 .on_click(|_, _, cx| model(cx).update(cx, |_, cx| cx.emit(AddAllProjectsRequested)))
             }),
           )
-          .description("Adds every Git repository directly inside the projects folder to the project bar."),
+          .description("Adds every Git repository directly inside the projects folder to the project menu."),
         ),
     ]),
-    SettingPage::new("Project bar").icon(IconName::Menu).resettable(false).group(
+    SettingPage::new("Project list").icon(IconName::Menu).resettable(false).group(
       SettingGroup::new()
         .title("Projects and categories")
-        .description("Rename, recolor, reorder and group the projects of the bar on the left, or remove them. Drag a project onto another one in the bar to group them.")
+        .description("Rename, recolor, reorder and group the projects of the menu in the title bar, or remove them. Right-click a project in that menu to move it to a category.")
         .item(SettingItem::render(move |_, _, _| projects.clone())),
+    ),
+    SettingPage::new("Accounts").icon(IconName::User).resettable(false).group(
+      SettingGroup::new()
+        .title("GitHub, GitLab and Azure DevOps")
+        .description("A connected account lets Vekro list your repositories to clone, list and open pull requests, and gives Git the token for that host over HTTPS. Tokens are kept in the macOS Keychain.")
+        .item(SettingItem::render(move |_, _, _| accounts.clone())),
     ),
     SettingPage::new("OpenCommit").icon(IconName::Bot).resettable(false).group(
       SettingGroup::new().title("Commit messages").item(

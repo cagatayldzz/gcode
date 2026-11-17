@@ -18,6 +18,7 @@ vekro-storage.workspace = true
 vekro-terminal.workspace = true
 vekro-git.workspace = true
 vekro-opencommit.workspace = true
+vekro-hosting.workspace = true
 gpui-kit.workspace = true
 gpui-kit-assets.workspace = true
 futures.workspace = true
