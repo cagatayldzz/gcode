@@ -2297,36 +2297,21 @@ impl Workspace {
       })
   }
 
-  /// The title bar's first tab, fixed at the left: the name of the open project with a menu of every project, grouped by category and
-  /// filtered by typing, and a way to add one.
+  /// The title bar's project menu, grouped by category and filtered by typing, with a way to add a project.
   fn render_repository_switcher(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let workspace = cx.entity();
     let theme = cx.theme().clone();
     let palette = colors(cx);
-    let name = self.projects.active.as_ref().and_then(|path| self.projects.projects.iter().find(|project| &project.path == path)).map(Project::name);
     let trigger = Button::new("repository-trigger")
       .custom(ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.rail_item_hover).active(palette.selected))
       .border_0()
       .h_8()
       .max_w_56()
       .rounded_md()
-      .child(
-        h_flex()
-          .gap_2()
-          .items_center()
-          .child(Icon::empty().path("icons/folder.svg").size_5())
-          .child(
-            Label::new(name.unwrap_or_else(|| "No project".to_string()))
-              .min_w_0()
-              .font_weight(FontWeight::SEMIBOLD)
-              .overflow_hidden()
-              .whitespace_nowrap()
-              .text_ellipsis(),
-          )
-          .child(
-            Icon::new(if self.projects_menu_open { IconName::ChevronUp } else { IconName::ChevronDown }).size_4().text_color(theme.muted_foreground),
-          ),
-      );
+      .tooltip("Projects")
+      .child(h_flex().gap_2().items_center().child(Icon::empty().path("icons/folder.svg").size_5()).child(
+        Icon::new(if self.projects_menu_open { IconName::ChevronUp } else { IconName::ChevronDown }).size_4().text_color(theme.muted_foreground),
+      ));
     Popover::new("repository-menu")
       .anchor(Anchor::TopLeft)
       .open(self.projects_menu_open)
@@ -2411,6 +2396,55 @@ impl Workspace {
               .children(rows),
           )
       })
+  }
+
+  fn render_favorite_projects(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    let palette = colors(cx);
+    let workspace = cx.entity();
+    self
+      .projects
+      .favorites()
+      .map(|project| {
+        let path = project.path.clone();
+        let selected = self.projects.active.as_ref() == Some(&path);
+        let look = avatar_look(project, selected, cx);
+        let workspace = workspace.clone();
+        Button::new(SharedString::from(format!("favorite-project-{}", path.display())))
+          .custom(
+            ButtonCustomVariant::new(cx)
+              .color(if selected { palette.selected } else { palette.rail })
+              .foreground(palette.text)
+              .hover(palette.rail_item_hover)
+              .active(palette.selected),
+          )
+          .border_0()
+          .h_8()
+          .max_w_56()
+          .rounded_md()
+          .child(
+            h_flex()
+              .gap_2()
+              .items_center()
+              .child(
+                div()
+                  .size_6()
+                  .flex()
+                  .flex_none()
+                  .items_center()
+                  .justify_center()
+                  .rounded_md()
+                  .text_sm()
+                  .text_color(look.text)
+                  .when_some(look.fill, |avatar, fill| avatar.bg(fill))
+                  .when_some(look.icon.clone(), |avatar, icon| avatar.child(Icon::empty().path(icon).size_4()))
+                  .when(look.icon.is_none(), |avatar| avatar.child(look.letter.clone())),
+              )
+              .child(Label::new(project.name()).min_w_0().font_weight(FontWeight::SEMIBOLD).overflow_hidden().whitespace_nowrap().text_ellipsis()),
+          )
+          .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.select_project(path.clone(), window, cx)))
+          .into_any_element()
+      })
+      .collect()
   }
 
   /// The bar above the editor in the Git tab: the branch with its menu, and the one button that keeps the branch in step with
@@ -3096,7 +3130,7 @@ impl Workspace {
   }
 
   /// The narrow bar at the far left: one button for each view of the sidebar (Explorer, Git), the open one marked; the terminal
-  /// button under them; and Settings at the bottom, with a small warning at its corner while an account needs attention.
+  /// button under them; and project settings, with a small warning at its corner while an account needs attention.
   fn render_activity_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
@@ -3143,8 +3177,15 @@ impl Workspace {
       });
     let settings = div()
       .relative()
-      .child(rail_button("settings-open", Icon::new(IconName::Settings), "Settings", false, true, &palette, |_, window, cx| {
-        window.dispatch_action(Box::new(OpenSettings), cx)
+      .child(rail_button("project-settings-open", Icon::new(IconName::Settings), "Project settings", false, true, &palette, {
+        let workspace = workspace.clone();
+        move |_, window, cx| {
+          workspace.update(cx, |this, cx| {
+            if let Some(path) = this.projects.active.clone() {
+              this.open_project_settings(&path, window, cx);
+            }
+          })
+        }
       }))
       // While an account has a permission problem, a small warning sits at the corner of the gear and opens Accounts.
       .when(attention, |gear| {
@@ -3192,7 +3233,6 @@ impl Workspace {
             .child(Icon::empty().path("icons/triangle-alert.svg").size_3().text_color(palette.on_accent)),
         )
       }))
-      .child(div().flex_1())
       .child(settings)
   }
 
@@ -3550,17 +3590,21 @@ impl Render for Workspace {
       .bg(theme.background)
       .text_color(theme.foreground)
       .text_size(FONT_SIZE)
-      .child(TitleBar::new().h(TOOLBAR_HEIGHT).pl(px(96.)).bg(palette.rail).border_b_1().border_color(palette.border).child(
-        h_flex().size_full().items_center().gap_2().pr_3().child(self.render_repository_switcher(cx)).child(rail_button(
-          "title-add",
-          Icon::new(IconName::Plus),
-          "Add project",
-          false,
-          false,
-          &palette,
-          |_, window, cx| window.dispatch_action(Box::new(AddProject), cx),
-        )),
-      ))
+      .child(
+        TitleBar::new().h(TOOLBAR_HEIGHT).pl(px(96.)).bg(palette.rail).border_b_1().border_color(palette.border).child(
+          h_flex()
+            .size_full()
+            .items_center()
+            .gap_2()
+            .pr_3()
+            .child(self.render_repository_switcher(cx))
+            .child(div().w_px().h_5().bg(palette.border))
+            .children(self.render_favorite_projects(cx))
+            .child(rail_button("title-add", Icon::new(IconName::Plus), "Add project", false, false, &palette, |_, window, cx| {
+              window.dispatch_action(Box::new(AddProject), cx)
+            })),
+        ),
+      )
       .child(h_flex().flex_1().min_h_0().child(self.render_activity_bar(cx)).child(if self.terminal_open {
         // The terminals take everything right of the activity bar: no sidebar and no status bar, like a terminal window.
         div().flex_1().min_w_0().h_full().child(main_area).into_any_element()
