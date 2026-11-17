@@ -992,13 +992,27 @@ impl Workspace {
     cx.notify();
   }
 
-  /// Opens the dialog for a project's name, icon and color.
+  /// Opens the dialog for a project's name, icon, color and Git remote.
   pub(crate) fn open_project_settings(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
     let Some(project) = self.projects.projects.iter().find(|project| project.path == path).cloned() else { return };
     let settings = cx.new(|cx| ProjectSettings::new(&project, window, cx));
     self._dialog_subscription = Some(cx.subscribe_in(&settings, window, |this, _, chosen: &AppearanceChosen, window, cx| {
       this.projects.set_appearance(&chosen.path, &chosen.name, chosen.icon.as_deref(), chosen.color.as_deref());
       this.persist_projects();
+      if let Some(url) = &chosen.remote {
+        match vekro_git::set_remote_url(&chosen.path, url) {
+          Ok(()) => {
+            if this.projects.active.as_ref() == Some(&chosen.path) {
+              this.refresh_project();
+            }
+            window.push_notification(Notification::info("Git remote updated."), cx);
+          }
+          Err(message) => {
+            window.push_notification(Notification::error(format!("Could not change the Git remote: {message}")), cx);
+            return;
+          }
+        }
+      }
       window.close_dialog(cx);
       cx.notify();
     }));

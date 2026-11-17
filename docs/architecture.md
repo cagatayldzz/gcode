@@ -33,7 +33,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/git/src/compare.rs` | comparing the current branch with another (`compare_choices`, `compare`) and merging it in (`merge_branch`); the History view's "Select Branch to Compare…" uses it |
 | `crates/ui/src/commit_view.rs` | `CommitView`: a commit of the History view in the main area (message, changed files, the diff of the chosen one) |
 | `crates/ui/src/project_setup.rs` | the Add project dialog (New, Clone, Import) |
-| `crates/ui/src/project_settings.rs` | the dialog for a project's name, icon and color |
+| `crates/ui/src/project_settings.rs` | the dialog for a project's name, icon, color and Git remote address (`vekro_git::set_remote_url`) |
 | `crates/ui/src/project_manager.rs` | the Project bar page of Settings: every project and category with its actions |
 | `crates/ui/src/settings.rs` | the Settings pages (the Kit `Settings` component) and `SettingsModel`, the settings every window shares |
 | `crates/ui/src/explorer.rs` | the folder tree rows |
@@ -42,7 +42,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/{components,assets}.rs` | the blue "chosen" button style; Kit icons |
 | `crates/terminal/src/session.rs` | `Session`: PTY, `alacritty_terminal`, shell directory lookup |
 | `crates/terminal/src/{snapshot,palette,keys,mouse,search}.rs` | styled screen snapshot, colors, key and mouse encoding, scrollback search |
-| `crates/git/src/lib.rs` | `summary` (branch, changed files, and `Sync`: remote, ahead/behind, last fetch), `file_diff`, `diff_files`, `history`, `commit_detail`, `commit_file_diff`, `undo_commit`, `create_tag`, `quick_status`, `branches`, `create_branch`, `switch_branch`, `commit`, `push`, `fetch`, `pull`, `create_project`, `clone`, `repository_name`, `find_repositories` |
+| `crates/git/src/lib.rs` | `summary` (branch, changed files, and `Sync`: remote, ahead/behind, last fetch), `file_diff`, `diff_files`, `history`, `commit_detail`, `commit_file_diff`, `undo_commit`, `create_tag`, `remote_url`, `set_remote_url`, `quick_status`, `branches`, `create_branch`, `switch_branch`, `commit`, `push`, `fetch`, `pull`, `create_project`, `clone`, `repository_name`, `find_repositories` |
 | `crates/updater/src/`, `crates/version/src/` | release lookup, download, verification, installer script; version comparison |
 | `crates/ui/src/updates.rs` | the update state of the shared settings model (`UpdateState`, `AppUpdate`) with its actions, and `UpdatePanel`, the Updates page of Settings |
 | `crates/hosting/src/` | `accounts.rs` (`Account`, `Accounts`, `TokenStore`: the macOS Keychain through `security`, or memory), `api.rs` (verify, repositories, pull requests per service), `remote.rs` (`RepoRef`: which repository a remote URL names) |

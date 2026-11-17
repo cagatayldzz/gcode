@@ -1,4 +1,4 @@
-//! The dialog that sets how a project looks in the project menu: its name, icon and color.
+//! The dialog that sets how a project looks in the project menu (its name, icon and color) and where its Git remote points.
 
 use crate::{
   components::selected_style,
@@ -53,11 +53,15 @@ pub(crate) struct AppearanceChosen {
   pub name: String,
   pub icon: Option<String>,
   pub color: Option<String>,
+  /// The new remote address, only when the user changed it.
+  pub remote: Option<String>,
 }
 
 pub(crate) struct ProjectSettings {
   path: PathBuf,
   input: Entity<InputState>,
+  remote_input: Entity<InputState>,
+  remote: String,
   icon: Option<String>,
   color: Option<String>,
   _subscription: Subscription,
@@ -70,17 +74,29 @@ impl ProjectSettings {
     let folder = project.folder_name();
     let current = project.name();
     let input = cx.new(|cx| InputState::new(window, cx).placeholder(folder).default_value(current));
+    let remote = vekro_git::remote_url(&project.path).unwrap_or_default();
+    let remote_input = cx.new(|cx| InputState::new(window, cx).placeholder("https://github.com/owner/repository.git").default_value(remote.clone()));
     let subscription = cx.subscribe_in(&input, window, |this, _, event: &InputEvent, _, cx| {
       if let InputEvent::PressEnter { .. } = event {
         this.save(cx);
       }
     });
-    Self { path: project.path.clone(), input, icon: project.icon.clone(), color: project.color.clone(), _subscription: subscription }
+    Self {
+      path: project.path.clone(),
+      input,
+      remote_input,
+      remote,
+      icon: project.icon.clone(),
+      color: project.color.clone(),
+      _subscription: subscription,
+    }
   }
 
   fn save(&mut self, cx: &mut Context<Self>) {
     let name = self.input.read(cx).value().to_string();
-    cx.emit(AppearanceChosen { path: self.path.clone(), name, icon: self.icon.clone(), color: self.color.clone() });
+    let remote = self.remote_input.read(cx).value().trim().to_string();
+    let remote = (remote != self.remote && !remote.is_empty()).then_some(remote);
+    cx.emit(AppearanceChosen { path: self.path.clone(), name, icon: self.icon.clone(), color: self.color.clone(), remote });
   }
 
   fn swatch(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement {
@@ -147,6 +163,13 @@ impl Render for ProjectSettings {
       .child(v_flex().gap_1p5().child(Label::new("Icon").text_color(muted).text_size(FONT_SIZE_SM)).child(
         h_flex().gap_1().flex_wrap().child(self.icon_button(None, cx)).children(PROJECT_ICONS.iter().map(|name| self.icon_button(Some(name), cx))),
       ))
+      .child(
+        v_flex()
+          .gap_1p5()
+          .child(Label::new("Git remote").text_color(muted).text_size(FONT_SIZE_SM))
+          .child(Input::new(&self.remote_input))
+          .child(Label::new("Change it when the repository was renamed or moved.").text_color(muted).text_size(FONT_SIZE_SM)),
+      )
       .child(
         h_flex()
           .gap_2()

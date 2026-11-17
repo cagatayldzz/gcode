@@ -597,9 +597,8 @@ pub fn create_tag(path: &Path, id: &str, name: &str) -> Result<(), String> {
   repository.tag_lightweight(name, &object, false).map(|_| ()).map_err(|error| error.message().to_string())
 }
 
-/// The URL of the remote the current branch follows, else `origin`, else the first remote; `None` without remotes.
-pub fn remote_url(path: &Path) -> Option<String> {
-  let repository = Repository::discover(path).ok()?;
+/// The name of the remote the current branch follows, else `origin`, else the first remote; `None` without remotes.
+fn main_remote_name(repository: &Repository) -> Option<String> {
   let remotes = repository.remotes().ok()?;
   let followed = repository
     .head()
@@ -607,12 +606,33 @@ pub fn remote_url(path: &Path) -> Option<String> {
     .and_then(|head| head.name().map(str::to_string))
     .and_then(|name| repository.branch_upstream_remote(&name).ok())
     .and_then(|remote| remote.as_str().map(str::to_string));
-  let name = followed
+  followed
     .or_else(|| remotes.iter().flatten().find(|name| *name == "origin").map(str::to_string))
-    .or_else(|| remotes.iter().flatten().next().map(str::to_string))?;
+    .or_else(|| remotes.iter().flatten().next().map(str::to_string))
+}
+
+/// The URL of the remote the current branch follows, else `origin`, else the first remote; `None` without remotes.
+pub fn remote_url(path: &Path) -> Option<String> {
+  let repository = Repository::discover(path).ok()?;
+  let name = main_remote_name(&repository)?;
   let remote = repository.find_remote(&name).ok()?;
   let url = remote.url().map(str::to_string);
   url
+}
+
+/// Points the remote that [`remote_url`] reports at `url` (a repository that was renamed or moved), or adds `origin` when there is
+/// no remote yet. Branches keep following the same remote, so nothing else changes. Fetching afterwards brings in what is there.
+pub fn set_remote_url(path: &Path, url: &str) -> Result<(), String> {
+  let url = url.trim();
+  if url.is_empty() || url.chars().any(char::is_whitespace) {
+    return Err("The remote address must not be empty or contain spaces.".into());
+  }
+  let repository = Repository::discover(path).map_err(|_| "This folder is not a Git repository.".to_string())?;
+  match main_remote_name(&repository) {
+    Some(name) => repository.remote_set_url(&name, url),
+    None => repository.remote("origin", url).map(|_| ()),
+  }
+  .map_err(|error| error.message().to_string())
 }
 
 /// The first line of the last commit's message.

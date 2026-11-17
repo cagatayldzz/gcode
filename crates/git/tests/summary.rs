@@ -229,3 +229,19 @@ fn committing_handles_deleted_files_the_first_commit_and_bad_input() {
   fs::remove_dir_all(dir).unwrap();
   fs::remove_dir_all(fresh).unwrap();
 }
+
+#[test]
+fn changing_the_remote_address_keeps_the_remote_and_adds_origin_when_missing() {
+  use vekro_git::{remote_url, set_remote_url};
+  let dir = temp_dir("set-remote");
+  assert!(set_remote_url(&dir, "https://github.com/a/b.git").is_err());
+  git2::Repository::init_opts(&dir, git2::RepositoryInitOptions::new().initial_head("main")).unwrap();
+  assert_eq!(remote_url(&dir), None);
+  set_remote_url(&dir, "https://github.com/cagatayldzz/relvo.git").unwrap();
+  assert_eq!(remote_url(&dir).as_deref(), Some("https://github.com/cagatayldzz/relvo.git"));
+  set_remote_url(&dir, " https://github.com/cagatayldzz/appforge.git ").unwrap();
+  assert_eq!(remote_url(&dir).as_deref(), Some("https://github.com/cagatayldzz/appforge.git"));
+  assert_eq!(git2::Repository::open(&dir).unwrap().remotes().unwrap().len(), 1);
+  assert!(set_remote_url(&dir, "  ").is_err());
+  fs::remove_dir_all(dir).unwrap();
+}
