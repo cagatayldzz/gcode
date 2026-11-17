@@ -10,10 +10,10 @@ use crate::{
   project_manager::ProjectManager,
   project_settings::{AppearanceChosen, ProjectSettings},
   project_setup::{ProjectReady, ProjectSetup},
-  pull_request::{PullRequestForm, PullRequestOpened, PullRequestTarget},
+  pull_request::{PullRequestEvent, PullRequestForm, PullRequestTarget},
   settings::{
-    init_settings, settings_view, AccountRemoveRequested, AddAllProjectsRequested, CommitSettingsRequested, ConnectAccountRequested, SettingsGlobal,
-    SettingsModel,
+    init_settings, settings_view, AccountRecheckRequested, AccountRemoveRequested, AddAllProjectsRequested, CommitSettingsRequested,
+    ConnectAccountRequested, SettingsGlobal, SettingsModel,
   },
   terminal::{Terminal, TerminalExited},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
@@ -50,7 +50,7 @@ use std::{
   time::Duration,
 };
 use vekro_git::{CommitInfo, Summary};
-use vekro_hosting::{KeychainStore, PullRequest, RepoRef};
+use vekro_hosting::{Connection, KeychainStore, PullRequest, RepoRef, TokenStore as _};
 use vekro_opencommit::DEFAULT_INSTRUCTIONS;
 use vekro_storage::{Category, Preferences, Project, ProjectList};
 
@@ -311,6 +311,11 @@ impl Workspace {
             this.open_connect_account(window, cx);
           }
         }),
+        cx.subscribe_in(&settings, window, |this, _, event: &AccountRecheckRequested, window, cx| {
+          if window.is_window_active() {
+            this.recheck_account(event.0.clone(), window, cx);
+          }
+        }),
         cx.subscribe_in(&settings, window, |this, _, event: &AccountRemoveRequested, window, cx| {
           if window.is_window_active() {
             this.remove_account(event.0.clone(), window, cx);
@@ -524,6 +529,106 @@ impl Workspace {
 
   /// Opens the Settings dialog.
   pub fn open_settings(&mut self, _: &OpenSettings, window: &mut Window, cx: &mut Context<Self>) {
+    self.open_settings_page("General", window, cx);
+  }
+
+  /// Marks the account that serves `url` as having a permission problem, because the host refused its token: a warning shows by
+  /// Settings until a check finds it fixed. `pull_requests` says which permission was refused.
+  fn flag_account_issue(&mut self, url: &str, pull_requests: bool, cx: &mut Context<Self>) {
+    self.settings.update(cx, |model, cx| {
+      let Some(account) = model.accounts.items.iter_mut().find(|account| RepoRef::for_account(account, url).is_some()) else { return };
+      let (action, permission) = if pull_requests {
+        ("Opening a pull request", account.provider.pull_request_permission())
+      } else {
+        ("Pushing or pulling", account.provider.push_permission())
+      };
+      account.issue = Some(format!("{action} was refused with this token. It needs {permission}."));
+      if let Err(error) = model.accounts.save(&accounts_path()) {
+        eprintln!("Could not save the accounts: {error}");
+      }
+      cx.notify();
+    });
+  }
+
+  /// Sets or clears what is wrong with an account's token.
+  fn set_account_issue(&mut self, key: &str, issue: Option<String>, cx: &mut Context<Self>) {
+    self.settings.update(cx, |model, cx| {
+      if let Some(account) = model.accounts.items.iter_mut().find(|account| account.key() == key) {
+        account.issue = issue;
+      }
+      if let Err(error) = model.accounts.save(&accounts_path()) {
+        eprintln!("Could not save the accounts: {error}");
+      }
+      cx.notify();
+    });
+  }
+
+  /// Asks the service what the account's token may do (see `vekro_hosting::verify_permissions`; nothing is changed) in the open
+  /// project's repository if the account serves it, else in the account's first repository. A fixed account loses its warning.
+  fn recheck_account(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(account) = self.settings.read(cx).accounts.items.iter().find(|account| account.key() == key).cloned() else { return };
+    if self.settings.read(cx).rechecking.contains(&key) {
+      return;
+    }
+    self.settings.update(cx, |model, cx| {
+      model.rechecking.push(key.clone());
+      cx.notify();
+    });
+    let remote = self.projects.active.as_ref().and_then(|root| vekro_git::remote_url(root));
+    let work = cx.background_executor().spawn({
+      let account = account.clone();
+      async move {
+        let token = KeychainStore
+          .get(&account.key())
+          .ok_or("The token is not in the Keychain any more. Disconnect the account and connect it again.".to_string())?;
+        let connection = Connection { account: account.clone(), token };
+        let own = remote.and_then(|url| RepoRef::for_account(&account, &url).map(|repository| (repository, url)));
+        let (repository, url) = match own {
+          Some(found) => found,
+          None => {
+            let first =
+              vekro_hosting::repositories(&connection)?.into_iter().next().ok_or("This account has no repository to check the permissions in.")?;
+            let repository = RepoRef::for_account(&account, &first.clone_url).ok_or("Could not tell which repository that is.")?;
+            (repository, first.clone_url)
+          }
+        };
+        let report = vekro_hosting::verify_permissions(&connection, &repository, &url);
+        let confirmed = report.push.is_some() || report.pull_requests.is_some();
+        let problems = if confirmed { report.missing(account.provider) } else { vekro_hosting::check_access(&connection).warnings(account.provider) };
+        Ok::<_, String>((problems, confirmed, repository.full_name()))
+      }
+    });
+    cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.settings.update(cx, |model, cx| {
+          model.rechecking.retain(|checking| checking != &key);
+          cx.notify();
+        });
+        let label = describe(&account);
+        match result {
+          Ok((problems, true, repository)) if problems.is_empty() => {
+            this.set_account_issue(&key, None, cx);
+            window.push_notification(Notification::info(format!("{label}: no permission is missing in {repository}.")), cx);
+          }
+          Ok((problems, _, _)) if !problems.is_empty() => {
+            let issue = format!("Still missing: {}.", problems.join("; "));
+            this.set_account_issue(&key, Some(issue.clone()), cx);
+            window.push_notification(Notification::warning(format!("{label}. {issue}")), cx);
+          }
+          Ok(_) => window.push_notification(
+            Notification::warning(format!("{label}: the service did not say whether the permissions are enough. Try pushing again.")),
+            cx,
+          ),
+          Err(message) => window.push_notification(Notification::error(message), cx),
+        }
+      });
+    })
+    .detach();
+  }
+
+  /// Opens Settings on one of its pages ("General", "Accounts", …).
+  pub(crate) fn open_settings_page(&mut self, page: &'static str, window: &mut Window, cx: &mut Context<Self>) {
     let fallback = self.new_project_dir(cx);
     let workspace = cx.entity();
     let projects = cx.new(|cx| ProjectManager::new(workspace, cx));
@@ -536,7 +641,7 @@ impl Workspace {
           .rounded_b_lg()
           .overflow_hidden()
           .child(Label::new("Settings").text_lg().font_weight(FontWeight::SEMIBOLD).px_6().py_4())
-          .child(div().h(px(520.)).child(settings_view(fallback.clone(), projects.clone(), accounts.clone(), updates.clone()))),
+          .child(div().h(px(520.)).child(settings_view(fallback.clone(), projects.clone(), accounts.clone(), updates.clone(), page))),
       )
     });
   }
@@ -978,6 +1083,7 @@ impl Workspace {
       let model = self.settings.read(cx);
       (model.opencommit.git_push, model.accounts.clone())
     };
+    let remote_url = self.git.as_ref().and_then(|git| git.sync.as_ref()).map(|sync| sync.url.clone()).unwrap_or_default();
     let work = cx.background_executor().spawn({
       let (root, files) = (root.clone(), files.clone());
       async move {
@@ -1006,7 +1112,12 @@ impl Workspace {
             match pushed {
               None => window.push_notification(Notification::info(format!("Committed {id}.")), cx),
               Some(Ok(_)) => window.push_notification(Notification::info(format!("Committed {id} and pushed.")), cx),
-              Some(Err(message)) => window.push_notification(Notification::error(format!("Committed {id}, but the push failed: {message}")), cx),
+              Some(Err(message)) => {
+                if message.contains(vekro_git::TOKEN_REFUSED) {
+                  this.flag_account_issue(&remote_url, false, cx);
+                }
+                window.push_notification(Notification::error(format!("Committed {id}, but the push failed: {message}")), cx)
+              }
             }
           }
           Err(message) => window.push_notification(Notification::error(message), cx),
@@ -1041,7 +1152,9 @@ impl Workspace {
   pub(crate) fn open_connect_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let form = cx.new(|cx| ConnectAccount::new(window, cx));
     self._dialog_subscription = Some(cx.subscribe_in(&form, window, |this, _, connected: &AccountConnected, window, cx| {
-      let (account, warnings, unchecked) = (connected.0.clone(), connected.1.clone(), connected.2.clone());
+      let (mut account, warnings, unchecked) = (connected.0.clone(), connected.1.clone(), connected.2.clone());
+      // A permission the token certainly lacks stays on the account until a check finds it fixed.
+      account.issue = (!warnings.is_empty()).then(|| warnings.join(" "));
       let described = describe(&account);
       this.settings.update(cx, |model, cx| {
         model.accounts.add(account);
@@ -1159,6 +1272,7 @@ impl Workspace {
       return;
     }
     let remote = sync.remote.clone();
+    let remote_url = sync.url.clone();
     let (title, done) = if sync.behind > 0 {
       (format!("Pulling from {remote}"), "Pulled")
     } else if !sync.upstream {
@@ -1209,7 +1323,12 @@ impl Workspace {
         this.refresh_project();
         match result {
           Ok(_) => window.push_notification(Notification::info(format!("{done} {remote}.")), cx),
-          Err(message) => window.push_notification(Notification::error(message), cx),
+          Err(message) => {
+            if message.contains(vekro_git::TOKEN_REFUSED) {
+              this.flag_account_issue(&remote_url, false, cx);
+            }
+            window.push_notification(Notification::error(message), cx)
+          }
         }
         cx.notify();
       });
@@ -1336,11 +1455,17 @@ impl Workspace {
     };
     let accounts = self.settings.read(cx).accounts.clone();
     let form = cx.new(|cx| PullRequestForm::new(accounts, target, window, cx));
-    self._dialog_subscription = Some(cx.subscribe_in(&form, window, |this, _, opened: &PullRequestOpened, window, cx| {
-      window.close_dialog(cx);
-      window.push_notification(Notification::info(format!("Opened pull request #{}: {}", opened.0.number, opened.0.title)), cx);
-      cx.open_url(&opened.0.url);
-      this.load_pull_requests(cx);
+    self._dialog_subscription = Some(cx.subscribe_in(&form, window, |this, form, event: &PullRequestEvent, window, cx| match event {
+      PullRequestEvent::Opened(opened) => {
+        window.close_dialog(cx);
+        window.push_notification(Notification::info(format!("Opened pull request #{}: {}", opened.number, opened.title)), cx);
+        cx.open_url(&opened.url);
+        this.load_pull_requests(cx);
+      }
+      PullRequestEvent::Refused => {
+        let url = form.read(cx).remote_url().to_string();
+        this.flag_account_issue(&url, true, cx);
+      }
     }));
     window.open_dialog(cx, move |dialog, _, _| dialog.title("Create a pull request").width(px(560.)).child(form.clone()));
   }
@@ -2467,6 +2592,7 @@ impl Render for Workspace {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     // The terminal panel sits under the editor, above the status bar, and can be dragged taller or shorter.
+    let attention = self.settings.read(cx).accounts.items.iter().any(|account| account.issue.is_some());
     let commit_shown = self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::History && self.selected_commit.is_some();
     let change_shown = self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::Changes && self.selected_change.is_some();
     let editor_area: AnyElement = if commit_shown {
@@ -2518,9 +2644,33 @@ impl Render for Workspace {
               &palette,
               |_, window, cx| window.dispatch_action(Box::new(ToggleTerminal), cx),
             ))
-            .child(rail_button("title-settings", Icon::new(IconName::Settings), "Settings", false, &palette, |_, window, cx| {
-              window.dispatch_action(Box::new(OpenSettings), cx)
-            })),
+            .child(
+              div()
+                .relative()
+                .child(rail_button("title-settings", Icon::new(IconName::Settings), "Settings", false, &palette, |_, window, cx| {
+                  window.dispatch_action(Box::new(OpenSettings), cx)
+                }))
+                // While an account has a permission problem, a small warning sits at the corner of the gear and opens Accounts.
+                .when(attention, |gear| {
+                  gear.child(
+                    div()
+                      .id("account-attention")
+                      .absolute()
+                      .bottom_0()
+                      .right_0()
+                      .size_4()
+                      .flex()
+                      .items_center()
+                      .justify_center()
+                      .rounded_full()
+                      .cursor_pointer()
+                      .bg(theme.warning)
+                      .tooltip(|window, cx| Tooltip::new("An account needs attention").build(window, cx))
+                      .child(Icon::empty().path("icons/triangle-alert.svg").size_3().text_color(palette.on_accent))
+                      .on_click(cx.listener(|this, _, window, cx| this.open_settings_page("Accounts", window, cx))),
+                  )
+                }),
+            ),
         ),
       )
       .child(

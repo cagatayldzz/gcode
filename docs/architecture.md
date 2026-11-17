@@ -144,6 +144,12 @@ the account for the remote's host and gives the `git` program the user name and 
 one-command credential helper (`vekro_git::CREDENTIAL_HELPER`), so they appear in no command line or file; if the server refuses the token (HTTP 401/403), the command is run once more with the
 user's own Git login, and a message names both when both fail. SSH remotes keep the user's keys. Self-hosted GitHub Enterprise and GitLab are reached by naming the host; Azure DevOps uses the organization.
 
+A refused token marks its account: `Account.issue` (in `accounts.json`) holds what is wrong. It is set when `vekro_git::TOKEN_REFUSED`
+is in the error of a push, pull or fetch, when a pull request is refused (`PullRequestEvent::Refused`), or when connecting finds a
+permission missing; it is cleared by `Workspace::recheck_account`, which runs `vekro_hosting::verify_permissions` (the push
+advertisement `info/refs?service=git-receive-pack` and an empty pull request, neither of which changes anything) on a background
+thread. While any account has an issue, the title bar's gear shows a warning badge that opens the Accounts page.
+
 ## Persistence
 
 Data directory `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_DIR`).

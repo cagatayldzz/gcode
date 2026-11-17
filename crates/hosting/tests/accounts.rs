@@ -2,7 +2,7 @@ use std::fs;
 use vekro_hosting::{Account, Accounts, MemoryStore, Provider, TokenStore};
 
 fn github(username: &str) -> Account {
-  Account { provider: Provider::GitHub, host: "github.com".into(), organization: None, username: username.into() }
+  Account { provider: Provider::GitHub, host: "github.com".into(), organization: None, username: username.into(), issue: None }
 }
 
 #[test]
@@ -17,6 +17,7 @@ fn accounts_survive_a_save_and_load_and_never_hold_a_token() {
     host: "dev.azure.com".into(),
     organization: Some("contoso".into()),
     username: "contoso".into(),
+    issue: Some("Pushing was refused.".into()),
   });
   accounts.save(&file).unwrap();
   assert_eq!(Accounts::load(&file), accounts);
@@ -63,7 +64,7 @@ fn a_remote_finds_the_account_and_token_for_its_host() {
 #[test]
 fn git_logins_use_the_token_as_the_password() {
   let connection = |provider, username: &str| vekro_hosting::Connection {
-    account: Account { provider, host: "h".into(), organization: None, username: username.into() },
+    account: Account { provider, host: "h".into(), organization: None, username: username.into(), issue: None },
     token: "tok".into(),
   };
   assert_eq!(connection(Provider::GitHub, "octo").git_login(), ("octo".to_string(), "tok".to_string()));
@@ -83,4 +84,19 @@ fn every_service_tells_where_to_create_the_token_and_what_it_needs() {
   assert!(azure.note.contains("All accessible organizations") && azure.note.contains("December 1, 2026"));
   assert!(Provider::GitHub.token_guide().permissions.iter().any(|(name, _)| name.starts_with("Pull requests")));
   assert!(Provider::GitLab.token_guide().permissions.iter().any(|(name, _)| *name == "api"));
+}
+
+#[test]
+fn each_service_has_a_page_where_the_token_is_edited() {
+  let account = |provider, host: &str, organization: Option<&str>| Account {
+    provider,
+    host: host.into(),
+    organization: organization.map(str::to_string),
+    username: "me".into(),
+    issue: None,
+  };
+  assert_eq!(account(Provider::GitHub, "github.com", None).tokens_url(), "https://github.com/settings/personal-access-tokens");
+  assert_eq!(account(Provider::GitHub, "git.example.com", None).tokens_url(), "https://git.example.com/settings/personal-access-tokens");
+  assert_eq!(account(Provider::GitLab, "gitlab.com", None).tokens_url(), "https://gitlab.com/-/user_settings/personal_access_tokens");
+  assert_eq!(account(Provider::AzureDevOps, "dev.azure.com", Some("contoso")).tokens_url(), "https://dev.azure.com/contoso/_usersSettings/tokens");
 }

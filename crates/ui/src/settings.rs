@@ -31,6 +31,8 @@ pub(crate) struct SettingsModel {
   pub accounts: Accounts,
   /// Vekro's own updates.
   pub updates: UpdateState,
+  /// The accounts whose permissions are being checked, by key.
+  pub rechecking: Vec<String>,
 }
 
 /// Sent when the user asks to add every project in the projects folder.
@@ -42,6 +44,11 @@ impl EventEmitter<AddAllProjectsRequested> for SettingsModel {}
 pub(crate) struct ConnectAccountRequested;
 
 impl EventEmitter<ConnectAccountRequested> for SettingsModel {}
+
+/// Sent when the user asks to check again the permissions of the account with this key.
+pub(crate) struct AccountRecheckRequested(pub String);
+
+impl EventEmitter<AccountRecheckRequested> for SettingsModel {}
 
 /// Sent when the user disconnects the account with this key.
 pub(crate) struct AccountRemoveRequested(pub String);
@@ -65,6 +72,7 @@ pub(crate) fn init_settings(cx: &mut App) -> Entity<SettingsModel> {
     opencommit: Config::load(&config_path()),
     accounts: Accounts::load(&accounts_path()),
     updates: UpdateState::new(),
+    rechecking: Vec::new(),
   });
   cx.set_global(SettingsGlobal(model.clone()));
   // The first window asks GitHub for a newer release, unless that is turned off.
@@ -112,10 +120,11 @@ pub(crate) fn settings_view(
   projects: Entity<ProjectManager>,
   accounts: Entity<AccountsList>,
   updates: Entity<UpdatePanel>,
+  first_page: &str,
 ) -> Settings {
   let shown_dir = fallback_dir.clone();
   Settings::new("vekro-settings").with_group_variant(GroupBoxVariant::Outline).sidebar_width(px(180.)).pages(vec![
-    SettingPage::new("General").icon(IconName::Settings).default_open(true).resettable(false).groups(vec![
+    SettingPage::new("General").icon(IconName::Settings).default_open(first_page == "General").resettable(false).groups(vec![
       SettingGroup::new().title("Appearance").item(
         SettingItem::new(
           "Theme",
@@ -212,7 +221,7 @@ pub(crate) fn settings_view(
         .description("Rename, recolor, reorder and group the projects of the menu in the title bar, or remove them. Right-click a project in that menu to move it to a category.")
         .item(SettingItem::render(move |_, _, _| projects.clone())),
     ),
-    SettingPage::new("Accounts").icon(IconName::User).resettable(false).group(
+    SettingPage::new("Accounts").icon(IconName::User).default_open(first_page == "Accounts").resettable(false).group(
       SettingGroup::new()
         .title("GitHub, GitLab and Azure DevOps")
         .description("A connected account lets Vekro list your repositories to clone, list and open pull requests, and gives Git the token for that host over HTTPS. Tokens are kept in the macOS Keychain.")

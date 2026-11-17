@@ -83,6 +83,7 @@ impl ConnectAccount {
       host: if host.is_empty() || provider == Provider::AzureDevOps { provider.default_host().to_string() } else { host },
       organization: (provider == Provider::AzureDevOps).then_some(organization),
       username: String::new(),
+      issue: None,
     };
     self.busy = true;
     self.error = None;

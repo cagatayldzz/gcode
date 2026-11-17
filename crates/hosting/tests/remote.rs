@@ -1,7 +1,7 @@
 use vekro_hosting::{remote_host, Account, Provider, RepoRef};
 
 fn account(provider: Provider, host: &str, organization: Option<&str>) -> Account {
-  Account { provider, host: host.into(), organization: organization.map(str::to_string), username: "me".into() }
+  Account { provider, host: host.into(), organization: organization.map(str::to_string), username: "me".into(), issue: None }
 }
 
 #[test]

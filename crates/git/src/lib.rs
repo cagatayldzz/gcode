@@ -439,6 +439,10 @@ fn finish(result: (bool, String), failure: &str) -> Result<String, String> {
   }
 }
 
+/// What the message of a failed push, fetch or pull says when the server turned down the connected account's token (and the user's own
+/// login could not be used either): the interface looks for it to mark the account as having a problem.
+pub const TOKEN_REFUSED: &str = "refused the token of the connected account";
+
 /// Whether git's message says the server turned the login down (rather than, say, a network failure).
 fn login_refused(message: &str) -> bool {
   ["403", "401", "Authentication failed", "denied", "could not read Username", "Permission to"].iter().any(|sign| message.contains(sign))
@@ -452,7 +456,7 @@ fn with_login(credentials: Option<&Credentials>, mut command: impl FnMut(Option<
     (Err(first), Some(_)) if login_refused(&first) => command(None).map_err(|second| {
       if login_refused(&second) {
         format!(
-          "The server refused the token of the connected account ({}). Your own Git login could not be used either ({}). Give the token write access in Settings → Accounts (reconnect the account with a new token), or sign in once with `git push` in a terminal.",
+          "The server {TOKEN_REFUSED} ({}). Your own Git login could not be used either ({}). Give the token write access in Settings → Accounts (reconnect the account with a new token), or sign in once with `git push` in a terminal.",
           first.trim_end_matches('.'),
           second.trim_end_matches('.')
         )

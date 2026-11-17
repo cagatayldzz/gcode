@@ -173,6 +173,12 @@ development builds, and only for Apple Silicon Macs.
   request later names the permission it needs. A connected
   account is used to browse and clone your repositories, to list and create pull requests, and to give Git the token for that host
   over HTTPS (clone, fetch, pull and push; SSH remotes keep using your keys; if the host refuses the token, Git's own login is tried before an error is shown). **Disconnect** removes the account and its token.
+  When a host refuses the token (a push, pull or pull request is turned down, or connecting finds a permission missing), a small
+  warning appears at the corner of the Settings gear in the title bar; it opens Settings → Accounts, where the account shows what
+  is missing and which permissions to give the token, with a button that opens the service's token page in the browser (GitHub
+  tokens: `github.com/settings/personal-access-tokens`; it lists your tokens, as GitHub does not tell Vekro which one is in use). The warning stays until it is fixed: after changing the token's permissions
+  (or connecting again with a new token) press **Check again**, which asks the service what the token may do (it can start a push
+  and open a pull request, without changing anything) in the open project's repository, else in the account's first repository.
 - **Updates:** see Updates above.
 - **OpenCommit:** how commit messages are generated.
 - **About:** the version and the data folder.

@@ -72,7 +72,7 @@ fn serve_with_headers(
 
 fn connection(provider: Provider, base: &str, organization: Option<&str>) -> Connection {
   Connection {
-    account: Account { provider, host: base.into(), organization: organization.map(str::to_string), username: "me".into() },
+    account: Account { provider, host: base.into(), organization: organization.map(str::to_string), username: "me".into(), issue: None },
     token: "pat".into(),
   }
 }
@@ -273,4 +273,53 @@ fn a_refused_request_names_the_permission_the_service_needs() {
   )
   .unwrap_err();
   assert!(error.contains("Code: Read & write"), "{error}");
+}
+
+#[test]
+fn permissions_are_probed_without_changing_anything() {
+  use vekro_hosting::verify_permissions;
+  // A token that may push and open pull requests: the push advertisement is given, the empty pull request is "unprocessable".
+  let (base, requests) = serve(|method, target| match (method, target) {
+    ("GET", t) if t.starts_with("/o/r.git/info/refs?service=git-receive-pack") => (200, "001e# service=git-receive-pack\n".into()),
+    ("POST", "/api/v3/repos/octo/app/pulls") => (422, r#"{"message":"Validation Failed"}"#.into()),
+    _ => (404, "{}".into()),
+  });
+  let github = connection(Provider::GitHub, &base, None);
+  let report = verify_permissions(&github, &github_repo(), &format!("{base}/o/r.git"));
+  assert_eq!(report, report_of(Some(true), Some(true)));
+  assert!(report.missing(Provider::GitHub).is_empty());
+  let probe = requests.recv().unwrap();
+  assert_eq!(probe.method, "GET");
+  assert!(probe.headers.contains("authorization: basic bwu6cgf0"), "the token is the password of a Basic login: {}", probe.headers);
+  let post = requests.recv().unwrap();
+  assert_eq!((post.method.as_str(), post.body.replace(char::is_whitespace, "").as_str()), ("POST", "{}"), "the pull request probe is empty");
+
+  // A read-only token: the push advertisement and pull requests are refused.
+  let (read_only, _) = serve(|_, _| (403, r#"{"message":"Resource not accessible by personal access token"}"#.into()));
+  let github = connection(Provider::GitHub, &read_only, None);
+  let report = verify_permissions(&github, &github_repo(), &format!("{read_only}/o/r.git"));
+  assert_eq!(report, report_of(Some(false), Some(false)));
+  let missing = report.missing(Provider::GitHub);
+  assert!(missing[0].contains("push") && missing[0].contains("Contents: Read and write"), "{missing:?}");
+  assert!(missing[1].contains("pull requests") && missing[1].contains("Pull requests: Read and write"), "{missing:?}");
+
+  // An answer that says nothing (the service is down) leaves it unknown instead of blaming the token.
+  let (down, _) = serve(|_, _| (500, "{}".into()));
+  let github = connection(Provider::GitHub, &down, None);
+  let report = verify_permissions(&github, &github_repo(), &format!("{down}/o/r.git"));
+  assert_eq!(report, report_of(None, None));
+  assert!(report.missing(Provider::GitHub).is_empty());
+}
+
+fn report_of(push: Option<bool>, pull_requests: Option<bool>) -> vekro_hosting::PermissionReport {
+  vekro_hosting::PermissionReport { push, pull_requests }
+}
+
+#[test]
+fn permission_problems_are_told_from_other_failures() {
+  use vekro_hosting::is_permission_problem;
+  assert!(is_permission_problem("GitHub refused the request: the token lacks a permission. It needs X."));
+  assert!(is_permission_problem("GitHub rejected the token. Check that it is correct."));
+  assert!(!is_permission_problem("Could not reach GitHub: connection refused"));
+  assert!(!is_permission_problem("GitHub could not find it."));
 }

@@ -72,6 +72,24 @@ impl Provider {
     }
   }
 
+  /// The permission pushing needs, as the service names it.
+  pub fn push_permission(self) -> &'static str {
+    match self {
+      Self::GitHub => "Contents: Read and write (or the `repo` scope)",
+      Self::GitLab => "the `write_repository` or `api` scope",
+      Self::AzureDevOps => "Code: Read & write",
+    }
+  }
+
+  /// The permission listing and opening pull requests needs, as the service names it.
+  pub fn pull_request_permission(self) -> &'static str {
+    match self {
+      Self::GitHub => "Pull requests: Read and write (or the `repo` scope)",
+      Self::GitLab => "the `api` scope",
+      Self::AzureDevOps => "Code: Read & write",
+    }
+  }
+
   /// The permission a refused request most likely lacks, for an error message.
   pub fn permission_hint(self) -> &'static str {
     match self {
@@ -102,6 +120,9 @@ pub struct Account {
   pub organization: Option<String>,
   /// Who the token belongs to, as the service reported when it was verified.
   pub username: String,
+  /// What is wrong with the token's permissions, while something is: set when a push or a pull request is refused (or a check
+  /// finds a permission missing), cleared when a check finds it fixed. A new token (connecting again) starts without one.
+  pub issue: Option<String>,
 }
 
 impl Account {
@@ -119,6 +140,17 @@ impl Account {
       host.to_string()
     } else {
       format!("https://{host}")
+    }
+  }
+
+  /// The page of the service where this account's tokens are listed and edited, to open in a browser. (GitHub does not tell Vekro
+  /// which token is in use, so it is the list, not one token.)
+  pub fn tokens_url(&self) -> String {
+    let base = self.base_url();
+    match self.provider {
+      Provider::GitHub => format!("{base}/settings/personal-access-tokens"),
+      Provider::GitLab => format!("{base}/-/user_settings/personal_access_tokens"),
+      Provider::AzureDevOps => format!("{base}/{}/_usersSettings/tokens", self.organization.as_deref().unwrap_or_default()),
     }
   }
 
@@ -245,6 +277,7 @@ impl Accounts {
           host: text("host")?,
           organization: text("organization").filter(|organization| !organization.is_empty()),
           username: text("username").unwrap_or_default(),
+          issue: text("issue").filter(|issue| !issue.is_empty()),
         })
       })
       .collect();
@@ -261,6 +294,7 @@ impl Accounts {
         "host": account.host,
         "organization": account.organization,
         "username": account.username,
+        "issue": account.issue,
       })).collect::<Vec<_>>(),
     });
     fs::write(path, serde_json::to_string_pretty(&value)?)

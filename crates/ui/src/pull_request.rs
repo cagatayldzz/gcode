@@ -15,10 +15,14 @@ use gpui_kit::{
 };
 use vekro_hosting::{Accounts, KeychainStore, NewPullRequest, PullRequest};
 
-/// Sent when the service has opened the pull request.
-pub(crate) struct PullRequestOpened(pub PullRequest);
+/// What the form tells the window: the pull request was opened, or the service refused the token.
+pub(crate) enum PullRequestEvent {
+  Opened(PullRequest),
+  /// The token is not allowed to open pull requests (or was rejected): the account has a problem to show.
+  Refused,
+}
 
-impl EventEmitter<PullRequestOpened> for PullRequestForm {}
+impl EventEmitter<PullRequestEvent> for PullRequestForm {}
 
 pub(crate) struct PullRequestForm {
   remote_url: String,
@@ -45,6 +49,11 @@ pub(crate) struct PullRequestTarget {
 }
 
 impl PullRequestForm {
+  /// The address of the remote the pull request is for.
+  pub fn remote_url(&self) -> &str {
+    &self.remote_url
+  }
+
   pub fn new(accounts: Accounts, target: PullRequestTarget, window: &mut Window, cx: &mut Context<Self>) -> Self {
     let title = cx.new(|cx| InputState::new(window, cx).placeholder("Title (required)").default_value(target.suggested_title.clone()));
     let description = cx.new(|cx| TextareaState::new(window, cx).placeholder("Description"));
@@ -116,8 +125,13 @@ impl PullRequestForm {
       let _ = this.update(cx, |this, cx| {
         this.busy = false;
         match result {
-          Ok(request) => cx.emit(PullRequestOpened(request)),
-          Err(message) => this.error = Some(message.into()),
+          Ok(request) => cx.emit(PullRequestEvent::Opened(request)),
+          Err(message) => {
+            if vekro_hosting::is_permission_problem(&message) {
+              cx.emit(PullRequestEvent::Refused);
+            }
+            this.error = Some(message.into());
+          }
         }
         cx.notify();
       });

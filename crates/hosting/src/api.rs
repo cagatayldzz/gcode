@@ -446,3 +446,85 @@ pub fn default_branch(connection: &Connection, repository: &RepoRef) -> Result<S
     .filter(|branch| !branch.is_empty())
     .ok_or_else(|| "The repository has no default branch yet.".into())
 }
+
+/// Whether an error message from this crate says the token was refused or lacks a permission (as opposed to a network failure or
+/// a missing repository).
+pub fn is_permission_problem(message: &str) -> bool {
+  message.contains("rejected the token") || message.contains("the token lacks a permission")
+}
+
+/// What a token can do in one repository, found by asking the service in ways that change nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PermissionReport {
+  /// Push (the service lets the token start a push). `None` when the answer was not clear.
+  pub push: Option<bool>,
+  /// List and open pull requests.
+  pub pull_requests: Option<bool>,
+}
+
+impl PermissionReport {
+  /// The permissions found missing, each as "what it is for (what to give the token)".
+  pub fn missing(&self, provider: Provider) -> Vec<String> {
+    let mut missing = Vec::new();
+    if self.push == Some(false) {
+      missing.push(format!("push ({})", provider.push_permission()));
+    }
+    if self.pull_requests == Some(false) {
+      missing.push(format!("pull requests ({})", provider.pull_request_permission()));
+    }
+    missing
+  }
+}
+
+impl Connection {
+  /// The status of a request, whatever it is: used to find out what the service allows from how it answers.
+  fn status_of(&self, method: &str, url: &str, body: Option<Value>, headers: Vec<(&'static str, String)>) -> Option<u16> {
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).http_status_as_error(false).build().into();
+    let sent = match (method, body) {
+      ("POST", Some(body)) => {
+        let mut request = agent.post(url);
+        for (name, value) in headers {
+          request = request.header(name, value);
+        }
+        request.send_json(&body)
+      }
+      _ => {
+        let mut request = agent.get(url);
+        for (name, value) in headers {
+          request = request.header(name, value);
+        }
+        request.call()
+      }
+    };
+    sent.ok().map(|response| response.status().as_u16())
+  }
+}
+
+/// Asks the service what the token may do in `repository`, without changing anything:
+/// - push: the advertisement a `git push` starts with (`info/refs?service=git-receive-pack`) is only given to a login that may push;
+/// - pull requests: a pull request is requested with an empty body, which the service refuses for a missing field when the token is
+///   allowed to open one, and for a missing permission when it is not.
+pub fn verify_permissions(connection: &Connection, repository: &RepoRef, clone_url: &str) -> PermissionReport {
+  let provider = connection.account.provider;
+  let (username, password) = connection.git_login();
+  let basic = format!("Basic {}", base64(format!("{username}:{password}").as_bytes()));
+  let advertisement = format!("{}/info/refs?service=git-receive-pack", clone_url.trim_end_matches('/'));
+  let push = match connection.status_of("GET", &advertisement, None, vec![("User-Agent", "Vekro".into()), ("Authorization", basic)]) {
+    Some(200) => Some(true),
+    Some(401 | 403 | 404) => Some(false),
+    _ => None,
+  };
+  let api = connection.api();
+  let url = match provider {
+    Provider::GitHub => format!("{api}/repos/{}/{}/pulls", repository.namespace, repository.name),
+    Provider::GitLab => format!("{api}/projects/{}/merge_requests", encode(&repository.full_name())),
+    Provider::AzureDevOps => format!("{}/pullrequests?api-version={AZURE_VERSION}", azure_repository_path(&api, repository)),
+  };
+  // A permitted token gets "unprocessable" (GitHub) or "bad request" (GitLab, Azure DevOps) for the empty body.
+  let pull_requests = match connection.status_of("POST", &url, Some(json!({})), connection.headers()) {
+    Some(400 | 422) => Some(true),
+    Some(401 | 403 | 404) => Some(false),
+    _ => None,
+  };
+  PermissionReport { push, pull_requests }
+}

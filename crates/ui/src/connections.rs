@@ -1,12 +1,17 @@
 //! Connected accounts (GitHub, GitLab, Azure DevOps): the helpers every part of the interface shares, and the list in Settings.
 
 use crate::{
-  settings::{AccountRemoveRequested, ConnectAccountRequested, SettingsGlobal, SettingsModel},
+  settings::{AccountRecheckRequested, AccountRemoveRequested, ConnectAccountRequested, SettingsGlobal, SettingsModel},
   theme::{colors, FONT_SIZE_SM},
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  component::{button::Button, h_flex, label::Label, v_flex, ActiveTheme as _, Icon, Sizable as _},
+  component::{
+    button::{Button, ButtonVariants as _},
+    h_flex,
+    label::Label,
+    v_flex, ActiveTheme as _, Disableable as _, Icon, Sizable as _,
+  },
   *,
 };
 use std::path::{Path, PathBuf};
@@ -64,10 +69,14 @@ impl Render for AccountsList {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
-    let accounts = model(cx).read(cx).accounts.items.clone();
+    let (accounts, rechecking) = {
+      let shared = model(cx).read(cx);
+      (shared.accounts.items.clone(), shared.rechecking.clone())
+    };
     let rows = accounts.iter().map(|account| {
       let key = account.key();
-      h_flex()
+      let checking = rechecking.contains(&key);
+      let row = h_flex()
         .id(SharedString::from(format!("account-{key}")))
         .gap_3()
         .px_3()
@@ -83,10 +92,62 @@ impl Render for AccountsList {
             .child(Label::new(account.provider.label()).font_weight(FontWeight::SEMIBOLD))
             .child(Label::new(account.label()).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground)),
         )
-        .child(Button::new(SharedString::from(format!("account-remove-{key}"))).label("Disconnect").small().outline().on_click(move |_, _, cx| {
+        .child(Button::new(SharedString::from(format!("account-remove-{key}"))).label("Disconnect").small().outline().on_click({
           let key = key.clone();
-          model(cx).update(cx, |_, cx| cx.emit(AccountRemoveRequested(key)));
-        }))
+          move |_, _, cx| {
+            let key = key.clone();
+            model(cx).update(cx, |_, cx| cx.emit(AccountRemoveRequested(key)));
+          }
+        }));
+      // While a permission is missing, an alert stays under the account until a check finds it fixed.
+      let alert = account.issue.clone().map(|issue| {
+        let key = key.clone();
+        let tokens_url = account.tokens_url();
+        let guide = account.provider.token_guide();
+        let needed = guide.permissions.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(", ");
+        v_flex()
+          .gap_2()
+          .p_3()
+          .rounded_md()
+          .border_1()
+          .border_color(theme.warning)
+          .bg(theme.warning.opacity(0.08))
+          .child(
+            h_flex()
+              .gap_2()
+              .items_center()
+              .child(Icon::empty().path("icons/triangle-alert.svg").size_4().text_color(theme.warning))
+              .child(Label::new("This account needs attention").font_weight(FontWeight::SEMIBOLD)),
+          )
+          .child(Label::new(issue).text_size(FONT_SIZE_SM))
+          .child(
+            Label::new(format!("Create a new token with {needed}, disconnect this account and connect it again, or fix the permissions of the current token. Then check again."))
+              .text_size(FONT_SIZE_SM)
+              .text_color(theme.muted_foreground),
+          )
+          .child(
+            h_flex().gap_2().items_center().child(
+              Button::new(SharedString::from(format!("account-recheck-{key}")))
+                .label(if checking { "Checking…" } else { "Check again" })
+                .small()
+                .primary()
+                .loading(checking)
+                .disabled(checking)
+                .on_click(move |_, _, cx| {
+                  let key = key.clone();
+                  model(cx).update(cx, |_, cx| cx.emit(AccountRecheckRequested(key)));
+                }),
+            ).child(
+              Button::new(SharedString::from(format!("account-tokens-{}", account.key())))
+                .small()
+                .outline()
+                .icon(Icon::empty().path("icons/external-link.svg"))
+                .tooltip("Open the token page in the browser")
+                .on_click(move |_, _, cx| cx.open_url(&tokens_url)),
+            ),
+          )
+      });
+      v_flex().gap_1().child(row).children(alert)
     });
     v_flex()
       .gap_2()
