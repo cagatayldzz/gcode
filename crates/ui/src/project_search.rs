@@ -2,6 +2,7 @@
 
 use std::{
   fs,
+  ops::Range,
   path::{Path, PathBuf},
   sync::atomic::{AtomicBool, Ordering},
 };
@@ -15,6 +16,7 @@ pub(crate) struct Match {
   pub line: usize,
   pub column: usize,
   pub preview: String,
+  pub highlight: Range<usize>,
 }
 
 pub(crate) fn search(root: &Path, query: &str, cancelled: &AtomicBool) -> Result<Vec<Match>, String> {
@@ -52,14 +54,30 @@ pub(crate) fn search(root: &Path, query: &str, cancelled: &AtomicBool) -> Result
       if let Some(column) = lower.find(&needle) {
         let mut folded_bytes = 0;
         let mut utf16_column = 0;
-        for ch in content.chars() {
-          if folded_bytes >= column {
+        let mut start = 0;
+        let mut end = content.len();
+        for (offset, ch) in content.char_indices() {
+          if folded_bytes >= column + needle.len() {
+            end = offset;
             break;
           }
-          folded_bytes += ch.to_lowercase().map(char::len_utf8).sum::<usize>();
-          utf16_column += ch.len_utf16();
+          let next = folded_bytes + ch.to_lowercase().map(char::len_utf8).sum::<usize>();
+          if next <= column {
+            utf16_column += ch.len_utf16();
+          } else if folded_bytes <= column {
+            start = offset;
+          }
+          folded_bytes = next;
         }
-        matches.push(Match { path: entry.path().to_path_buf(), line, column: utf16_column, preview: content.trim().chars().take(200).collect() });
+        let context_start = content[..start].char_indices().rev().nth(12).map_or(0, |(offset, _)| offset);
+        let context = content[context_start..start].trim_start();
+        let prefix = if context_start > 0 { "…" } else { "" };
+        let mut preview = format!("{prefix}{context}");
+        let highlight_start = preview.len();
+        preview.extend(content[start..end].chars().take(160));
+        let highlight_end = preview.len();
+        preview.extend(content[end..].chars().take(40));
+        matches.push(Match { path: entry.path().to_path_buf(), line, column: utf16_column, preview, highlight: highlight_start..highlight_end });
         if matches.len() == MAX_RESULTS {
           return Ok(matches);
         }

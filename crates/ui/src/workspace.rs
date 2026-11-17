@@ -27,7 +27,6 @@ use gpui_kit::{
   component::{
     button::{Button, ButtonCustomVariant, ButtonVariant, ButtonVariants as _},
     checkbox::Checkbox,
-    command::{Command, CommandItem, CommandState},
     dock::{panel_handle, DockArea, DockLayout, DockSkin},
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
@@ -239,7 +238,9 @@ pub struct Workspace {
   /// The scroll position of the folder tree.
   explorer_scroll: UniformListScrollHandle,
   search_open: bool,
-  search_state: Entity<CommandState>,
+  search_state: Entity<InputState>,
+  search_subscription: Option<Subscription>,
+  search_collapsed: HashSet<PathBuf>,
   search_results: Vec<project_search::Match>,
   search_task: Option<Task<()>>,
   search_cancellation: Option<SearchCancellation>,
@@ -353,7 +354,9 @@ impl Workspace {
       _dialog_subscription: None,
       explorer_scroll: UniformListScrollHandle::default(),
       search_open: false,
-      search_state: cx.new(|cx| CommandState::new(window, cx)),
+      search_state: cx.new(|cx| InputState::new(window, cx).placeholder("Search project files")),
+      search_subscription: None,
+      search_collapsed: HashSet::new(),
       search_results: Vec::new(),
       search_task: None,
       search_cancellation: None,
@@ -1055,11 +1058,7 @@ impl Workspace {
   /// summary, the file or diff in the editor and the terminals. What the project being left shows is put away
   /// and comes back when it is opened again; its shells keep running.
   fn switch_project(&mut self, window: &mut Window, cx: &mut Context<Self>, change: impl FnOnce(&mut ProjectList)) {
-    self.search_open = false;
-    self.search_task = None;
-    self.search_cancellation = None;
-    self.search_results.clear();
-    self.search_epoch += 1;
+    self.close_project_search(cx);
     let before = self.projects.active.clone();
     if let Some(root) = &before {
       let view = ProjectView {
@@ -1283,11 +1282,20 @@ impl Workspace {
       self.hide_terminal(window, cx);
     }
     if !self.search_open {
-      self.search_state = cx.new(|cx| CommandState::new(window, cx));
+      self.search_state = cx.new(|cx| InputState::new(window, cx).placeholder("Search project files"));
+      self.search_subscription = Some(cx.subscribe_in(&self.search_state, window, |this, input, event, window, cx| match event {
+        InputEvent::Change => this.run_project_search(input.read(cx).value().to_string(), window, cx),
+        InputEvent::PressEnter { .. } => {
+          if let Some(result) = this.search_results.iter().find(|result| !this.search_collapsed.contains(&result.path)).cloned() {
+            this.open_search_result(&result, window, cx);
+          }
+        }
+        _ => {}
+      }));
       self.search_open = true;
       self.search_results.clear();
     }
-    self.search_state.update(cx, |state, cx| state.focus(window, cx));
+    self.search_state.read(cx).focus_handle(cx).focus(window, cx);
     cx.notify();
   }
 
@@ -1297,12 +1305,11 @@ impl Workspace {
     self.search_task = None;
     self.search_cancellation = None;
     self.search_results.clear();
+    self.search_collapsed.clear();
     let Some(root) = self.projects.active.clone().filter(|_| !query.is_empty()) else {
-      self.search_state.update(cx, |state, cx| state.set_loading(false, window, cx));
       cx.notify();
       return;
     };
-    self.search_state.update(cx, |state, cx| state.set_loading(true, window, cx));
     let cancelled = Arc::new(AtomicBool::new(false));
     self.search_cancellation = Some(SearchCancellation(cancelled.clone()));
     self.search_task = Some(cx.spawn_in(window, async move |this, cx| {
@@ -1313,9 +1320,12 @@ impl Workspace {
         if this.search_epoch != epoch || !this.search_open {
           return;
         }
-        this.search_state.update(cx, |state, cx| state.set_loading(false, window, cx));
+        this.search_cancellation = None;
         match result {
-          Ok(results) => this.search_results = results,
+          Ok(mut results) => {
+            results.sort_by(|left, right| left.path.cmp(&right.path).then(left.line.cmp(&right.line)));
+            this.search_results = results;
+          }
           Err(message) => window.push_notification(Notification::error(message), cx),
         }
         cx.notify();
@@ -3188,12 +3198,7 @@ impl Workspace {
           .tooltip(if self.search_open { "Close search" } else { "Search project" })
           .on_click(cx.listener(|this, _, window, cx| {
             if this.search_open {
-              this.search_open = false;
-              this.search_task = None;
-              this.search_cancellation = None;
-              this.search_results.clear();
-              this.search_epoch += 1;
-              cx.notify();
+              this.close_project_search(cx);
             } else {
               this.search_project(&SearchProject, window, cx);
             }
@@ -3214,70 +3219,132 @@ impl Workspace {
         action("explorer-collapse", "icons/list-chevrons-down-up.svg", "Collapse folders")
           .on_click(cx.listener(|this, _, _, cx| this.collapse_folders(cx))),
       );
-    if self.search_open {
-      let root = self.projects.active.clone().unwrap_or_default();
-      let items = self
-        .search_results
-        .iter()
-        .map(|item| {
-          let path = SharedString::from(format!("{}:{}", item.path.strip_prefix(&root).unwrap_or(&item.path).display(), item.line + 1));
-          let preview = SharedString::from(item.preview.clone());
-          CommandItem::new().label(path.clone()).child(move |_, cx| {
-            v_flex()
-              .min_w_0()
-              .gap_0p5()
+    v_flex()
+      .flex_1()
+      .min_h_0()
+      .gap_2()
+      .child(header)
+      .child(if self.search_open { self.render_project_search(cx) } else { rows.into_any_element() })
+      .into_any_element()
+  }
+
+  fn close_project_search(&mut self, cx: &mut Context<Self>) {
+    self.search_open = false;
+    self.search_subscription = None;
+    self.search_task = None;
+    self.search_cancellation = None;
+    self.search_results.clear();
+    self.search_collapsed.clear();
+    self.search_epoch += 1;
+    cx.notify();
+  }
+
+  fn open_search_result(&mut self, result: &project_search::Match, window: &mut Window, cx: &mut Context<Self>) {
+    self.open_file(result.path.clone(), window, cx);
+    self.editor_panel.update(cx, |editor, cx| editor.reveal_position(&result.path, result.line, result.column, window, cx));
+  }
+
+  fn render_project_search(&self, cx: &mut Context<Self>) -> AnyElement {
+    let theme = cx.theme().clone();
+    let root = self.projects.active.as_deref().unwrap_or_else(|| Path::new(""));
+    let groups = self.search_results.chunk_by(|left, right| left.path == right.path);
+    let count = self.search_results.len();
+    let loading = self.search_cancellation.is_some();
+    let status = if loading {
+      "Searching…".into()
+    } else if count == 0 {
+      if self.search_state.read(cx).value().is_empty() { "" } else { "No matches found" }.into()
+    } else {
+      let files = groups.clone().count();
+      let result_word = if count == 1 { "result" } else { "results" };
+      let file_word = if files == 1 { "file" } else { "files" };
+      let limit = if count == project_search::MAX_RESULTS { "Showing first " } else { "" };
+      format!("{limit}{count} {result_word} in {files} {file_word}")
+    };
+
+    v_flex()
+      .id("project-search")
+      .flex_1()
+      .min_h_0()
+      .gap_2()
+      .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+        if event.keystroke.key == "escape" {
+          this.close_project_search(cx);
+          this.focus_handle.focus(window, cx);
+          cx.stop_propagation();
+        }
+      }))
+      .child(div().pr_3().child(Input::new(&self.search_state).small().cleanable(true).prefix(Icon::new(IconName::Search).small())))
+      .when(!status.is_empty(), |panel| {
+        panel.child(
+          h_flex()
+            .gap_2()
+            .when(loading, |row| row.child(Spinner::new().small()))
+            .child(Label::new(status).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground)),
+        )
+      })
+      .child(v_flex().id("project-search-results").flex_1().min_h_0().overflow_y_scrollbar().children(groups.map(|matches| {
+        let path = &matches[0].path;
+        let relative = path.strip_prefix(root).unwrap_or(path);
+        let filename = SharedString::from(relative.file_name().unwrap_or_default().to_string_lossy().into_owned());
+        let folder = SharedString::from(relative.parent().unwrap_or_else(|| Path::new("")).display().to_string());
+        let collapsed = self.search_collapsed.contains(path);
+        let group_path = path.clone();
+        v_flex()
+          .id(SharedString::from(path.display().to_string()))
+          .child(
+            h_flex()
+              .id("file")
+              .gap_1()
+              .py_1()
+              .pr_3()
+              .cursor_pointer()
+              .rounded_md()
+              .hover(|row| row.bg(theme.secondary_hover))
+              .child(Icon::new(if collapsed { IconName::ChevronRight } else { IconName::ChevronDown }).xsmall())
+              .child(Label::new(filename).font_weight(FontWeight::SEMIBOLD).whitespace_nowrap().overflow_hidden().text_ellipsis())
               .child(
-                Label::new(path.clone())
+                Label::new(folder)
+                  .flex_1()
+                  .min_w_0()
                   .text_size(FONT_SIZE_SM)
-                  .text_color(cx.theme().muted_foreground)
-                  .overflow_hidden()
+                  .text_color(theme.muted_foreground)
                   .whitespace_nowrap()
+                  .overflow_hidden()
                   .text_ellipsis(),
               )
-              .child(Label::new(preview.clone()).overflow_hidden().whitespace_nowrap().text_ellipsis())
+              .child(Label::new(matches.len().to_string()).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground))
+              .on_click(cx.listener(move |this, _, _, cx| {
+                if !this.search_collapsed.remove(&group_path) {
+                  this.search_collapsed.insert(group_path.clone());
+                }
+                cx.notify();
+              })),
+          )
+          .when(!collapsed, |group| {
+            group.children(matches.iter().map(|result| {
+              let target = result.clone();
+              h_flex()
+                .id(("line", result.line))
+                .gap_2()
+                .pl_4()
+                .pr_3()
+                .py_1()
+                .cursor_pointer()
+                .rounded_md()
+                .hover(|row| row.bg(theme.secondary_hover))
+                .child(Label::new((result.line + 1).to_string()).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground))
+                .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(
+                  StyledText::new(SharedString::from(result.preview.clone())).with_highlights([(
+                    result.highlight.clone(),
+                    HighlightStyle { background_color: Some(theme.primary.opacity(0.28)), ..Default::default() },
+                  )]),
+                ))
+                .on_click(cx.listener(move |this, _, window, cx| this.open_search_result(&target, window, cx)))
+            }))
           })
-        })
-        .collect::<Vec<_>>();
-      let owner = cx.entity().downgrade();
-      let confirm_owner = owner.clone();
-      let cancel_owner = owner.clone();
-      let command = Command::new(&self.search_state)
-        .filterable(false)
-        .placeholder("Search in project files…")
-        .empty(|state, _, cx| {
-          let message = if state.query(cx).is_empty() { "Type to search project files" } else { "No matches found" };
-          Label::new(message).text_color(cx.theme().muted_foreground).p_3()
-        })
-        .items(items)
-        .when(self.search_results.len() == project_search::MAX_RESULTS, |command| {
-          command.footer(|_, _, cx| {
-            Label::new("Showing the first 200 matches. Refine your search.").text_size(FONT_SIZE_SM).text_color(cx.theme().muted_foreground).p_2()
-          })
-        })
-        .on_query(move |query, window, cx| {
-          let _ = owner.update(cx, |this, cx| this.run_project_search(query.to_string(), window, cx));
-        })
-        .on_confirm(move |index, window, cx| {
-          let _ = confirm_owner.update(cx, |this, cx| {
-            if let Some(result) = this.search_results.get(index.row).cloned() {
-              this.open_file(result.path.clone(), window, cx);
-              this.editor_panel.update(cx, |editor, cx| editor.reveal_position(&result.path, result.line, result.column, window, cx));
-            }
-          });
-        })
-        .on_cancel(move |_, cx| {
-          let _ = cancel_owner.update(cx, |this, cx| {
-            this.search_open = false;
-            this.search_task = None;
-            this.search_cancellation = None;
-            this.search_epoch += 1;
-            cx.notify();
-          });
-        });
-      v_flex().flex_1().min_h_0().gap_2().child(header).child(div().flex_1().min_h_0().pr_3().child(command)).into_any_element()
-    } else {
-      v_flex().flex_1().min_h_0().gap_2().child(header).child(rows).into_any_element()
-    }
+      })))
+      .into_any_element()
   }
 
   /// The repository summary and the folder tree.

@@ -37,4 +37,5 @@ fn finds_text_with_locations_and_respects_ignore_rules() {
   assert_eq!(results[0].path.file_name().unwrap(), "source.rs");
   assert_eq!((results[0].line, results[0].column), (1, 8));
   assert_eq!(results[0].preview, "😀 Café NEEDLE here");
+  assert_eq!(&results[0].preview[results[0].highlight.clone()], "NEEDLE");
 }
