@@ -513,6 +513,7 @@ impl Workspace {
     self._terminal_subscriptions.push(cx.subscribe_in(&terminal, window, |this, terminal, _: &TerminalExited, window, cx| {
       this.close_pane(terminal.clone(), window, cx);
     }));
+    self._terminal_subscriptions.push(cx.subscribe(&terminal, |_, _, _: &TerminalAttentionChanged, cx| cx.notify()));
     Some(terminal)
   }
 
