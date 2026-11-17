@@ -1,14 +1,16 @@
-//! The editor area: a code editor for a file, or the diff of a changed file.
+//! The editor area: tabs of code editors and of the diffs of changed files.
 
 use crate::settings::code_font_size;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
+    button::{Button, ButtonVariants as _},
     diff::{Diff, DiffFile, DiffMode, DiffState},
     dock::{BasePanel, Panel, PanelControl, PanelEvent},
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     input::{Editor, EditorState, InputEvent},
-    Icon, IconName,
+    tab::{Tab, TabBar},
+    v_flex, Icon, IconName, Sizable as _,
   },
   *,
 };
@@ -62,18 +64,67 @@ struct ReadyFile {
   _cursor: Subscription,
 }
 
-enum Content {
-  Nothing,
+/// One tab: a file in the editor, or the changes of a file.
+#[derive(Clone)]
+enum OpenTab {
   File(PathBuf),
   Diff { name: String, state: Entity<DiffState> },
 }
 
+/// The tabs of a project and the one that is shown.
+#[derive(Default)]
+struct Tabs {
+  items: Vec<OpenTab>,
+  active: usize,
+}
+
+impl Tabs {
+  fn current(&self) -> Option<&OpenTab> {
+    self.items.get(self.active)
+  }
+
+  /// Shows the tab for which `same` is true, or adds `tab` and shows it.
+  fn show(&mut self, tab: OpenTab, same: impl Fn(&OpenTab) -> bool) {
+    match self.items.iter().position(same) {
+      Some(index) => {
+        self.items[index] = tab;
+        self.active = index;
+      }
+      None => {
+        self.items.push(tab);
+        self.active = self.items.len() - 1;
+      }
+    }
+  }
+
+  /// Takes away a tab; the one on its right (else on its left) is shown.
+  fn remove(&mut self, index: usize) {
+    if index >= self.items.len() {
+      return;
+    }
+    self.items.remove(index);
+    if self.active > index || self.active >= self.items.len() {
+      self.active = self.active.saturating_sub(1);
+    }
+  }
+}
+
+/// What the editor area shows now, sent when it changes so the sidebar can select the same file or change.
+pub(crate) enum ActiveTab {
+  File(PathBuf),
+  /// The changes of this file, named by its path in the repository.
+  Diff(String),
+  Nothing,
+}
+
+impl EventEmitter<ActiveTab> for EditorPanel {}
+
 pub(crate) struct EditorPanel {
-  content: Content,
+  tabs: Tabs,
   /// Editors that are ready, by path. Reopening one is instant and keeps its unsaved text.
   files: HashMap<PathBuf, ReadyFile>,
   /// What each project that is not open was showing.
-  saved: HashMap<PathBuf, Content>,
+  saved: HashMap<PathBuf, Tabs>,
   /// Paths in `files`, least recently used first.
   recent: Vec<PathBuf>,
   /// A few lines of code drawn out of sight so the first real file of a language does not pay for its highlighter.
@@ -105,7 +156,7 @@ impl EditorPanel {
       });
     });
     Self {
-      content: Content::Nothing,
+      tabs: Tabs::default(),
       files: HashMap::new(),
       saved: HashMap::new(),
       recent: Vec::new(),
@@ -117,17 +168,45 @@ impl EditorPanel {
     }
   }
 
-  /// Switches to another project's editor area: the file or changes the project being left shows are put away and
-  /// come back with it; a project not seen before starts empty.
+  /// Switches to another project's editor area: the tabs of the project being left are put away and come back with
+  /// it; a project not seen before starts with none.
   pub fn switch_project(&mut self, from: Option<PathBuf>, to: Option<PathBuf>, cx: &mut Context<Self>) {
-    let current = std::mem::replace(&mut self.content, Content::Nothing);
+    let current = std::mem::take(&mut self.tabs);
     if let Some(from) = from {
       self.saved.insert(from, current);
     }
-    if let Some(content) = to.and_then(|to| self.saved.remove(&to)) {
-      self.content = content;
+    if let Some(tabs) = to.and_then(|to| self.saved.remove(&to)) {
+      self.tabs = tabs;
     }
+    self.announce(cx);
+  }
+
+  /// Tells the others what is shown and redraws.
+  fn announce(&mut self, cx: &mut Context<Self>) {
+    let shown = match self.tabs.current() {
+      Some(OpenTab::File(path)) => ActiveTab::File(path.clone()),
+      Some(OpenTab::Diff { name, .. }) => ActiveTab::Diff(name.clone()),
+      None => ActiveTab::Nothing,
+    };
+    cx.emit(shown);
     cx.notify();
+  }
+
+  /// Shows another tab.
+  fn activate(&mut self, index: usize, cx: &mut Context<Self>) {
+    if index < self.tabs.items.len() {
+      self.tabs.active = index;
+      if let Some(OpenTab::File(path)) = self.tabs.current().cloned() {
+        self.touch(&path);
+      }
+      self.announce(cx);
+    }
+  }
+
+  /// Closes a tab. A file with unsaved text keeps it in memory: opening the file again brings it back.
+  fn close_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+    self.tabs.remove(index);
+    self.announce(cx);
   }
 
   /// Opens a text file for editing, at once if its editor is already ready.
@@ -137,8 +216,8 @@ impl EditorPanel {
       file.painted = true;
     }
     self.touch(&path);
-    self.content = Content::File(path);
-    cx.notify();
+    self.tabs.show(OpenTab::File(path.clone()), |tab| matches!(tab, OpenTab::File(open) if *open == path));
+    self.announce(cx);
     Ok(())
   }
 
@@ -206,9 +285,10 @@ impl EditorPanel {
 
   /// Drops the least recently used editors beyond the limit, never the open file or one with unsaved changes.
   fn evict(&mut self) {
-    // The open file and the files other projects have open stay.
-    let shown = std::iter::once(&self.content).chain(self.saved.values());
-    let open: Vec<PathBuf> = shown.filter_map(|content| if let Content::File(path) = content { Some(path.clone()) } else { None }).collect();
+    // The files in tabs, in this project or another, stay.
+    let tabs = std::iter::once(&self.tabs).chain(self.saved.values());
+    let open: Vec<PathBuf> =
+      tabs.flat_map(|tabs| tabs.items.iter()).filter_map(|tab| if let OpenTab::File(path) = tab { Some(path.clone()) } else { None }).collect();
     let mut index = 0;
     while self.files.len() > MAX_READY_FILES && index < self.recent.len() {
       let path = self.recent[index].clone();
@@ -229,30 +309,37 @@ impl EditorPanel {
       return Err(format!("{name} has no text changes to show."));
     }
     let state = cx.new(|cx| DiffState::new(files, cx).with_mode(DiffMode::Unified));
-    self.content = Content::Diff { name, state };
-    cx.notify();
+    let same = name.clone();
+    self.tabs.show(OpenTab::Diff { name, state }, move |tab| matches!(tab, OpenTab::Diff { name, .. } if *name == same));
+    self.announce(cx);
     Ok(())
   }
 
   /// Drops what the editor remembers about a file whose changes were thrown away: its text (also unsaved edits), and
-  /// the view of it or of its diff, which is named `diff_name`.
+  /// its tab and the tab of its diff, which is named `diff_name`.
   pub fn forget(&mut self, path: &Path, diff_name: &str, cx: &mut Context<Self>) {
     self.files.remove(path);
     self.recent.retain(|recent| recent != path);
-    let shows_it = match &self.content {
-      Content::File(open) => open == path,
-      Content::Diff { name, .. } => name == diff_name,
-      Content::Nothing => false,
-    };
-    if shows_it {
-      self.content = Content::Nothing;
+    let kept: Vec<OpenTab> = self
+      .tabs
+      .items
+      .iter()
+      .filter(|tab| match tab {
+        OpenTab::File(open) => open != path,
+        OpenTab::Diff { name, .. } => name != diff_name,
+      })
+      .cloned()
+      .collect();
+    if kept.len() != self.tabs.items.len() {
+      self.tabs.active = self.tabs.active.min(kept.len().saturating_sub(1));
+      self.tabs.items = kept;
     }
-    cx.notify();
+    self.announce(cx);
   }
 
   /// Writes the open file to disk.
   pub fn save(&mut self, cx: &mut Context<Self>) -> io::Result<bool> {
-    let Content::File(path) = &self.content else { return Ok(false) };
+    let Some(OpenTab::File(path)) = self.tabs.current() else { return Ok(false) };
     let Some(file) = self.files.get_mut(path) else { return Ok(false) };
     fs::write(path, file.state.read(cx).value().to_string())?;
     file.dirty = false;
@@ -267,9 +354,9 @@ impl EditorPanel {
   /// What the status bar says about the open file, left to right: the cursor, the indentation, the encoding, the line
   /// ending and the language. A diff only says that it shows changes.
   pub fn status(&self, cx: &App) -> Vec<String> {
-    match &self.content {
-      Content::Nothing => Vec::new(),
-      Content::File(path) => {
+    match self.tabs.current() {
+      None => Vec::new(),
+      Some(OpenTab::File(path)) => {
         let Some(file) = self.files.get(path) else { return Vec::new() };
         let cursor = file.state.read(cx).cursor_position();
         vec![
@@ -280,7 +367,7 @@ impl EditorPanel {
           language_label(path).into(),
         ]
       }
-      Content::Diff { name, .. } => vec![format!("{name} · changes")],
+      Some(OpenTab::Diff { name, .. }) => vec![format!("{name} · changes")],
     }
   }
 }
@@ -350,24 +437,52 @@ impl BasePanel for EditorPanel {
   }
 }
 
+impl EditorPanel {
+  /// The tab bar, drawn by the panel itself so the first tab sits at the edge of the pane.
+  fn render_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let tabs = self.tabs.items.iter().enumerate().map(|(index, tab)| {
+      let label = match tab {
+        OpenTab::File(path) => format!("{}{}", display_name(path), if self.is_dirty(path) { " •" } else { "" }),
+        OpenTab::Diff { name, .. } => {
+          format!("{} (changes)", Path::new(name).file_name().map_or_else(|| name.clone(), |file| file.to_string_lossy().into_owned()))
+        }
+      };
+      Tab::new().label(label).px_2().gap_2().suffix(
+        Button::new(("close-tab", index)).ghost().xsmall().icon(Icon::empty().path("icons/x.svg").size_4()).tooltip("Close").on_click(cx.listener(
+          move |this, _, _, cx| {
+            // The click must not also reach the tab and select it.
+            cx.stop_propagation();
+            this.close_tab(index, cx);
+          },
+        )),
+      )
+    });
+    TabBar::new("editor-tabs")
+      .selected_index(self.tabs.active)
+      .on_click(cx.listener(|this, index: &usize, _, cx| this.activate(*index, cx)))
+      .children(tabs)
+  }
+}
+
 impl Panel for EditorPanel {
   fn zoom_control(&self, _: &App) -> Option<PanelControl> {
     Some(PanelControl::Both)
   }
 
   fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-    match &self.content {
-      Content::Nothing => "Editor".to_string(),
-      Content::File(path) => format!("{}{}", display_name(path), if self.is_dirty(path) { " •" } else { "" }),
-      Content::Diff { name, .. } => format!("{name} (changes)"),
-    }
+    div().child("Editor")
+  }
+
+  /// The panel draws its own tabs (`render_tabs`).
+  fn title_bar(&self, _: &App) -> bool {
+    false
   }
 }
 
 impl Render for EditorPanel {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let content = match &self.content {
-      Content::Nothing => Empty::new()
+    let content = match self.tabs.current() {
+      None => Empty::new()
         .size_full()
         .header(
           EmptyHeader::new()
@@ -376,14 +491,15 @@ impl Render for EditorPanel {
             .description(EmptyDescription::new().child("Choose a file in the Explorer, or a changed file in Git.")),
         )
         .into_any_element(),
-      Content::File(path) => match self.files.get(path) {
+      Some(OpenTab::File(path)) => match self.files.get(path) {
         Some(file) => Editor::new(&file.state).appearance(false).bordered(false).size_full().into_any_element(),
         None => div().into_any_element(),
       },
-      Content::Diff { state, .. } => Diff::new(state).soft_wrap(true).border_0().text_size(code_font_size(cx)).size_full().into_any_element(),
+      Some(OpenTab::Diff { state, .. }) => Diff::new(state).soft_wrap(true).border_0().text_size(code_font_size(cx)).size_full().into_any_element(),
     };
     let hidden = self.preview.clone().or_else(|| self.warmup.clone());
-    div().relative().size_full().child(content).when_some(hidden, |this, state| {
+    let tabs = (!self.tabs.items.is_empty()).then(|| self.render_tabs(cx));
+    v_flex().relative().size_full().children(tabs).child(div().flex_1().min_h_0().child(content)).when_some(hidden, |this, state| {
       this.child(div().absolute().top_0().left_0().w(px(1.)).h(px(1.)).overflow_hidden().opacity(0.).child(Editor::new(&state)))
     })
   }

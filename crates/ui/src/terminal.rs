@@ -1,14 +1,12 @@
-//! A shell in a dock panel: draws the screen of a [`Session`] and sends it keys, mouse events and pastes.
+//! A shell in a view: draws the screen of a [`Session`] and sends it keys, mouse events and pastes.
 
 use crate::selection::{extend_selection, move_endpoint, word_range};
 use futures::StreamExt as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
-    button::{Button, ButtonVariants as _},
-    dock::{BasePanel, Panel, PanelControl, PanelEvent},
     scroll::{ScrollableElement as _, ScrollbarHandle},
-    ActiveTheme as _, IconName, Sizable as _,
+    ActiveTheme as _,
   },
   *,
 };
@@ -34,9 +32,6 @@ const PADDING: Pixels = px(10.);
 
 /// Sent when the shell of a terminal exits.
 pub(crate) struct TerminalExited;
-
-/// Sent when the user asks for another terminal from this one's toolbar.
-pub(crate) struct NewTerminalRequested;
 
 /// A running shell that is not yet in a view.
 pub(crate) struct Started {
@@ -64,9 +59,7 @@ pub(crate) struct Terminal {
   _events_task: Task<()>,
 }
 
-impl EventEmitter<PanelEvent> for Terminal {}
 impl EventEmitter<TerminalExited> for Terminal {}
-impl EventEmitter<NewTerminalRequested> for Terminal {}
 
 impl Terminal {
   /// Starts the login shell in `directory`. Kept apart from [`Terminal::new`] so a failure can be reported
@@ -112,10 +105,9 @@ impl Terminal {
     }
   }
 
-  /// The folder the shell is in.
-  #[allow(dead_code)]
-  pub fn directory(&self) -> Option<&PathBuf> {
-    self.directory.as_ref()
+  /// What the shell calls itself (the window title it reports), or the shell's name.
+  pub fn title(&self) -> SharedString {
+    self.title.clone()
   }
 
   fn handle_event(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
@@ -127,10 +119,6 @@ impl Terminal {
       SessionEvent::Exit => cx.emit(TerminalExited),
     }
     cx.notify();
-  }
-
-  pub fn focus(&self, window: &mut Window, cx: &mut App) {
-    self.focus_handle.focus(window, cx);
   }
 
   fn copy(&mut self, cx: &mut Context<Self>) {
@@ -239,29 +227,6 @@ impl Terminal {
 impl Focusable for Terminal {
   fn focus_handle(&self, _: &App) -> FocusHandle {
     self.focus_handle.clone()
-  }
-}
-
-impl BasePanel for Terminal {
-  fn panel_name(&self) -> &'static str {
-    "terminal"
-  }
-}
-
-impl Panel for Terminal {
-  fn zoom_control(&self, _: &App) -> Option<PanelControl> {
-    Some(PanelControl::Both)
-  }
-
-  fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-    self.title.clone()
-  }
-
-  fn toolbar_buttons(&mut self, _: &mut Window, cx: &mut Context<Self>) -> Option<Vec<Button>> {
-    let terminal = cx.weak_entity();
-    Some(vec![Button::new("new-terminal").icon(IconName::Plus).ghost().xsmall().tooltip("New terminal").on_click(move |_, _, cx| {
-      let _ = terminal.update(cx, |_, cx| cx.emit(NewTerminalRequested));
-    })])
   }
 }
 

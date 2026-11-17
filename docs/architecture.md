@@ -19,8 +19,8 @@ apps/vekro ─► app ─► ui ─► terminal
 | `apps/vekro/src/main.rs` | executable entry point only; calls `vekro_app::run` |
 | `crates/app/src/lib.rs` | startup: key bindings, quit, opening and closing windows |
 | `crates/ui/src/workspace.rs` | `Workspace` (one per window): projects, the sidebar, the project rail, the status bar, the sidebar, the dock and the terminals of every project |
-| `crates/ui/src/editor.rs` | `EditorPanel`: the editor for a file, the diff of a changed file, or the empty state |
-| `crates/ui/src/terminal.rs` | `Terminal` (a dock panel): draws a `Session`, handles keys, mouse, selection, scrolling and paste |
+| `crates/ui/src/editor.rs` | `EditorPanel`: tabs (`Tabs`) of file editors and file diffs, shown with the Kit default `TabBar` that the panel draws itself (the dock title bar is off), or the empty state |
+| `crates/ui/src/terminal.rs` | `Terminal` (a view): draws a `Session`, handles keys, mouse, selection, scrolling and paste |
 | `crates/ui/src/project_setup.rs` | the Add project dialog (New, Clone, Import) |
 | `crates/ui/src/project_settings.rs` | the dialog for a project's name, icon and color |
 | `crates/ui/src/project_manager.rs` | the Project bar page of Settings: every project and category with its actions |
@@ -37,30 +37,29 @@ apps/vekro ─► app ─► ui ─► terminal
 ## Window layout
 
 The `Workspace` renders the title band, then a row of the **project rail** (fixed, 60 px; projects can be dragged onto each other to group them into categories), the **sidebar** (an
-icon `TabBar` that switches between Explorer and Git, and the selected view, in a Kit `h_resizable` pane,
-200–480 px) and, right of it, a column with the Kit **`DockArea`** and the status bar below it, so the rail and the sidebar run down to the bottom of the window. The sidebar is plain
-workspace content, not a dock panel, so it has no tab bar. The dock holds:
+icon `TabBar` that switches between Explorer, Git and Terminal, and the selected view, in a Kit `h_resizable` pane,
+200–960 px) and, right of it, a column with the Kit **`DockArea`** and the status bar below it, so the rail and the sidebar run down to the bottom of the window. The sidebar is plain
+workspace content, not a dock panel, so it has no tab bar. The dock holds only the center: `EditorPanel`. The terminals are
+not dock panels: the Terminal tab of the sidebar lists them (`render_terminal_sessions`), and while that tab is chosen the
+main area draws the open project's shell, or two side by side, in place of the dock (`render_terminal_area`: a title row
+with the buttons, then the shells).
 
-- center: `EditorPanel`;
-- bottom dock: one `Terminal` panel per running shell of the open project.
-
-The Kit draws the dock chrome (tab bars, drag and drop, resize handles, the `…` menu). The editor and the
-terminals can be zoomed to fill the dock area (`zoom_control` is `PanelControl::Both`: a button and a menu
-entry). The Kit always draws the `…` button of a dock panel.
+The Kit draws the dock chrome of the editor (the title, zoom button and `…` menu).
 
 ## Projects and terminals
 
 - `Workspace.projects` is the `ProjectList`, shown as the project rail; the active project decides what the sidebar, the editor
-  tree, the Git summary and the terminal dock show.
-- `Workspace::switch_project` is the only way the open project changes. It hides the old project's terminals
-  (while it is still the open one), puts its Explorer and Git selections away (`Workspace.views`) and its editor
-  content away (`EditorPanel::switch_project`, `saved`), applies the change, restores the new project's views, and
-  shows the new project's terminals. Editors that other projects have open are never evicted from the cache.
-- `Workspace.terminals` maps each project folder to its terminals. The panels of the project being left leave the
-  dock (`hide_terminals`) and the new project's are added (`show_terminals`); the entities stay alive in the map, so
-  their shells keep running. A project with no terminal gets one.
-- A shell that exits sends `TerminalExited`; the workspace removes the panel and, if the project has no
-  terminal left, starts another.
+  tree, the Git summary and the Terminal tab show.
+- `Workspace::switch_project` is the only way the open project changes. It puts the old project's Explorer and Git
+  selections away (`Workspace.views`) and its editor
+  tabs away (`EditorPanel::switch_project`, `saved`), applies the change, restores the new project's views, and
+  makes sure the new project has a shell (`ensure_terminal`). Editors that other projects have open are never evicted
+  from the cache.
+- `Workspace.terminals` maps each project folder to its terminals; the entities stay alive in the map while another
+  project is open, so their shells keep running. `active_terminal` says which one the Terminal tab shows and
+  `split_terminals` which projects show two side by side. A project with no terminal gets one.
+- A shell that exits sends `TerminalExited`, and Kill terminal does the same job (`close_terminal`): the workspace
+  removes the terminal and, if the project has none left, starts another.
 
 ## Opening files quickly
 
@@ -68,7 +67,9 @@ Opening a file must feel instant. Measured in a development build, reading and b
 milliseconds; the cost is the first time the highlighter draws a text (up to ~0.1 s for a few tens of KB). So:
 
 - `EditorPanel` keeps the editor of every file it has opened (`files`, up to 24; files with unsaved changes are
-  never dropped). Reopening a file is instant and keeps its unsaved text.
+  never dropped, and files in a tab of any project stay). Reopening a file is instant and keeps its unsaved text, also after
+  its tab was closed. The panel sends `ActiveTab` whenever the shown tab changes, and the workspace selects the same
+  file or change in the sidebar.
 - When the pointer rests on a file in the Explorer for 120 ms (`HOVER_PREPARE_DELAY`), `EditorPanel::prefetch` reads
   it and draws its editor out of sight for half a second, so the highlighting is done before the click. Files over
   100 KB are skipped, because drawing them would stall the window; they open on click and finish highlighting in the

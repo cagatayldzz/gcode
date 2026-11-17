@@ -17,8 +17,8 @@ in a second terminal, read or fix some code, look at what changed, commit.
 
 - **Projects:** a rail of project avatars, like a chat app's server list. Switch projects in one
   click; each project keeps its own running terminals.
-- **Terminals:** real shells in a dock at the bottom. Open several and drag them side by side.
-- **Editor:** open a file from the folder tree, with syntax colors and line numbers. `⌘S` saves.
+- **Terminals:** real shells: the sidebar's Terminal tab lists the sessions and the terminal fills the main area. Open several, or split two side by side.
+- **Editor:** open files from the folder tree in tabs, with syntax colors and line numbers. `⌘S` saves.
 - **Git:** the branch, the list of changed files and the diff of any of them.
 - **Light and dark:** follows macOS, or choose one in Settings.
 

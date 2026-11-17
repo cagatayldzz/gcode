@@ -1,12 +1,12 @@
 use crate::{
   components::{avatar_look, display_path},
-  editor::EditorPanel,
+  editor::{ActiveTab, EditorPanel},
   explorer,
   project_manager::ProjectManager,
   project_settings::{AppearanceChosen, ProjectSettings},
   project_setup::{ProjectReady, ProjectSetup},
   settings::{init_settings, settings_view, AddAllProjectsRequested, SettingsGlobal, SettingsModel},
-  terminal::{NewTerminalRequested, Terminal, TerminalExited},
+  terminal::{Terminal, TerminalExited},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   AddProject, NewTerminal, OpenSettings, SaveFile,
 };
@@ -15,11 +15,11 @@ use gpui_kit::{
   component::{
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
-    dock::{panel_handle, DockArea, DockLayout, DockPlacement, DockSkin},
+    dock::{panel_handle, DockArea, DockLayout, DockSkin},
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
     label::Label,
-    menu::{ContextMenuExt as _, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     notification::Notification,
     resizable::{h_resizable, resizable_panel},
     scroll::{ScrollableElement as _, Scrollbar, ScrollbarAxis},
@@ -57,10 +57,7 @@ const SIDEBAR_WIDTH: Pixels = px(280.);
 
 /// How narrow and how wide the sidebar can be dragged.
 const SIDEBAR_MIN_WIDTH: Pixels = px(200.);
-const SIDEBAR_MAX_WIDTH: Pixels = px(480.);
-
-/// Height of the bottom dock when the window opens.
-const BOTTOM_DOCK_HEIGHT: Pixels = px(260.);
+const SIDEBAR_MAX_WIDTH: Pixels = px(960.);
 
 /// Indentation of each tree level.
 const INDENT: Pixels = px(16.);
@@ -71,15 +68,17 @@ enum SidebarTab {
   #[default]
   Explorer,
   Git,
+  Terminal,
 }
 
 impl SidebarTab {
-  const ALL: [SidebarTab; 2] = [SidebarTab::Explorer, SidebarTab::Git];
+  const ALL: [SidebarTab; 3] = [SidebarTab::Explorer, SidebarTab::Git, SidebarTab::Terminal];
 
   fn icon(self) -> Icon {
     match self {
       SidebarTab::Explorer => Icon::empty().path("icons/folder-tree.svg"),
       SidebarTab::Git => Icon::empty().path("icons/git-branch.svg"),
+      SidebarTab::Terminal => Icon::empty().path("icons/terminal.svg"),
     }
   }
 
@@ -87,6 +86,7 @@ impl SidebarTab {
     match self {
       SidebarTab::Explorer => "Explorer",
       SidebarTab::Git => "Git",
+      SidebarTab::Terminal => "Terminal",
     }
   }
 }
@@ -133,6 +133,8 @@ pub struct Workspace {
   _activation: Subscription,
   /// Repaints the window when the editor changes: the status bar shows the cursor.
   _editor: Subscription,
+  /// Selects in the sidebar what the editor area shows.
+  _active_tab: Subscription,
   _refresh_task: Task<()>,
   /// A check for projects whose folder was deleted is running.
   syncing: bool,
@@ -140,6 +142,10 @@ pub struct Workspace {
   editor_panel: Entity<EditorPanel>,
   /// The shells of every project that has been opened, kept alive while another project is shown.
   terminals: HashMap<PathBuf, Vec<Entity<Terminal>>>,
+  /// Which of a project's shells the Terminal tab shows.
+  active_terminal: HashMap<PathBuf, usize>,
+  /// The projects whose Terminal tab shows two shells side by side.
+  split_terminals: HashSet<PathBuf>,
   _terminal_subscriptions: Vec<Subscription>,
 }
 
@@ -204,6 +210,8 @@ impl Workspace {
       dock,
       editor_panel: editor_panel.clone(),
       terminals: HashMap::new(),
+      active_terminal: HashMap::new(),
+      split_terminals: HashSet::new(),
       _terminal_subscriptions: Vec::new(),
       _appearance: cx.observe_window_appearance(window, |this, window, cx| {
         let preferences = &this.settings.read(cx).preferences;
@@ -211,6 +219,23 @@ impl Workspace {
       }),
       // Changes made in another app (an editor, GitHub Desktop, a terminal) show up as soon as the window is back.
       _editor: cx.observe(&editor_panel, |_, _, cx| cx.notify()),
+      _active_tab: cx.subscribe(&editor_panel, |this, _, shown: &ActiveTab, cx| {
+        match shown {
+          ActiveTab::File(path) => {
+            this.selected_entry = Some(path.clone());
+            this.selected_change = None;
+          }
+          ActiveTab::Diff(name) => {
+            this.selected_entry = None;
+            this.selected_change = Some(PathBuf::from(name));
+          }
+          ActiveTab::Nothing => {
+            this.selected_entry = None;
+            this.selected_change = None;
+          }
+        }
+        cx.notify();
+      }),
       _activation: cx.observe_window_activation(window, |this, window, cx| {
         if window.is_window_active() {
           this.refresh_in_background(cx);
@@ -231,7 +256,7 @@ impl Workspace {
     };
     this.sync_projects(window, cx);
     this.refresh_project();
-    this.show_terminals(window, cx);
+    this.ensure_terminal(window, cx);
     this
   }
 
@@ -248,63 +273,123 @@ impl Workspace {
       .unwrap_or_default()
   }
 
-  /// Puts the active project's shells in the bottom dock, starting one if the project has none yet.
-  fn show_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+  /// Starts a shell in the open project if it has none: a project never stays without one.
+  fn ensure_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
     if self.terminals.get(&root).is_none_or(|list| list.is_empty()) {
-      self.start_terminal(root.clone(), window, cx);
-    }
-    for terminal in self.terminals.get(&root).cloned().unwrap_or_default() {
-      self.dock.update(cx, |area, cx| area.add_panel_view(panel_handle(terminal), DockPlacement::Bottom, Some(BOTTOM_DOCK_HEIGHT), window, cx));
+      self.start_terminal(root, window, cx);
     }
   }
 
-  /// Takes the active project's shells off the screen without stopping them.
-  fn hide_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    let Some(root) = self.projects.active.clone() else { return };
-    for terminal in self.terminals.get(&root).cloned().unwrap_or_default() {
-      self.dock.update(cx, |area, cx| area.remove_panel(terminal, window, cx));
-    }
-  }
-
-  /// Starts a shell in `root` and remembers it; the caller puts it on screen.
-  fn start_terminal(&mut self, root: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+  /// Starts a shell in `root` and remembers it as the project's last one.
+  fn start_terminal(&mut self, root: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Option<Entity<Terminal>> {
     let started = match Terminal::start(root.clone(), cx) {
       Ok(started) => started,
       Err(error) => {
         window.push_notification(Notification::error(format!("Could not start a shell: {error}")), cx);
-        return;
+        return None;
       }
     };
     let terminal = cx.new(|cx| Terminal::new(started, cx));
     self._terminal_subscriptions.push(cx.subscribe_in(&terminal, window, |this, terminal, _: &TerminalExited, window, cx| {
       this.close_terminal(terminal.clone(), window, cx);
     }));
-    self._terminal_subscriptions.push(cx.subscribe_in(&terminal, window, |this, _, _: &NewTerminalRequested, window, cx| {
-      this.new_terminal(&NewTerminal, window, cx);
-    }));
-    self.terminals.entry(root).or_default().push(terminal);
+    self.terminals.entry(root).or_default().push(terminal.clone());
+    Some(terminal)
   }
 
-  /// Opens another shell next to the others in the active project.
+  /// The shells of the open project and the position of the one the Terminal tab is on.
+  fn open_terminals(&self) -> (Vec<Entity<Terminal>>, usize) {
+    let Some(root) = &self.projects.active else { return (Vec::new(), 0) };
+    let list = self.terminals.get(root).cloned().unwrap_or_default();
+    let active = self.active_terminal.get(root).copied().unwrap_or(0).min(list.len().saturating_sub(1));
+    (list, active)
+  }
+
+  /// Gives the keyboard to the shell the Terminal tab is on, once the tab is drawn.
+  fn focus_terminal(&self, window: &mut Window, cx: &mut Context<Self>) {
+    let (list, active) = self.open_terminals();
+    if let Some(terminal) = list.get(active) {
+      let handle = terminal.read(cx).focus_handle(cx);
+      window.defer(cx, move |window, cx| handle.focus(window, cx));
+    }
+  }
+
+  /// Switches to the Terminal tab and puts the keyboard in the shell.
+  fn show_terminal_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.sidebar_tab = SidebarTab::Terminal;
+    self.focus_terminal(window, cx);
+    cx.notify();
+  }
+
+  /// Opens another shell in the open project and shows it.
   pub fn new_terminal(&mut self, _: &NewTerminal, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
-    let before = self.terminals.get(&root).map_or(0, Vec::len);
-    self.start_terminal(root.clone(), window, cx);
-    let Some(terminal) = self.terminals.get(&root).filter(|list| list.len() > before).and_then(|list| list.last().cloned()) else { return };
-    self.dock.update(cx, |area, cx| area.add_panel_view(panel_handle(terminal.clone()), DockPlacement::Bottom, Some(BOTTOM_DOCK_HEIGHT), window, cx));
-    terminal.update(cx, |terminal, cx| terminal.focus(window, cx));
+    if self.start_terminal(root.clone(), window, cx).is_none() {
+      return;
+    }
+    let last = self.terminals.get(&root).map_or(0, |list| list.len().saturating_sub(1));
+    self.active_terminal.insert(root, last);
+    self.show_terminal_tab(window, cx);
   }
 
-  /// Removes a terminal whose shell has exited; a project never stays without one.
+  /// Shows two shells side by side, starting a second one if the project has only one.
+  pub(crate) fn split_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    if self.terminals.get(&root).map_or(0, Vec::len) < 2 && self.start_terminal(root.clone(), window, cx).is_none() {
+      return;
+    }
+    self.split_terminals.insert(root);
+    self.show_terminal_tab(window, cx);
+  }
+
+  /// Stops the shell the tab is on and takes it away. The last one is replaced by a fresh shell.
+  pub(crate) fn kill_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let (list, active) = self.open_terminals();
+    if let Some(terminal) = list.get(active) {
+      self.close_terminal(terminal.clone(), window, cx);
+      self.focus_terminal(window, cx);
+    }
+  }
+
+  /// Stops the shell at `index` of the open project and takes it away.
+  pub(crate) fn kill_terminal_at(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    let (list, _) = self.open_terminals();
+    if let Some(terminal) = list.get(index) {
+      self.close_terminal(terminal.clone(), window, cx);
+    }
+  }
+
+  /// Picks which shell the tab shows.
+  pub(crate) fn select_terminal(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    if let Some(root) = self.projects.active.clone() {
+      self.active_terminal.insert(root, index);
+    }
+    self.focus_terminal(window, cx);
+    cx.notify();
+  }
+
+  /// Leaves the Terminal tab; the shells keep running.
+  pub(crate) fn hide_terminal_tab(&mut self, cx: &mut Context<Self>) {
+    self.sidebar_tab = SidebarTab::Explorer;
+    cx.notify();
+  }
+
+  /// Removes a terminal, whose shell has exited or was killed; a project never stays without one.
   fn close_terminal(&mut self, terminal: Entity<Terminal>, window: &mut Window, cx: &mut Context<Self>) {
-    self.dock.update(cx, |area, cx| area.remove_panel(terminal.clone(), window, cx));
-    for list in self.terminals.values_mut() {
-      list.retain(|other| other != &terminal);
+    for (root, list) in &mut self.terminals {
+      let Some(position) = list.iter().position(|other| other == &terminal) else { continue };
+      list.remove(position);
+      let active = self.active_terminal.entry(root.clone()).or_insert(0);
+      if *active >= position {
+        *active = active.saturating_sub(1);
+      }
+      if list.len() < 2 {
+        self.split_terminals.remove(root);
+      }
     }
-    if self.projects.active.as_ref().is_some_and(|root| self.terminals.get(root).is_none_or(|list| list.is_empty())) {
-      self.show_terminals(window, cx);
-    }
+    self.ensure_terminal(window, cx);
+    cx.notify();
   }
 
   /// Opens the Settings dialog.
@@ -341,7 +426,7 @@ impl Workspace {
       }
       // With no project open before, the first one just opened.
       if self.terminals.is_empty() {
-        self.show_terminals(window, cx);
+        self.ensure_terminal(window, cx);
         self.refresh_project();
       }
     }
@@ -512,8 +597,6 @@ impl Workspace {
   /// and comes back when it is opened again; its shells keep running.
   fn switch_project(&mut self, window: &mut Window, cx: &mut Context<Self>, change: impl FnOnce(&mut ProjectList)) {
     let before = self.projects.active.clone();
-    // The terminals must leave while the old project is still the open one.
-    self.hide_terminals(window, cx);
     if let Some(root) = &before {
       let view = ProjectView {
         expanded: std::mem::take(&mut self.expanded),
@@ -534,7 +617,7 @@ impl Workspace {
     self.selected_change = view.selected_change;
     self.editor_panel.update(cx, |editor, cx| editor.switch_project(before, after, cx));
     self.refresh_project();
-    self.show_terminals(window, cx);
+    self.ensure_terminal(window, cx);
     cx.notify();
   }
 
@@ -993,7 +1076,7 @@ impl Workspace {
     v_flex()
       .items_center()
       .gap_1()
-      .when(!folded, |group| group.bg(palette.rail_hover).rounded_xl().p_1())
+      .when(!folded, |group| group.bg(palette.rail_hover).rounded_lg().py_1())
       .child(tile)
       .when(!folded, |group| group.children(members.into_iter().map(|project| self.rail_project(project, true, cx))))
   }
@@ -1279,9 +1362,12 @@ impl Workspace {
     let tabs = TabBar::new("sidebar-tabs")
       .underline()
       .selected_index(selected)
-      .on_click(cx.listener(|this, index: &usize, _, cx| {
+      .on_click(cx.listener(|this, index: &usize, window, cx| {
         if let Some(tab) = SidebarTab::ALL.get(*index) {
           this.sidebar_tab = *tab;
+          if *tab == SidebarTab::Terminal {
+            this.focus_terminal(window, cx);
+          }
           cx.notify();
         }
       }))
@@ -1292,8 +1378,111 @@ impl Workspace {
         Some(git) => git.into_any_element(),
         None => Label::new("Not a Git repository").text_color(cx.theme().muted_foreground).px_2().into_any_element(),
       },
+      SidebarTab::Terminal => self.render_terminal_sessions(cx).into_any_element(),
     };
     v_flex().size_full().bg(cx.theme().sidebar).child(div().px_3().pt_2().child(tabs)).child(v_flex().flex_1().min_h_0().pl_3().pt_3().child(content))
+  }
+
+  /// The Terminal tab of the sidebar: the shells of the project as a list. The terminal itself is drawn in the main area.
+  fn render_terminal_sessions(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let theme = cx.theme().clone();
+    let palette = colors(cx);
+    let (list, active) = self.open_terminals();
+    let split = list.len() >= 2 && self.projects.active.as_ref().is_some_and(|root| self.split_terminals.contains(root));
+    let partner = (active + 1) % list.len().max(1);
+    let rows = list.iter().enumerate().map(|(index, terminal)| {
+      let shown_beside = split && index == partner;
+      h_flex()
+        .id(("session", index))
+        .gap_2()
+        .pl_2()
+        .pr_1()
+        .py_1()
+        .items_center()
+        .rounded_md()
+        .cursor_pointer()
+        .when(index == active, |row| row.bg(palette.selected))
+        .when(shown_beside, |row| row.bg(palette.hover))
+        .hover(|row| row.bg(palette.hover))
+        .child(Icon::empty().path("icons/terminal.svg").size_4().flex_none().text_color(theme.muted_foreground))
+        .child(Label::new(terminal.read(cx).title()).flex_1().min_w_0().whitespace_nowrap().overflow_hidden().text_ellipsis())
+        .child(Label::new(format!("{}", index + 1)).text_color(theme.muted_foreground).text_size(FONT_SIZE_SM))
+        .child(Button::new(("session-kill", index)).ghost().xsmall().icon(Icon::empty().path("icons/x.svg")).tooltip("Kill terminal").on_click(
+          cx.listener(move |this, _, window, cx| {
+            // The click must not also select the session.
+            cx.stop_propagation();
+            this.kill_terminal_at(index, window, cx);
+          }),
+        ))
+        .on_click(cx.listener(move |this, _, window, cx| this.select_terminal(index, window, cx)))
+    });
+    v_flex()
+      .size_full()
+      .gap_1()
+      .child(
+        h_flex().gap_1().items_center().pl_2().pr_3().child(Label::new("Sessions").font_weight(FontWeight::SEMIBOLD).flex_1()).child(
+          Button::new("session-new")
+            .ghost()
+            .xsmall()
+            .icon(Icon::empty().path("icons/plus.svg"))
+            .tooltip("New terminal")
+            .on_click(cx.listener(|this, _, window, cx| this.new_terminal(&NewTerminal, window, cx))),
+        ),
+      )
+      .child(v_flex().id("sessions").flex_1().min_h_0().pr_3().overflow_y_scrollbar().children(rows))
+  }
+
+  /// The terminal in the main area: a title row with the buttons, then the shell (or two of them side by side).
+  fn render_terminal_area(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let theme = cx.theme().clone();
+    let (list, active) = self.open_terminals();
+    let Some(current) = list.get(active).cloned() else {
+      return Label::new("No project is open.").text_color(theme.muted_foreground).p_3().into_any_element();
+    };
+    let split = list.len() >= 2 && self.projects.active.as_ref().is_some_and(|root| self.split_terminals.contains(root));
+    let shown: Vec<Entity<Terminal>> = if split { vec![current.clone(), list[(active + 1) % list.len()].clone()] } else { vec![current.clone()] };
+    let workspace = cx.entity();
+    let button =
+      |id: &'static str, icon: &'static str, tooltip: &'static str| Button::new(id).ghost().xsmall().icon(Icon::empty().path(icon)).tooltip(tooltip);
+    let header = h_flex()
+      .gap_1()
+      .items_center()
+      .px_3()
+      .py_1()
+      .border_b_1()
+      .border_color(theme.border)
+      .child(Icon::empty().path("icons/terminal.svg").size_4().text_color(theme.muted_foreground))
+      .child(Label::new(current.read(cx).title()).flex_1().min_w_0().whitespace_nowrap().overflow_hidden().text_ellipsis())
+      .child(
+        button("terminal-new", "icons/plus.svg", "New terminal")
+          .on_click(cx.listener(|this, _, window, cx| this.new_terminal(&NewTerminal, window, cx))),
+      )
+      .child(button("terminal-menu", "icons/chevron-down.svg", "More").dropdown_menu(move |menu, _, _| {
+        let (new, split, kill) = (workspace.clone(), workspace.clone(), workspace.clone());
+        menu
+          .item(
+            PopupMenuItem::new("New terminal").on_click(move |_, window, cx| new.update(cx, |this, cx| this.new_terminal(&NewTerminal, window, cx))),
+          )
+          .item(PopupMenuItem::new("Split terminal").on_click(move |_, window, cx| split.update(cx, |this, cx| this.split_terminal(window, cx))))
+          .separator()
+          .item(PopupMenuItem::new("Kill terminal").on_click(move |_, window, cx| kill.update(cx, |this, cx| this.kill_terminal(window, cx))))
+      }))
+      .child(
+        button("terminal-split", "icons/columns-2.svg", "Split terminal")
+          .on_click(cx.listener(|this, _, window, cx| this.split_terminal(window, cx))),
+      )
+      .child(button("terminal-kill", "icons/trash.svg", "Kill terminal").on_click(cx.listener(|this, _, window, cx| this.kill_terminal(window, cx))))
+      .child(
+        button("terminal-close", "icons/x.svg", "Back to the editor (shells keep running)")
+          .on_click(cx.listener(|this, _, _, cx| this.hide_terminal_tab(cx))),
+      );
+    v_flex()
+      .size_full()
+      .child(header)
+      .child(h_flex().flex_1().min_h_0().children(shown.into_iter().enumerate().map(|(position, terminal)| {
+        div().flex_1().min_w_0().h_full().when(position > 0, |pane| pane.border_l_1().border_color(theme.border)).child(terminal)
+      })))
+      .into_any_element()
   }
 }
 
@@ -1380,6 +1569,9 @@ impl Render for Workspace {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
+    // The terminal tab of the sidebar puts the terminal in the main area, where the editor otherwise is.
+    let main_area =
+      if self.sidebar_tab == SidebarTab::Terminal { self.render_terminal_area(cx).into_any_element() } else { self.dock.clone().into_any_element() };
     v_flex()
       .id("workspace")
       .key_context("Workspace")
@@ -1398,10 +1590,7 @@ impl Render for Workspace {
           h_resizable("sidebar-split")
             .child(resizable_panel().size(SIDEBAR_WIDTH).size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH).child(self.render_sidebar(cx)))
             // The status bar belongs to the editor and the terminals: the rail and the sidebar run down to the bottom of the window.
-            .child(
-              resizable_panel()
-                .child(v_flex().size_full().child(div().flex_1().min_h_0().child(self.dock.clone())).child(self.render_status_bar(cx))),
-            ),
+            .child(resizable_panel().child(v_flex().size_full().child(div().flex_1().min_h_0().child(main_area)).child(self.render_status_bar(cx)))),
         ),
       )
   }

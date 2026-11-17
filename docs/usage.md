@@ -3,20 +3,20 @@
 A Vekro window has four parts:
 
 - the **project rail** on the far left: one avatar per project, the `+` button, and Settings at the bottom;
-- the **sidebar**: two icon tabs. **Explorer** shows the folder tree of the open project, under a row with the project's name and four
+- the **sidebar**: three icon tabs. **Explorer** shows the folder tree of the open project, under a row with the project's name and four
   buttons: new file, new folder (created inside the selected folder, next to the selected file, or in the project folder; type the name and
   press Enter, `dir/name.rs` makes the subfolder too), refresh and collapse all folders. **Git** shows the branch
   and the changed files, each with a checkbox (click a file for its diff; right-click for **Open in Editor** and
   **Discard changes**, which asks first, throws away every change to that file and deletes it if it is new). Below the list
   is the commit box: type a **Summary** (required) and, if you like, a **Description**, then **Commit N files to
   <branch>**. Only the ticked files go into the commit; the others (staged or not) stay as they are, so they show up
-  again in the list. A commit needs `user.name` and `user.email` in your Git configuration;
-- the **editor area** in the middle: a file, or the diff of a changed file;
-- the **terminal dock** at the bottom: one or more shells of the open project.
+  again in the list. A commit needs `user.name` and `user.email` in your Git configuration. **Terminal** holds the
+  shells of the open project (see Terminals below);
+- the **main area**: tabs of files and of the diffs of changed files, or the terminal while the Terminal tab is chosen,
+  filling the rest of the window.
 
-The editor and each terminal have a zoom button in their title bar (also **Zoom In** in the `…` menu) that
-makes the panel fill the whole dock area; press it again to go back. Drag the edge of the sidebar to resize it. 
-A thin **status bar** under the editor and the terminals (the rail and the sidebar run down to the bottom of the window) shows the branch and the number of changed files on the left, the project
+The editor has a zoom button in its title bar (also **Zoom In** in the `…` menu). Drag the edge of the sidebar to resize it
+(up to 960 px). A thin **status bar** under the editor and the terminals (the rail and the sidebar run down to the bottom of the window) shows the branch and the number of changed files on the left, the project
 folder in the middle and the open file's cursor position, indentation, encoding, line ending and language on the right (`Ln 12, Col 5`, `Spaces: 2`, `UTF-8`, `LF`, `Rust`).
 
 ## Projects
@@ -88,12 +88,18 @@ Press Save (or Enter in the name field). Clearing the name, choosing **Default**
 
 ## Terminals
 
-Each project starts with one `zsh` (your login shell) in the project folder.
+The third sidebar tab, with the terminal icon, lists the shells of the open project as **Sessions**. Choosing it also
+puts the terminal in the main area, where the editor is; the other two tabs bring the editor back. Each project starts with
+one `zsh` (your login shell) in the project folder.
 
-- `⌘T`, or `+` in the terminal's title bar, opens another shell in the same project.
-- Drag a terminal's tab to the side of the dock to put two shells next to each other, for example
-  the running app on the left and an AI assistant on the right.
-- A shell that exits (`exit`, `⌃D`) closes its terminal; a project is never left without one.
+- In the list: click a session to show it, **×** on a row kills that shell, **+** on top opens another (also `⌘T`,
+  which switches to the tab). The session beside the shown one in a split is marked lighter.
+- The row above the terminal has its title and these buttons: **+**, **▾** (New terminal, Split terminal, Kill
+  terminal), **Split** (two shells side by side; it starts a second shell if there is only one), **Trash** (stops the
+  shell that is shown) and **×** (back to the editor; the shells keep running).
+
+A shell that exits (`exit`, `⌃D`) closes its terminal; a project is never left without one. Each project keeps its own
+shells and which one is shown.
 
 | Shortcut | Action |
 | --- | --- |
@@ -111,9 +117,12 @@ hold `⇧` to select text instead. Copying joins lines that only wrapped at the 
 
 ## Editor
 
-Click a file in the folder tree to open it. Text files up to 2 MB open; anything else is refused with
-a notification. `⌘S` writes the file; a `•` after the name means unsaved changes. Opening another
-file replaces the current one without asking, so save first.
+Click a file in the folder tree to open it in a tab. Text files up to 2 MB open; anything else is refused with
+a notification. Open as many as you like: the tabs sit in a row on top of the editor area, the shown one is raised. Click
+a tab to show its file, **×** on it closes it (a click on a file that is already open shows its tab). The Explorer selects
+the file of the shown tab. `⌘S` writes the shown file; a `•` after the name means unsaved changes. Closing a tab keeps
+its unsaved text in memory, and opening the file again brings it back, so nothing is lost silently; the text is only
+written by saving. A changed file opens its diff in a tab of its own (`name (changes)`). Each project keeps its own tabs.
 
 ## Git
 
