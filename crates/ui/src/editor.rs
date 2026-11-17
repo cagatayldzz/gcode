@@ -222,6 +222,14 @@ impl EditorPanel {
     Ok(())
   }
 
+  pub fn reveal_position(&mut self, path: &Path, line: usize, column: usize, window: &mut Window, cx: &mut Context<Self>) {
+    if let Some(file) = self.files.get(path) {
+      file.state.update(cx, |state, cx| {
+        state.set_cursor_position(gpui_kit::component::input::Position { line: line as u32, character: column as u32 }, window, cx);
+      });
+    }
+  }
+
   /// Gets a file ready for opening while the pointer rests on it: reads it and draws its editor out of sight,
   /// which is when the highlighting happens, so the click only has to show it. Errors are ignored: opening the
   /// file for real reports them.

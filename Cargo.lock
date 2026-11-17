@@ -7412,6 +7412,7 @@ dependencies = [
  "futures",
  "gpui-kit",
  "gpui-kit-assets",
+ "ignore",
  "unicode-width",
  "vekro-git",
  "vekro-hosting",

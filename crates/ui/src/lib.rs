@@ -12,6 +12,7 @@ mod editor;
 mod explorer;
 mod menus;
 mod project_manager;
+mod project_search;
 mod project_settings;
 mod project_setup;
 mod pull_request;
@@ -37,6 +38,7 @@ actions!(
     NewWindow,
     AddProject,
     OpenSettings,
+    SearchProject,
     NewTerminal,
     SaveFile,
     CloseTab,

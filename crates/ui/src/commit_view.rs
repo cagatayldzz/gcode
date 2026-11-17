@@ -7,7 +7,7 @@ use crate::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
-    button::{Button, ButtonVariants as _},
+    clipboard::Clipboard,
     diff::{Diff, DiffFile, DiffMode, DiffState},
     h_flex,
     label::Label,
@@ -199,12 +199,10 @@ impl Render for CommitView {
           .child(Icon::empty().path("icons/git-commit-horizontal.svg").size_4().text_color(theme.muted_foreground))
           .child(Label::new(detail.info.short.clone()).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground))
           .child(
-            Button::new("copy-commit-id")
-              .ghost()
-              .xsmall()
-              .icon(Icon::empty().path("icons/copy.svg"))
-              .tooltip("Copy the full commit id")
-              .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(id.clone()))),
+            Clipboard::new(SharedString::from(format!("copy-commit-id-{id}")))
+              .value(id)
+              .accessibility_label("Copy the full commit id")
+              .tooltip("Copy the full commit id"),
           ),
       )
       .when(!detail.body.is_empty(), |column| {
