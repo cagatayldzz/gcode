@@ -2,7 +2,7 @@ use crate::{
   change_view::ChangeView,
   commit_settings::{CommitSettings, CommitSettingsSaved},
   commit_view::CommitView,
-  components::{avatar_look, display_path},
+  components::{avatar_look, display_path, strip, strip_tab},
   connect_account::{AccountConnected, ConnectAccount},
   connections::{accounts_path, credentials_for_repository, describe, AccountsList},
   editor::{ActiveTab, EditorPanel},
@@ -24,7 +24,7 @@ use crate::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
-    button::{Button, ButtonCustomVariant, ButtonVariants as _},
+    button::{Button, ButtonCustomVariant, ButtonVariant, ButtonVariants as _},
     checkbox::Checkbox,
     dock::{panel_handle, DockArea, DockLayout, DockSkin},
     h_flex,
@@ -50,10 +50,10 @@ use std::{
   sync::{Arc, Mutex},
   time::Duration,
 };
-use vekro_git::{CommitInfo, Summary};
+use vekro_git::{BranchChoices, BranchRef, CommitInfo, Comparison, Summary};
 use vekro_hosting::{Connection, KeychainStore, PullRequest, RepoRef, TokenStore as _};
 use vekro_opencommit::DEFAULT_INSTRUCTIONS;
-use vekro_storage::{Category, Preferences, Project, ProjectList};
+use vekro_storage::{Category, Preferences, Project, ProjectList, WindowMode, WindowPlacement};
 
 /// Height of the top band: the traffic lights and the title.
 pub const TOOLBAR_HEIGHT: Pixels = px(40.);
@@ -167,8 +167,28 @@ enum GitView {
   History,
 }
 
+/// Which side of a comparison the History list shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CompareSide {
+  /// Commits of the other branch that the current one does not have.
+  Behind,
+  /// Commits of the current branch that the other one does not have.
+  Ahead,
+}
+
+/// The History list compared with another branch ("Select Branch to Compare…").
+struct CompareView {
+  branch: String,
+  side: CompareSide,
+  /// The commits of both sides; `None` while they are being read.
+  found: Option<Comparison>,
+}
+
 /// How many commits the History view loads at first, and loads more of each time the list is scrolled to its end.
 const HISTORY_PAGE: usize = 50;
+
+/// How long the window must rest before its place is written.
+const WINDOW_SAVE_DELAY: Duration = Duration::from_millis(500);
 
 /// How long after a scroll the History list is checked for its end.
 const HISTORY_SCROLL_SETTLE: Duration = Duration::from_millis(80);
@@ -217,6 +237,15 @@ pub struct Workspace {
   /// The view of the Git tab, the commits it lists, the one chosen and the view of it in the main area.
   git_view: GitView,
   history: Vec<CommitInfo>,
+  /// The branch the History list is compared with, if one was chosen.
+  compare: Option<CompareView>,
+  /// The branches the field offers while it is open; `None` while they are being read.
+  compare_choices: Option<BranchChoices>,
+  compare_open: bool,
+  compare_filter: Entity<InputState>,
+  compare_epoch: u64,
+  /// A branch is being merged into the current one.
+  merging: bool,
   selected_commit: Option<String>,
   commit_view: Entity<CommitView>,
   /// The changes of the chosen file of the Changes view, shown in the main area.
@@ -247,6 +276,9 @@ pub struct Workspace {
   /// The repository menu of the title bar is open.
   projects_menu_open: bool,
   project_filter: Entity<InputState>,
+  /// Writes where the window is once it has stopped moving or resizing; a newer change replaces (cancels) the pending write.
+  window_save: Task<()>,
+  _window_bounds: Subscription,
   _commit_subscriptions: Vec<Subscription>,
   _settings_subscriptions: Vec<Subscription>,
   _appearance: Subscription,
@@ -285,6 +317,7 @@ impl Workspace {
     let commit_description = cx.new(|cx| TextareaState::new(window, cx).placeholder("Description"));
     let branch_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find or create a branch"));
     let project_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find a project"));
+    let compare_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Select Branch to Compare…"));
     let mut this = Self {
       projects: ProjectList::load(&ProjectList::default_path()),
       settings: settings.clone(),
@@ -307,6 +340,12 @@ impl Workspace {
       branch_tab: BranchTab::Branches,
       git_view: GitView::Changes,
       history: Vec::new(),
+      compare: None,
+      compare_choices: None,
+      compare_open: false,
+      compare_filter: compare_filter.clone(),
+      compare_epoch: 0,
+      merging: false,
       selected_commit: None,
       commit_view: cx.new(|_| CommitView::new()),
       change_view: cx.new(|_| ChangeView::new()),
@@ -326,12 +365,20 @@ impl Workspace {
       branch_filter: branch_filter.clone(),
       projects_menu_open: false,
       project_filter: project_filter.clone(),
+      window_save: Task::ready(()),
+      _window_bounds: cx.observe_window_bounds(window, |this, window, cx| this.remember_window(window, cx)),
       _commit_subscriptions: vec![
         // The commit button is enabled once there is a summary.
         cx.subscribe(&commit_summary, |_, _, _: &InputEvent, cx| cx.notify()),
         // The menus list what the filter field matches.
         cx.subscribe(&branch_filter, |_, _, _: &InputEvent, cx| cx.notify()),
         cx.subscribe(&project_filter, |_, _, _: &InputEvent, cx| cx.notify()),
+        // Choosing the field lists the branches; typing narrows them; Enter takes the first one.
+        cx.subscribe_in(&compare_filter, window, |this, _, event: &InputEvent, window, cx| match event {
+          InputEvent::Focus => this.open_compare_list(window, cx),
+          InputEvent::PressEnter { .. } => this.choose_first_compare_branch(window, cx),
+          _ => cx.notify(),
+        }),
       ],
       _settings_subscriptions: vec![
         // Any change to a setting is saved and applied in every window.
@@ -732,14 +779,27 @@ impl Workspace {
     let projects = cx.new(|cx| ProjectManager::new(workspace, cx));
     let accounts = cx.new(AccountsList::new);
     let updates = cx.new(UpdatePanel::new);
+    let palette = colors(cx);
     window.open_dialog(cx, move |dialog, _, _| {
       // The dialog's own padding is removed so that the page list reaches the edges of the window.
       dialog.p_0().width(px(820.)).child(
         v_flex()
           .rounded_b_lg()
           .overflow_hidden()
-          .child(Label::new("Settings").text_lg().font_weight(FontWeight::SEMIBOLD).px_6().py_4())
-          .child(div().h(px(520.)).child(settings_view(fallback.clone(), projects.clone(), accounts.clone(), updates.clone(), page))),
+          .child(
+            div()
+              .border_b_1()
+              .border_color(palette.border)
+              .child(Label::new("Settings").text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).px_5().py_4()),
+          )
+          .child(div().h(px(486.)).child(settings_view(
+            fallback.clone(),
+            projects.clone(),
+            accounts.clone(),
+            updates.clone(),
+            page,
+            palette.background,
+          ))),
       )
     });
   }
@@ -769,6 +829,32 @@ impl Workspace {
     cx.notify();
   }
 
+  /// Remembers where the window is, shortly after it stopped moving or resizing, so that it opens there next time.
+  fn remember_window(&mut self, window: &Window, cx: &mut Context<Self>) {
+    let (bounds, mode) = match window.window_bounds() {
+      WindowBounds::Windowed(bounds) => (bounds, WindowMode::Windowed),
+      WindowBounds::Maximized(bounds) => (bounds, WindowMode::Maximized),
+      WindowBounds::Fullscreen(bounds) => (bounds, WindowMode::Fullscreen),
+    };
+    let placement = WindowPlacement {
+      x: f32::from(bounds.origin.x),
+      y: f32::from(bounds.origin.y),
+      width: f32::from(bounds.size.width),
+      height: f32::from(bounds.size.height),
+      mode,
+    };
+    self.window_save = cx.spawn(async move |_, cx| {
+      cx.background_executor().timer(WINDOW_SAVE_DELAY).await;
+      cx.background_executor()
+        .spawn(async move {
+          if let Err(error) = placement.save(&WindowPlacement::default_path()) {
+            eprintln!("Could not save the window size: {error}");
+          }
+        })
+        .await;
+    });
+  }
+
   /// Opens the dialog that creates, clones or imports a project.
   pub fn add_project(&mut self, _: &AddProject, window: &mut Window, cx: &mut Context<Self>) {
     let location = self.new_project_dir(cx);
@@ -779,7 +865,7 @@ impl Workspace {
       let path = event.0.clone();
       this.switch_project(window, cx, move |projects| projects.add(path));
     }));
-    window.open_dialog(cx, move |dialog, _, _| dialog.title("Add project").width(px(480.)).child(setup.clone()));
+    window.open_dialog(cx, move |dialog, _, _| dialog.title("Add project").width(px(520.)).p_5().child(setup.clone()));
   }
 
   /// Writes the project list; a failure is logged, the window keeps working.
@@ -791,7 +877,7 @@ impl Workspace {
 
   /// Asks for a name and adds an empty category: a place to drop projects on in the project bar.
   pub(crate) fn create_category(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    self.ask_name("New category", "Category name", "", window, cx, move |this, name, _, cx| {
+    self.ask_name("New category", "Category name", "Press Enter to add the category.", "", window, cx, move |this, name, _, cx| {
       if name.trim().is_empty() {
         return Err("Enter a name for the category.".into());
       }
@@ -820,7 +906,7 @@ impl Workspace {
 
   /// Makes a category from a project, unnamed: the menu's way to start one without a second project.
   pub(crate) fn new_category(&mut self, project: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-    self.ask_name("New category", "Category name", "", window, cx, move |this, name, _, cx| {
+    self.ask_name("New category", "Category name", "Press Enter to add the category.", "", window, cx, move |this, name, _, cx| {
       let id = this.projects.add_category(name);
       this.projects.set_category(&project, Some(&id));
       this.persist_projects();
@@ -832,7 +918,7 @@ impl Workspace {
   /// Renames a category. An empty name makes it unnamed again.
   pub(crate) fn rename_category(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
     let initial = self.projects.categories.iter().find(|category| category.id == id).map(|category| category.name.clone()).unwrap_or_default();
-    self.ask_name("Rename category", "Category name", &initial, window, cx, move |this, name, _, cx| {
+    self.ask_name("Rename category", "Category name", "Press Enter to rename the category.", &initial, window, cx, move |this, name, _, cx| {
       this.projects.rename_category(&id, name);
       this.persist_projects();
       cx.notify();
@@ -880,7 +966,10 @@ impl Workspace {
       alert
         .title(title.clone())
         .description("The project leaves the list and its terminals stop. The folder and its files stay on disk.")
+        .width(px(430.))
         .confirm()
+        .ok_text("Remove")
+        .ok_variant(ButtonVariant::Danger)
         .on_ok(move |_, window, cx| {
           workspace.update(cx, |this, cx| this.remove_project(&path, window, cx));
           true
@@ -913,7 +1002,7 @@ impl Workspace {
       cx.notify();
     }));
     let title = SharedString::from(format!("{} settings", project.name()));
-    window.open_dialog(cx, move |dialog, _, _| dialog.title(title.clone()).width(px(460.)).child(settings.clone()));
+    window.open_dialog(cx, move |dialog, _, _| dialog.title(title.clone()).width(px(480.)).p_5().child(settings.clone()));
   }
 
   fn select_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -941,6 +1030,9 @@ impl Workspace {
     }
     self.excluded.clear();
     self.history.clear();
+    self.compare = None;
+    self.compare_open = false;
+    self.compare_choices = None;
     self.history_limit = HISTORY_PAGE;
     self.selected_commit = None;
     let after = self.projects.active.clone();
@@ -1049,7 +1141,7 @@ impl Workspace {
       .map_or_else(|| root.clone(), Path::to_path_buf);
     let (kind, placeholder) = if is_dir { ("folder", "Folder name") } else { ("file", "File name") };
     let place = parent.file_name().map_or_else(|| "project".into(), |name| name.to_string_lossy().into_owned());
-    self.ask_name(format!("New {kind} in {place}"), placeholder, "", window, cx, move |this, name, window, cx| {
+    self.ask_name(format!("New {kind} in {place}"), placeholder, "Press Enter to create it.", "", window, cx, move |this, name, window, cx| {
       let path = explorer::create(&parent, name, is_dir)?;
       this.entry_created(path, is_dir, window, cx);
       Ok(())
@@ -1062,6 +1154,7 @@ impl Workspace {
     &mut self,
     title: impl Into<SharedString>,
     placeholder: &'static str,
+    hint: &'static str,
     initial: &str,
     window: &mut Window,
     cx: &mut Context<Self>,
@@ -1080,7 +1173,14 @@ impl Workspace {
     }));
     let title = title.into();
     let field = input.clone();
-    window.open_dialog(cx, move |dialog, _, _| dialog.title(title.clone()).width(px(420.)).child(Input::new(&field)));
+    let muted = cx.theme().muted_foreground;
+    window.open_dialog(cx, move |dialog, _, _| {
+      dialog
+        .title(title.clone())
+        .width(px(420.))
+        .p_5()
+        .child(v_flex().gap_2().child(Input::new(&field)).child(Label::new(hint).text_size(FONT_SIZE_SM).text_color(muted)))
+    });
     let focus = input.read(cx).focus_handle(cx);
     window.defer(cx, move |window, cx| focus.focus(window, cx));
   }
@@ -1154,7 +1254,10 @@ impl Workspace {
       alert
         .title(title.clone())
         .description("Every change to this file, staged or not, is lost. A new file is deleted. This cannot be undone.")
+        .width(px(430.))
         .confirm()
+        .ok_text("Discard")
+        .ok_variant(ButtonVariant::Danger)
         .on_ok(move |_, window, cx| {
           workspace.update(cx, |this, cx| this.discard_changes(&file, window, cx));
           true
@@ -1284,7 +1387,7 @@ impl Workspace {
         window.push_notification(Notification::info(format!("Connected {described}.")), cx);
       }
     }));
-    window.open_dialog(cx, move |dialog, _, _| dialog.title("Connect an account").width(px(540.)).child(form.clone()));
+    window.open_dialog(cx, move |dialog, _, _| dialog.title("Connect an account").width(px(580.)).p_5().child(form.clone()));
   }
 
   /// Disconnects an account: it leaves the list and its token leaves the Keychain.
@@ -1327,7 +1430,7 @@ impl Workspace {
       });
       window.close_dialog(cx);
     }));
-    window.open_dialog(cx, move |dialog, _, _| dialog.title("OpenCommit settings").width(px(560.)).child(form.clone()));
+    window.open_dialog(cx, move |dialog, _, _| dialog.title("OpenCommit settings").width(px(600.)).p_5().child(form.clone()));
   }
 
   /// Writes the summary and description of the commit from the ticked files' changes, with OpenCommit.
@@ -1491,7 +1594,8 @@ impl Workspace {
           this.history = found;
           cx.notify();
         }
-        if !known {
+        // While a comparison is shown, the commit chosen in it stays.
+        if !known && this.compare.is_none() {
           match first {
             Some(id) => this.select_commit(id, cx),
             None => this.selected_commit = None,
@@ -1530,13 +1634,21 @@ impl Workspace {
   /// Asks for a name and tags a commit with it.
   fn create_tag(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
     let short: String = id.chars().take(7).collect();
-    self.ask_name(format!("Create a tag at {short}"), "Tag name, such as v1.0.0", "", window, cx, move |this, name, window, cx| {
-      let root = this.projects.active.clone().ok_or("Open a project first.")?;
-      vekro_git::create_tag(&root, &id, name)?;
-      this.load_history(cx);
-      window.push_notification(Notification::info(format!("Tagged {short} as {}. The tag is local until you push it.", name.trim())), cx);
-      Ok(())
-    });
+    self.ask_name(
+      format!("Create a tag at {short}"),
+      "Tag name, such as v1.0.0",
+      "Press Enter to tag the commit.",
+      "",
+      window,
+      cx,
+      move |this, name, window, cx| {
+        let root = this.projects.active.clone().ok_or("Open a project first.")?;
+        vekro_git::create_tag(&root, &id, name)?;
+        this.load_history(cx);
+        window.push_notification(Notification::info(format!("Tagged {short} as {}. The tag is local until you push it.", name.trim())), cx);
+        Ok(())
+      },
+    );
   }
 
   /// Loads the next page of commits when the History list has been scrolled to its end. Called after the list was scrolled, once its
@@ -1553,6 +1665,161 @@ impl Workspace {
     }
     self.history_limit += HISTORY_PAGE;
     self.load_history(cx);
+  }
+
+  /// Opens the list of branches under the compare field, reading them off the interface thread.
+  fn open_compare_list(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    if self.compare_open || self.compare.is_some() {
+      return;
+    }
+    let Some(root) = self.projects.active.clone() else { return };
+    self.compare_open = true;
+    self.compare_choices = None;
+    self.compare_epoch += 1;
+    let epoch = self.compare_epoch;
+    let work = cx.background_executor().spawn(async move { vekro_git::compare_choices(&root) });
+    cx.spawn(async move |this, cx| {
+      let found = work.await;
+      let _ = this.update(cx, |this, cx| {
+        if this.compare_epoch == epoch && this.compare_open {
+          this.compare_choices = Some(found.unwrap_or_default());
+          cx.notify();
+        }
+      });
+    })
+    .detach();
+    cx.notify();
+  }
+
+  /// Closes the list of branches and empties the field.
+  fn close_compare_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.compare_open = false;
+    self.compare_epoch += 1;
+    self.compare_filter.update(cx, |input, cx| input.set_value("", window, cx));
+    window.blur(cx);
+    cx.notify();
+  }
+
+  /// The branches the field's text matches, in the list's three groups.
+  fn matching_compare_branches(&self, cx: &App) -> (Option<BranchRef>, Vec<BranchRef>, Vec<BranchRef>) {
+    let query = self.compare_filter.read(cx).value().trim().to_lowercase();
+    let fits = |branch: &BranchRef| query.is_empty() || branch.name.to_lowercase().contains(&query);
+    match &self.compare_choices {
+      Some(choices) => (
+        choices.default.clone().filter(fits),
+        choices.recent.iter().filter(|branch| fits(branch)).cloned().collect(),
+        choices.other.iter().filter(|branch| fits(branch)).cloned().collect(),
+      ),
+      None => (None, Vec::new(), Vec::new()),
+    }
+  }
+
+  /// Enter in the field: compares with the first branch that matches.
+  fn choose_first_compare_branch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let (default, recent, other) = self.matching_compare_branches(cx);
+    if let Some(branch) = default.into_iter().chain(recent).chain(other).next() {
+      self.choose_compare_branch(branch.name, window, cx);
+    }
+  }
+
+  /// Compares the History list with a branch: the commits each side has that the other lacks, read off the interface thread.
+  fn choose_compare_branch(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    self.close_compare_list(window, cx);
+    self.compare = Some(CompareView { branch: name.clone(), side: CompareSide::Behind, found: None });
+    let epoch = self.compare_epoch;
+    let work = cx.background_executor().spawn({
+      let name = name.clone();
+      async move { vekro_git::compare(&root, &name) }
+    });
+    cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        if this.compare_epoch != epoch || this.compare.as_ref().map(|view| view.branch.as_str()) != Some(name.as_str()) {
+          return;
+        }
+        match result {
+          Ok(found) => {
+            let side = if found.behind.is_empty() && !found.ahead.is_empty() { CompareSide::Ahead } else { CompareSide::Behind };
+            let first = match side {
+              CompareSide::Behind => found.behind.first(),
+              CompareSide::Ahead => found.ahead.first(),
+            }
+            .map(|commit| commit.id.clone());
+            if let Some(view) = this.compare.as_mut() {
+              view.side = side;
+              view.found = Some(found);
+            }
+            if let Some(id) = first {
+              this.select_commit(id, cx);
+            }
+          }
+          Err(message) => {
+            this.compare = None;
+            window.push_notification(Notification::error(message), cx);
+          }
+        }
+        cx.notify();
+      });
+    })
+    .detach();
+    cx.notify();
+  }
+
+  /// Shows the other side of the comparison.
+  fn set_compare_side(&mut self, side: CompareSide, cx: &mut Context<Self>) {
+    let Some(view) = self.compare.as_mut() else { return };
+    view.side = side;
+    let first = view.found.as_ref().and_then(|found| match side {
+      CompareSide::Behind => found.behind.first(),
+      CompareSide::Ahead => found.ahead.first(),
+    });
+    if let Some(id) = first.map(|commit| commit.id.clone()) {
+      self.select_commit(id, cx);
+    }
+    cx.notify();
+  }
+
+  /// Goes back from a comparison to the plain History list.
+  fn clear_compare(&mut self, cx: &mut Context<Self>) {
+    self.compare = None;
+    self.compare_epoch += 1;
+    if let Some(id) = self.history.first().map(|commit| commit.id.clone()) {
+      self.select_commit(id, cx);
+    }
+    cx.notify();
+  }
+
+  /// Merges the compared branch into the current one, like `git merge`, once the user asks for it. Conflicts stop it and leave
+  /// everything as it was.
+  fn merge_compare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let (Some(root), Some(branch)) = (self.projects.active.clone(), self.compare.as_ref().map(|view| view.branch.clone())) else { return };
+    if self.merging {
+      return;
+    }
+    self.merging = true;
+    cx.notify();
+    let work = cx.background_executor().spawn({
+      let branch = branch.clone();
+      async move { vekro_git::merge_branch(&root, &branch) }
+    });
+    cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.merging = false;
+        this.refresh_project();
+        match result {
+          Ok(()) => {
+            this.compare = None;
+            this.load_history(cx);
+            window.push_notification(Notification::info(format!("Merged {branch}.")), cx);
+          }
+          Err(message) => window.push_notification(Notification::error(message), cx),
+        }
+        cx.notify();
+      });
+    })
+    .detach();
   }
 
   /// Shows a commit of the History view in the main area.
@@ -1633,7 +1900,7 @@ impl Workspace {
         this.flag_account_issue(&url, IssueKind::PullRequests, cx);
       }
     }));
-    window.open_dialog(cx, move |dialog, _, _| dialog.title("Create a pull request").width(px(560.)).child(form.clone()));
+    window.open_dialog(cx, move |dialog, _, _| dialog.title("Create a pull request").width(px(600.)).p_5().child(form.clone()));
   }
 
   /// Opens or closes the branch menu; opening reads the local branches and clears the filter.
@@ -1682,13 +1949,21 @@ impl Workspace {
   /// Asks for a name, creates a branch at the current commit and switches to it. Uncommitted changes come along.
   fn new_branch(&mut self, initial: String, window: &mut Window, cx: &mut Context<Self>) {
     self.branch_menu_open = false;
-    self.ask_name("New branch", "Branch name", &initial, window, cx, move |this, name, window, cx| {
-      let root = this.projects.active.clone().ok_or("Open a project first.")?;
-      vekro_git::create_branch(&root, name)?;
-      this.refresh_project();
-      window.push_notification(Notification::info(format!("Created and switched to {}.", name.trim())), cx);
-      Ok(())
-    });
+    self.ask_name(
+      "New branch",
+      "Branch name",
+      "Press Enter to create the branch and switch to it.",
+      &initial,
+      window,
+      cx,
+      move |this, name, window, cx| {
+        let root = this.projects.active.clone().ok_or("Open a project first.")?;
+        vekro_git::create_branch(&root, name)?;
+        this.refresh_project();
+        window.push_notification(Notification::info(format!("Created and switched to {}.", name.trim())), cx);
+        Ok(())
+      },
+    );
   }
 
   /// Opens or closes the repository menu of the title bar; opening clears the filter and focuses it.
@@ -2024,7 +2299,7 @@ impl Workspace {
         h_flex()
           .gap_2()
           .items_center()
-          .child(Icon::empty().path("icons/folder-git-2.svg").size_5().text_color(theme.muted_foreground))
+          .child(Icon::empty().path("icons/folder.svg").size_5())
           .child(
             Label::new(name.unwrap_or_else(|| "No project".to_string()))
               .min_w_0()
@@ -2377,14 +2652,27 @@ impl Workspace {
   /// The commits of the open project, newest first: the subject, who made it and when, the tags on it, and an arrow while the
   /// remote does not have it yet. Choosing one shows it in the main area.
   fn render_history(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let body = if self.compare_open {
+      self.render_compare_choices(cx)
+    } else if let Some(view) = &self.compare {
+      self.render_compare(view, cx)
+    } else {
+      self.commit_list(&self.history, true, cx)
+    };
+    v_flex().flex_1().min_h_0().gap_2().child(self.render_compare_field(cx)).child(body)
+  }
+
+  /// A list of commits: the subject, who made it and when, the tags on it, and an arrow while the remote does not have it yet.
+  /// With `paged` the next page of the History view is loaded when the list is scrolled to its end.
+  fn commit_list(&self, commits: &[CommitInfo], paged: bool, cx: &mut Context<Self>) -> AnyElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
-    if self.history.is_empty() {
-      return Label::new("No commits yet").px_2().py_2().text_color(theme.muted_foreground).into_any_element();
+    if commits.is_empty() {
+      return Label::new(if paged { "No commits yet" } else { "No commits" }).px_2().py_2().text_color(theme.muted_foreground).into_any_element();
     }
     let workspace = cx.entity();
     let tip = self.history.first().map(|commit| commit.id.clone());
-    let rows = self.history.iter().map(|commit| {
+    let rows = commits.iter().map(|commit| {
       let id = commit.id.clone();
       let selected = self.selected_commit.as_deref() == Some(commit.id.as_str());
       // Only the last commit, and only while the remote does not have it, can be undone.
@@ -2477,7 +2765,7 @@ impl Workspace {
         })
     });
     // The next page of commits is loaded when the list is scrolled to its end (after the wheel stops), or with the button there.
-    let more = (self.history.len() >= self.history_limit).then(|| {
+    let more = (paged && self.history.len() >= self.history_limit).then(|| {
       Button::new("history-more")
         .ghost()
         .small()
@@ -2495,7 +2783,10 @@ impl Workspace {
           .pr_3()
           .overflow_y_scroll()
           .track_scroll(&self.history_scroll)
-          .on_scroll(cx.listener(|_, _: &ScrollEvent, _, cx| {
+          .on_scroll(cx.listener(move |_, _: &ScrollEvent, _, cx| {
+            if !paged {
+              return;
+            }
             cx.spawn(async move |this, cx| {
               cx.background_executor().timer(HISTORY_SCROLL_SETTLE).await;
               let _ = this.update(cx, |this, cx| this.load_more_history(true, cx));
@@ -2507,6 +2798,166 @@ impl Workspace {
       )
       .child(div().id("history-scrollbar").absolute().size_full().vertical_scrollbar(&self.history_scroll))
       .into_any_element()
+  }
+
+  /// The field above the History list: choose a branch to compare with, or the branch chosen, with a button to stop comparing.
+  fn render_compare_field(&self, cx: &mut Context<Self>) -> AnyElement {
+    let theme = cx.theme().clone();
+    let branch_icon = || Icon::empty().path("icons/git-branch.svg").size_4().text_color(theme.muted_foreground);
+    let field = match &self.compare {
+      Some(view) => h_flex()
+        .h_8()
+        .px_2()
+        .gap_2()
+        .items_center()
+        .rounded_md()
+        .border_1()
+        .border_color(theme.input)
+        .child(branch_icon())
+        .child(Label::new(view.branch.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+        .child(
+          Button::new("compare-clear")
+            .ghost()
+            .xsmall()
+            .icon(Icon::empty().path("icons/x.svg").size_4())
+            .tooltip("Stop comparing")
+            .on_click(cx.listener(|this, _, _, cx| this.clear_compare(cx))),
+        )
+        .into_any_element(),
+      None => h_flex()
+        .gap_1()
+        .items_center()
+        .child(div().flex_1().child(Input::new(&self.compare_filter).prefix(branch_icon())))
+        .when(self.compare_open, |row| {
+          row.child(
+            Button::new("compare-close")
+              .ghost()
+              .xsmall()
+              .icon(Icon::empty().path("icons/x.svg").size_4())
+              .tooltip("Close")
+              .on_click(cx.listener(|this, _, window, cx| this.close_compare_list(window, cx))),
+          )
+        })
+        .into_any_element(),
+    };
+    div().pr_3().child(field).into_any_element()
+  }
+
+  /// The branches under the compare field: the default one, the ones used lately and all the others, each with how many commits
+  /// it is behind (↓) and ahead (↑) of the current branch.
+  fn render_compare_choices(&self, cx: &mut Context<Self>) -> AnyElement {
+    let theme = cx.theme().clone();
+    let palette = colors(cx);
+    if self.compare_choices.is_none() {
+      return h_flex()
+        .gap_2()
+        .p_3()
+        .items_center()
+        .justify_center()
+        .child(Spinner::new().small())
+        .child(Label::new("Reading branches…").text_color(theme.muted_foreground))
+        .into_any_element();
+    }
+    let (default, recent, other) = self.matching_compare_branches(cx);
+    if default.is_none() && recent.is_empty() && other.is_empty() {
+      return Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground).into_any_element();
+    }
+    let heading = |text: &'static str| Label::new(text).px_2().pt_2().pb_1().font_weight(FontWeight::SEMIBOLD).text_color(theme.muted_foreground);
+    let row = |branch: &BranchRef, cx: &mut Context<Self>| {
+      let name = branch.name.clone();
+      h_flex()
+        .id(SharedString::from(format!("compare-branch-{}", branch.name)))
+        .gap_2()
+        .px_2()
+        .py_1p5()
+        .items_center()
+        .rounded_md()
+        .cursor_pointer()
+        .hover(|row| row.bg(palette.hover))
+        .child(Icon::empty().path("icons/git-branch.svg").size_4().text_color(theme.muted_foreground))
+        .child(Label::new(branch.name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+        .child(Label::new(format!("{}↓ {}↑", branch.behind, branch.ahead)).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground))
+        .on_click(cx.listener(move |this, _, window, cx| this.choose_compare_branch(name.clone(), window, cx)))
+        .into_any_element()
+    };
+    let mut list = v_flex().id("compare-list").flex_1().min_h_0().pr_3().overflow_y_scrollbar();
+    if let Some(branch) = &default {
+      list = list.child(heading("Default Branch")).child(row(branch, cx));
+    }
+    if !recent.is_empty() {
+      list = list.child(heading("Recent Branches")).children(recent.iter().map(|branch| row(branch, cx)).collect::<Vec<_>>());
+    }
+    if !other.is_empty() {
+      list = list.child(heading("Other Branches")).children(other.iter().map(|branch| row(branch, cx)).collect::<Vec<_>>());
+    }
+    list.into_any_element()
+  }
+
+  /// The comparison with the chosen branch: its two sides as tabs, the commits of the shown side, and what merging would do.
+  fn render_compare(&self, view: &CompareView, cx: &mut Context<Self>) -> AnyElement {
+    let theme = cx.theme().clone();
+    let palette = colors(cx);
+    let current = self.git.as_ref().map(|git| git.branch.clone()).unwrap_or_default();
+    let (behind, ahead) = view.found.as_ref().map_or((0, 0), |found| (found.behind_count, found.ahead_count));
+    let tabs = TabBar::new("compare-sides")
+      .segmented()
+      .selected_index(usize::from(view.side == CompareSide::Ahead))
+      .on_click(
+        cx.listener(|this, index: &usize, _, cx| this.set_compare_side(if *index == 1 { CompareSide::Ahead } else { CompareSide::Behind }, cx)),
+      )
+      .children([Tab::new().label(format!("Behind ({behind})")), Tab::new().label(format!("Ahead ({ahead})"))]);
+    let list = match &view.found {
+      None => h_flex()
+        .gap_2()
+        .p_3()
+        .items_center()
+        .justify_center()
+        .child(Spinner::new().small())
+        .child(Label::new("Comparing…").text_color(theme.muted_foreground))
+        .into_any_element(),
+      Some(found) => {
+        let commits = match view.side {
+          CompareSide::Behind => &found.behind,
+          CompareSide::Ahead => &found.ahead,
+        };
+        div().flex_1().min_h_0().flex().flex_col().child(self.commit_list(commits, false, cx)).into_any_element()
+      }
+    };
+    let bold = |text: String| Label::new(text).font_weight(FontWeight::SEMIBOLD);
+    let note = |parts: Vec<AnyElement>| {
+      h_flex().flex_wrap().justify_center().gap_1().text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).children(parts)
+    };
+    let footer = view.found.as_ref().map(|_| {
+      let message = if behind > 0 {
+        note(vec![
+          Label::new("This will merge").into_any_element(),
+          bold(format!("{behind} commit{}", if behind == 1 { "" } else { "s" })).into_any_element(),
+          Label::new("from").into_any_element(),
+          bold(view.branch.clone()).into_any_element(),
+          Label::new("into").into_any_element(),
+          bold(current.clone()).into_any_element(),
+        ])
+      } else {
+        note(vec![Label::new("This branch is up to date with").into_any_element(), bold(view.branch.clone()).into_any_element()])
+      };
+      v_flex().gap_2().pr_3().pb_3().pt_2().items_center().child(Icon::new(IconName::Check).size_4().text_color(palette.new)).child(message).when(
+        behind > 0,
+        |footer| {
+          footer.child(
+            div().w_full().child(
+              Button::new("compare-merge")
+                .primary()
+                .w_full()
+                .label("Create a merge commit")
+                .loading(self.merging)
+                .disabled(self.merging)
+                .on_click(cx.listener(|this, _, window, cx| this.merge_compare(window, cx))),
+            ),
+          )
+        },
+      )
+    });
+    v_flex().flex_1().min_h_0().gap_2().child(div().pr_3().child(tabs)).child(list).children(footer).into_any_element()
   }
 
   /// One line of the folder tree.
@@ -2614,7 +3065,7 @@ impl Workspace {
         action("explorer-collapse", "icons/list-chevrons-down-up.svg", "Collapse folders")
           .on_click(cx.listener(|this, _, _, cx| this.collapse_folders(cx))),
       );
-    v_flex().flex_1().min_h_0().gap_1().child(header).child(rows)
+    v_flex().flex_1().min_h_0().gap_2().child(header).child(rows)
   }
 
   /// The repository summary and the folder tree.
@@ -2719,7 +3170,6 @@ impl Workspace {
   /// shown tab, split side by side or one above the other, each with a small header when there is more than one.
   fn render_terminal_area(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
-    let palette = colors(cx);
     let (Some(root), Some(arrangement)) = (self.projects.active.clone(), self.arrangement()) else {
       return Label::new("No project is open.").text_color(theme.muted_foreground).p_3().into_any_element();
     };
@@ -2728,40 +3178,31 @@ impl Workspace {
     };
     let strip = (arrangement.tabs.len() > 1).then(|| {
       let tabs = arrangement.tabs.iter().enumerate().map(|(index, tab)| {
-        let label = tab.panes().first().map(|terminal| terminal.read(cx).title()).unwrap_or_default();
-        Tab::new().label(label).px_2().gap_2().suffix(
-          Button::new(("close-terminal-tab", index)).ghost().xsmall().icon(Icon::empty().path("icons/x.svg").size_4()).tooltip("Close").on_click(
-            cx.listener(move |this, _, window, cx| {
-              // The click must not also reach the tab and select it.
-              cx.stop_propagation();
-              this.close_terminal_tab(index, window, cx);
-            }),
-          ),
-        )
+        let first = tab.panes().first().cloned();
+        let label = first.as_ref().map(|terminal| terminal.read(cx).title()).unwrap_or_default();
+        let key = first.map_or_else(|| index.to_string(), |terminal| terminal.entity_id().to_string());
+        let close = Button::new(SharedString::from(format!("close-terminal-tab-{key}")))
+          .ghost()
+          .xsmall()
+          .icon(Icon::empty().path("icons/x.svg").size_4())
+          .tooltip("Close")
+          .on_click(cx.listener(move |this, _, window, cx| {
+            // The click must not also reach the tab and select it.
+            cx.stop_propagation();
+            this.close_terminal_tab(index, window, cx);
+          }));
+        strip_tab(SharedString::from(format!("terminal-tab-{key}")), label, index == arrangement.active, close, cx)
+          .on_click(cx.listener(move |this, _, window, cx| this.select_terminal_tab(index, window, cx)))
       });
-      h_flex()
-        .flex_none()
-        .items_center()
-        .bg(palette.surface_alt)
-        .border_b_1()
-        .border_color(palette.border)
-        .child(
-          div().flex_1().min_w_0().child(
-            TabBar::new("terminal-tabs")
-              .selected_index(arrangement.active)
-              .on_click(cx.listener(|this, index: &usize, window, cx| this.select_terminal_tab(*index, window, cx)))
-              .children(tabs),
-          ),
-        )
-        .child(
-          Button::new("terminal-new-tab")
-            .ghost()
-            .xsmall()
-            .icon(Icon::empty().path("icons/plus.svg").size_4())
-            .tooltip("New terminal tab")
-            .mx_2()
-            .on_click(cx.listener(|this, _, window, cx| this.new_terminal(&NewTerminal, window, cx))),
-        )
+      strip(cx).child(h_flex().flex_1().min_w_0().h_full().children(tabs)).child(
+        Button::new("terminal-new-tab")
+          .ghost()
+          .xsmall()
+          .icon(Icon::empty().path("icons/plus.svg").size_4())
+          .tooltip("New terminal tab")
+          .mx_2()
+          .on_click(cx.listener(|this, _, window, cx| this.new_terminal(&NewTerminal, window, cx))),
+      )
     });
     let headers = node.panes().len() > 1;
     v_flex()
@@ -2889,7 +3330,7 @@ fn project_list_row(workspace: &Entity<Workspace>, project: &Project, selected: 
         .rounded_md()
         .cursor_pointer()
         .hover(|star| star.bg(palette.hover))
-        .when(!favorite, |star| star.invisible().group_hover("project-row", |star| star.visible()))
+        .when(!favorite, |star| star.opacity(0.5))
         .tooltip(move |window, cx| Tooltip::new(if favorite { "Remove from favorites" } else { "Add to favorites" }).build(window, cx))
         .child(Icon::empty().path(if favorite { "icons/star-fill.svg" } else { "icons/star.svg" }).size_4().text_color(if favorite {
           palette.modified

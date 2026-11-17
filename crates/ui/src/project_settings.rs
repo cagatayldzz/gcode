@@ -2,7 +2,7 @@
 
 use crate::{
   components::selected_style,
-  theme::{project_color, FONT_SIZE, PROJECT_COLORS},
+  theme::{project_color, FONT_SIZE, FONT_SIZE_SM, PROJECT_COLORS},
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -130,9 +130,9 @@ impl Render for ProjectSettings {
     v_flex()
       .text_size(FONT_SIZE)
       .gap_4()
-      .child(v_flex().gap_2().child(Label::new("Name").text_color(muted)).child(Input::new(&self.input)))
+      .child(v_flex().gap_1p5().child(Label::new("Name").text_color(muted).text_size(FONT_SIZE_SM)).child(Input::new(&self.input)))
       .child(
-        v_flex().gap_2().child(Label::new("Color").text_color(muted)).child(
+        v_flex().gap_1p5().child(Label::new("Color").text_color(muted).text_size(FONT_SIZE_SM)).child(
           h_flex()
             .gap_2()
             .items_center()
@@ -144,7 +144,7 @@ impl Render for ProjectSettings {
             .children((0..PROJECT_COLORS.len()).map(|index| self.swatch(index, cx))),
         ),
       )
-      .child(v_flex().gap_2().child(Label::new("Icon").text_color(muted)).child(
+      .child(v_flex().gap_1p5().child(Label::new("Icon").text_color(muted).text_size(FONT_SIZE_SM)).child(
         h_flex().gap_1().flex_wrap().child(self.icon_button(None, cx)).children(PROJECT_ICONS.iter().map(|name| self.icon_button(Some(name), cx))),
       ))
       .child(

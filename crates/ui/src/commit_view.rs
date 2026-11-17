@@ -172,7 +172,7 @@ impl Render for CommitView {
       .flex_none()
       .gap_1()
       .px_4()
-      .py_2()
+      .py_2p5()
       .border_b_1()
       .border_color(palette.border)
       .child(

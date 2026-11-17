@@ -161,8 +161,13 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     theme.font_size = px(16.);
     theme.mono_font_family = MONO_FONT.into();
     theme.mono_font_size = px(code_font_size as f32);
+    // Dialogs and notifications are rounded with `radius_lg`; fields, buttons and menu items with `radius`.
+    theme.radius = px(6.);
+    theme.radius_lg = px(12.);
+    theme.notification.width = px(360.);
     let style = &mut std::sync::Arc::make_mut(&mut theme.highlight_theme).style;
-    style.editor_active_line = Some(c.selected);
+    // The design shows no highlight on the line of the cursor.
+    style.editor_active_line = Some(c.background);
     style.editor_active_line_number = Some(c.text);
     let colors = &mut theme.colors;
     colors.background = c.background;
@@ -177,6 +182,8 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     colors.border = c.border;
     colors.input = c.control_border;
     colors.tab_bar_segmented = c.surface_alt;
+    // A switch that is off is a gray track.
+    colors.switch = c.rail_item_hover;
     colors.tab_active = c.selected;
     colors.popover = c.surface;
     colors.popover_foreground = c.text;

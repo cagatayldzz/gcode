@@ -129,11 +129,11 @@ impl CommitSettings {
       .gap_1p5()
       .child(Label::new(title).font_weight(FontWeight::SEMIBOLD))
       .child(
-        v_flex().rounded_lg().border_1().border_color(palette.control_border).children(
+        v_flex().rounded_lg().border_1().border_color(palette.border).children(
           rows
             .into_iter()
             .enumerate()
-            .map(|(index, row)| div().px_3().py_2().when(index > 0, |row| row.border_t_1().border_color(palette.border)).child(row)),
+            .map(|(index, row)| div().px_3p5().py_2p5().when(index > 0, |row| row.border_t_1().border_color(palette.border)).child(row)),
         ),
       )
       .when_some(help, |section, help| section.child(Label::new(help).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground)))
@@ -185,7 +185,7 @@ impl Render for CommitSettings {
     let instructions = v_flex()
       .gap_1p5()
       .child(Label::new("Commit instructions").font_weight(FontWeight::SEMIBOLD))
-      .child(Textarea::new(&self.instructions).h(px(88.)))
+      .child(Textarea::new(&self.instructions).h_20())
       .child(
         Label::new("Sent to the model with every generated message, on top of the rules above. Leave empty for none.")
           .text_size(FONT_SIZE_SM)

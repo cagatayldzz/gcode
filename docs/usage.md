@@ -145,6 +145,14 @@ The Git tab has two views, **Changes** and **History**. **History** lists the co
 in the main area, in place of the editor: its message, the files it changed (with `+`/`-` totals) and the diff of the chosen file;
 right-click a commit for **Undo Commit…** (only the last commit, and only while the remote does not have it: it goes back like `git reset --soft`, its changes return to Changes and its message to the commit box), **Create Tag…** (a lightweight tag on that commit, local until you push it) and **Copy SHA**; the first commit is shown when you open the view, and the editor tabs come back when you return to Changes or another sidebar tab.
 
+Above the History list, **Select Branch to Compare…** lists the other branches (the default branch, the ones you used lately, then all
+the others, local and remote), each with how many commits it is behind (↓) and ahead (↑) of the current branch; type to narrow the
+list and press Enter for the first match. Choosing a branch shows two tabs: **Behind (n)**, the commits of that branch the current one
+does not have, and **Ahead (n)**, the commits of the current branch that one does not have (each list shows up to 300). Click a commit
+to see it in the main area. While the other branch is ahead, **Create a merge commit** merges it into the current branch like
+`git merge`, only when you press it; with conflicts the merge is stopped and nothing is changed, and the notification names the
+files. The cross in the field goes back to the plain History list.
+
 **Changes** shows every changed file with a mark: **A** new, **M** modified,
 **D** deleted, **R** renamed, **!** conflicted. Click a file to see its diff against the last commit
 in the main area, in place of the editor, with the path on top (staged and unstaged changes together; a new file is shown as all
@@ -227,5 +235,5 @@ is found from the remote's address, or from a connected account for a self-hoste
 ## Where things are stored
 
 `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_DIR`): `projects.json` holds the
-project list, their categories and the one open last; `preferences.json` holds Settings (theme, projects folder, code font size, commit instructions);
+project list, their categories and the one open last; `window.json` holds where the window was and how big, and Vekro opens there next time (on a screen that is still connected; else centered); `preferences.json` holds Settings (theme, projects folder, code font size, commit instructions);
 `accounts.json` lists the connected accounts (service, host, user name; never a token: those are in the macOS Keychain, service "Vekro").

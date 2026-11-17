@@ -7363,6 +7363,7 @@ name = "vekro-app"
 version = "0.1.0"
 dependencies = [
  "gpui-kit",
+ "vekro-storage",
  "vekro-ui",
 ]
 

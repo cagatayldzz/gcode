@@ -1,6 +1,7 @@
 //! The editor area: tabs of code editors.
 
 use crate::close_order::CloseOrder;
+use crate::components::{strip, strip_tab};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -8,7 +9,6 @@ use gpui_kit::{
     dock::{BasePanel, Panel, PanelControl, PanelEvent},
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     input::{Editor, EditorState, InputEvent},
-    tab::{Tab, TabBar},
     v_flex, Icon, IconName, Sizable as _,
   },
   *,
@@ -419,20 +419,20 @@ impl EditorPanel {
   fn render_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let tabs = self.tabs.items.iter().enumerate().map(|(index, path)| {
       let label = format!("{}{}", display_name(path), if self.is_dirty(path) { " •" } else { "" });
-      Tab::new().label(label).px_2().gap_2().suffix(
-        Button::new(("close-tab", index)).ghost().xsmall().icon(Icon::empty().path("icons/x.svg").size_4()).tooltip("Close").on_click(cx.listener(
-          move |this, _, _, cx| {
-            // The click must not also reach the tab and select it.
-            cx.stop_propagation();
-            this.close_tab(index, cx);
-          },
-        )),
-      )
+      let close = Button::new(SharedString::from(format!("close-tab:{}", path.display())))
+        .ghost()
+        .xsmall()
+        .icon(Icon::empty().path("icons/x.svg").size_4())
+        .tooltip("Close")
+        .on_click(cx.listener(move |this, _, _, cx| {
+          // The click must not also reach the tab and select it.
+          cx.stop_propagation();
+          this.close_tab(index, cx);
+        }));
+      strip_tab(SharedString::from(format!("editor-tab:{}", path.display())), label, index == self.tabs.active, close, cx)
+        .on_click(cx.listener(move |this, _, _, cx| this.activate(index, cx)))
     });
-    TabBar::new("editor-tabs")
-      .selected_index(self.tabs.active)
-      .on_click(cx.listener(|this, index: &usize, _, cx| this.activate(*index, cx)))
-      .children(tabs)
+    strip(cx).children(tabs)
   }
 }
 

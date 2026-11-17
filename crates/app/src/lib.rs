@@ -1,6 +1,7 @@
 //! The Vekro application: startup, windows and key bindings. `apps/vekro` only calls [`run`].
 
 use gpui_kit::{component::TitleBar, *};
+use vekro_storage::{WindowMode, WindowPlacement};
 use vekro_ui::{
   Assets, ClearBuffer, CloseTab, CopySelection, NewTerminal, NewWindow, OpenSettings, PasteClipboard, Quit, SaveFile, SplitDown, SplitRight,
   ToggleTerminal, ViewOnHost, Workspace, TOOLBAR_HEIGHT,
@@ -42,10 +43,24 @@ pub fn run() {
   });
 }
 
+/// The window as it was when it was last closed, if it still fits on a screen that is connected; else a centered default.
+fn initial_bounds(cx: &App) -> WindowBounds {
+  let saved = WindowPlacement::load(&WindowPlacement::default_path()).and_then(|placement| {
+    let bounds = Bounds::new(point(px(placement.x), px(placement.y)), size(px(placement.width), px(placement.height)));
+    // Its center must be on a screen, so that a window saved on a display that is gone does not open out of sight.
+    let visible = cx.displays().iter().any(|display| display.bounds().contains(&bounds.center()));
+    visible.then_some(match placement.mode {
+      WindowMode::Windowed => WindowBounds::Windowed(bounds),
+      WindowMode::Maximized => WindowBounds::Maximized(bounds),
+      WindowMode::Fullscreen => WindowBounds::Fullscreen(bounds),
+    })
+  });
+  saved.unwrap_or_else(|| WindowBounds::Windowed(Bounds::centered(None, size(px(1280.), px(800.)), cx)))
+}
+
 fn open_window(cx: &mut App) {
-  let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
   let options = WindowOptions {
-    window_bounds: Some(WindowBounds::Windowed(bounds)),
+    window_bounds: Some(initial_bounds(cx)),
     window_min_size: Some(size(px(800.), px(500.))),
     titlebar: Some(TitlebarOptions { traffic_light_position: Some(point(px(18.), TOOLBAR_HEIGHT / 2. - px(6.))), ..TitleBar::title_bar_options() }),
     ..TitleBar::window_options()

@@ -13,7 +13,7 @@ use gpui_kit::{
     h_flex,
     label::Label,
     setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings},
-    ActiveTheme as _, IconName, Sizable as _,
+    ActiveTheme as _, Sizable as _,
   },
   *,
 };
@@ -121,10 +121,11 @@ pub(crate) fn settings_view(
   accounts: Entity<AccountsList>,
   updates: Entity<UpdatePanel>,
   first_page: &str,
+  background: Hsla,
 ) -> Settings {
   let shown_dir = fallback_dir.clone();
-  Settings::new("vekro-settings").with_group_variant(GroupBoxVariant::Outline).sidebar_width(px(180.)).pages(vec![
-    SettingPage::new("General").icon(IconName::Settings).default_open(first_page == "General").resettable(false).groups(vec![
+  Settings::new("vekro-settings").with_group_variant(GroupBoxVariant::Outline).sidebar_width(px(180.)).sidebar_style(&StyleRefinement::default().bg(background)).pages(vec![
+    SettingPage::new("General").default_open(first_page == "General").resettable(false).groups(vec![
       SettingGroup::new().title("Appearance").item(
         SettingItem::new(
           "Theme",
@@ -151,7 +152,7 @@ pub(crate) fn settings_view(
         .description("System follows the macOS appearance."),
       ),
     ]),
-    SettingPage::new("Editor").icon(IconName::File).default_open(first_page == "Editor").resettable(false).group(
+    SettingPage::new("Editor").default_open(first_page == "Editor").resettable(false).group(
       SettingGroup::new().title("Code").item(
         SettingItem::new(
           "Font size",
@@ -167,7 +168,7 @@ pub(crate) fn settings_view(
         .description("The size of code in the editor and in a file's changes, in pixels."),
       ),
     ),
-    SettingPage::new("Projects").icon(IconName::Folder).default_open(first_page == "Projects").resettable(false).groups(vec![
+    SettingPage::new("Projects").default_open(first_page == "Projects").resettable(false).groups(vec![
       SettingGroup::new()
         .title("Folder")
         .item(
@@ -215,19 +216,19 @@ pub(crate) fn settings_view(
           .description("Adds every Git repository directly inside the projects folder to the project menu."),
         ),
     ]),
-    SettingPage::new("Project list").icon(IconName::Menu).default_open(first_page == "Project list").resettable(false).group(
+    SettingPage::new("Project list").default_open(first_page == "Project list").resettable(false).group(
       SettingGroup::new()
         .title("Projects and categories")
         .description("Rename, recolor, reorder and group the projects of the menu in the title bar, or remove them. Right-click a project in that menu to move it to a category.")
         .item(SettingItem::render(move |_, _, _| projects.clone())),
     ),
-    SettingPage::new("Accounts").icon(IconName::User).default_open(first_page == "Accounts").resettable(false).group(
+    SettingPage::new("Accounts").default_open(first_page == "Accounts").resettable(false).group(
       SettingGroup::new()
         .title("GitHub, GitLab and Azure DevOps")
         .description("A connected account lets Vekro list your repositories to clone, list and open pull requests, and gives Git the token for that host over HTTPS. Tokens are kept in the macOS Keychain.")
         .item(SettingItem::render(move |_, _, _| accounts.clone())),
     ),
-    SettingPage::new("OpenCommit").icon(IconName::Bot).resettable(false).group(
+    SettingPage::new("OpenCommit").resettable(false).group(
       SettingGroup::new().title("Commit messages").item(
         SettingItem::new(
           "Generate commit messages",
@@ -242,20 +243,23 @@ pub(crate) fn settings_view(
         .description("The sparkle button beside a commit's description writes the summary and description with OpenCommit. Choose the model, language and message style here."),
       ),
     ),
-    SettingPage::new("Updates").icon(IconName::ArrowDown).resettable(false).groups(vec![
-      SettingGroup::new().title("Vekro").item(SettingItem::render(move |_, _, _| updates.clone())),
-      SettingGroup::new().title("Automatic").item(
-        SettingItem::new(
-          "Check for updates on launch",
-          SettingField::switch(
-            |cx: &App| preferences(cx).check_updates,
-            |value: bool, cx: &mut App| update(cx, |preferences| preferences.check_updates = value),
-          ),
-        )
-        .description("Vekro asks GitHub (api.github.com) for the latest release of its repository. Nothing about you or your projects is sent. An update is only downloaded when you choose to."),
-      ),
-    ]),
-    SettingPage::new("About").icon(IconName::Info).resettable(false).group(
+    // One titled group: with two, the Kit adds an arrow and a submenu to the page in the list on the left.
+    SettingPage::new("Updates").resettable(false).group(
+      SettingGroup::new()
+        .title("Vekro")
+        .item(SettingItem::render(move |_, _, _| updates.clone()))
+        .item(
+          SettingItem::new(
+            "Check for updates on launch",
+            SettingField::switch(
+              |cx: &App| preferences(cx).check_updates,
+              |value: bool, cx: &mut App| update(cx, |preferences| preferences.check_updates = value),
+            ),
+          )
+          .description("Vekro asks GitHub (api.github.com) for the latest release of its repository. Nothing about you or your projects is sent. An update is only downloaded when you choose to."),
+        ),
+    ),
+    SettingPage::new("About").resettable(false).group(
       SettingGroup::new()
         .title("Vekro")
         .item(SettingItem::new("Version", SettingField::render(|_, _, _| Label::new(env!("CARGO_PKG_VERSION")).text_sm())))

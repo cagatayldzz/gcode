@@ -3,6 +3,10 @@
 use git2::{build::CheckoutBuilder, DiffFormat, DiffOptions, Repository, Status, StatusOptions};
 use std::path::{Path, PathBuf};
 
+mod compare;
+
+pub use compare::{compare, compare_choices, merge_branch, BranchChoices, BranchRef, Comparison, COMPARE_LIMIT};
+
 /// How a file differs from the last commit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChangeKind {

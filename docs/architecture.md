@@ -28,6 +28,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/terminal_layout.rs` | the tabs and split panes of a project's terminals as plain data (`Arrangement`, `Node`, `Direction`), tested without a window |
 | `crates/ui/src/commit_settings.rs` | the OpenCommit settings dialog (model, diff size, language, message style, instructions, push after commit) |
 | `crates/ui/src/change_view.rs` | `ChangeView`: the diff of the chosen file of the Changes view in the main area, in place of the editor (re-read every refresh, redrawn only when it differs) |
+| `crates/git/src/compare.rs` | comparing the current branch with another (`compare_choices`, `compare`) and merging it in (`merge_branch`); the History view's "Select Branch to Compare…" uses it |
 | `crates/ui/src/commit_view.rs` | `CommitView`: a commit of the History view in the main area (message, changed files, the diff of the chosen one) |
 | `crates/ui/src/project_setup.rs` | the Add project dialog (New, Clone, Import) |
 | `crates/ui/src/project_settings.rs` | the dialog for a project's name, icon and color |
@@ -161,6 +162,7 @@ Data directory `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_
 | --- | --- | --- |
 | `projects.json` | `ProjectList` (project paths with their name, icon, color and category; the categories and whether each is folded; the active project) | when a project is added or selected, or a category changes |
 | `accounts.json` | `Accounts` (service, host, organization and user name of each connected account; tokens are in the Keychain) | when an account is connected or disconnected |
+| `window.json` | `WindowPlacement` (position, size and whether the window was maximized or full screen) | half a second after the window stops moving or resizing |
 | `preferences.json` | `Preferences` (theme, projects folder, code font size, commit instructions) | on each settings change |
 
 Not stored yet: window size and position, dock layout, open files, running terminals.

@@ -3,7 +3,6 @@
 
 use crate::{
   components::selected_style,
-  connections::provider_icon,
   theme::{FONT_SIZE, FONT_SIZE_SM},
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -118,7 +117,7 @@ impl ConnectAccount {
       .p_3()
       .rounded_md()
       .border_1()
-      .border_color(theme.input)
+      .border_color(theme.border)
       .child(Label::new("Create a token with these permissions").font_weight(FontWeight::SEMIBOLD))
       .child(Label::new(guide.place).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground))
       .children(guide.permissions.iter().map(|(name, why)| {
@@ -137,7 +136,6 @@ impl ConnectAccount {
       .small()
       .when(chosen, |button| button.custom(selected_style(cx)))
       .when(!chosen, |button| button.outline())
-      .icon(Icon::empty().path(provider_icon(provider)))
       .label(provider.label())
       .on_click(cx.listener(move |this, _, window, cx| this.choose(provider, window, cx)))
   }
