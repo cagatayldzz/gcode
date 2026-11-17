@@ -137,6 +137,14 @@ enum PullRequests {
   Failed(SharedString),
 }
 
+/// What a host refused, for the warning an account shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IssueKind {
+  Push,
+  PullRequests,
+  Workflows,
+}
+
 /// The two views of the Git tab: the files to commit, and the commits already made.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum GitView {
@@ -534,13 +542,15 @@ impl Workspace {
 
   /// Marks the account that serves `url` as having a permission problem, because the host refused its token: a warning shows by
   /// Settings until a check finds it fixed. `pull_requests` says which permission was refused.
-  fn flag_account_issue(&mut self, url: &str, pull_requests: bool, cx: &mut Context<Self>) {
+  fn flag_account_issue(&mut self, url: &str, kind: IssueKind, cx: &mut Context<Self>) {
     self.settings.update(cx, |model, cx| {
       let Some(account) = model.accounts.items.iter_mut().find(|account| RepoRef::for_account(account, url).is_some()) else { return };
-      let (action, permission) = if pull_requests {
-        ("Opening a pull request", account.provider.pull_request_permission())
-      } else {
-        ("Pushing or pulling", account.provider.push_permission())
+      let (action, permission) = match kind {
+        IssueKind::PullRequests => ("Opening a pull request", account.provider.pull_request_permission().to_string()),
+        IssueKind::Push => ("Pushing or pulling", account.provider.push_permission().to_string()),
+        IssueKind::Workflows => {
+          ("Pushing commits that change .github/workflows", format!("{} (a classic token, the `workflow` scope)", vekro_git::WORKFLOWS_REFUSED))
+        }
       };
       account.issue = Some(format!("{action} was refused with this token. It needs {permission}."));
       if let Err(error) = model.accounts.save(&accounts_path()) {
@@ -1113,8 +1123,8 @@ impl Workspace {
               None => window.push_notification(Notification::info(format!("Committed {id}.")), cx),
               Some(Ok(_)) => window.push_notification(Notification::info(format!("Committed {id} and pushed.")), cx),
               Some(Err(message)) => {
-                if message.contains(vekro_git::TOKEN_REFUSED) {
-                  this.flag_account_issue(&remote_url, false, cx);
+                if let Some(kind) = refusal_kind(&message) {
+                  this.flag_account_issue(&remote_url, kind, cx);
                 }
                 window.push_notification(Notification::error(format!("Committed {id}, but the push failed: {message}")), cx)
               }
@@ -1324,8 +1334,8 @@ impl Workspace {
         match result {
           Ok(_) => window.push_notification(Notification::info(format!("{done} {remote}.")), cx),
           Err(message) => {
-            if message.contains(vekro_git::TOKEN_REFUSED) {
-              this.flag_account_issue(&remote_url, false, cx);
+            if let Some(kind) = refusal_kind(&message) {
+              this.flag_account_issue(&remote_url, kind, cx);
             }
             window.push_notification(Notification::error(message), cx)
           }
@@ -1464,7 +1474,7 @@ impl Workspace {
       }
       PullRequestEvent::Refused => {
         let url = form.read(cx).remote_url().to_string();
-        this.flag_account_issue(&url, true, cx);
+        this.flag_account_issue(&url, IssueKind::PullRequests, cx);
       }
     }));
     window.open_dialog(cx, move |dialog, _, _| dialog.title("Create a pull request").width(px(560.)).child(form.clone()));
@@ -2512,6 +2522,18 @@ fn project_menu(
   menu
 }
 
+/// What a failed push, pull or fetch says about the account's token, if it says anything: the host turned the token down, or
+/// accepted it but refused commits that change workflow files.
+fn refusal_kind(message: &str) -> Option<IssueKind> {
+  if message.contains(vekro_git::WORKFLOWS_REFUSED) {
+    Some(IssueKind::Workflows)
+  } else if message.contains(vekro_git::TOKEN_REFUSED) {
+    Some(IssueKind::Push)
+  } else {
+    None
+  }
+}
+
 /// How long ago a commit was made, in words: "2 minutes ago", "3 hours ago", "yesterday".
 fn ago_long(seconds_since_epoch: i64) -> String {
   let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs() as i64);
@@ -2605,7 +2627,9 @@ impl Render for Workspace {
     let main_area = if self.terminal_open {
       v_resizable("editor-terminal-split")
         .child(resizable_panel().child(editor_area))
-        .child(resizable_panel().size(TERMINAL_HEIGHT).size_range(TERMINAL_MIN_HEIGHT..TERMINAL_MAX_HEIGHT).child(self.render_terminal_area(cx)))
+        .child(
+          resizable_panel().size(TERMINAL_HEIGHT).size_range(TERMINAL_MIN_HEIGHT..TERMINAL_MAX_HEIGHT).fixed().child(self.render_terminal_area(cx)),
+        )
         .into_any_element()
     } else {
       editor_area
@@ -2676,7 +2700,8 @@ impl Render for Workspace {
       .child(
         h_flex().flex_1().min_h_0().child(
           h_resizable("sidebar-split")
-            .child(resizable_panel().size(SIDEBAR_WIDTH).size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH).child(self.render_sidebar(cx)))
+            // `fixed`: the sidebar keeps the width the user gave it when the window is resized; only the main area changes.
+            .child(resizable_panel().size(SIDEBAR_WIDTH).size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH).fixed().child(self.render_sidebar(cx)))
             // The status bar belongs to the editor and the terminals: the sidebar runs down to the bottom of the window.
             .child(
               resizable_panel().child(

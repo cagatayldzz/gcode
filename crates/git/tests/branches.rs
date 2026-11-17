@@ -290,3 +290,51 @@ fn a_refused_token_is_followed_by_the_users_own_login_and_the_message_says_both_
   assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 3);
   fs::remove_dir_all(dir).unwrap();
 }
+
+/// A bare remote whose pre-receive hook says `output` and refuses the push, the way a host refuses a commit.
+fn refusing_remote(name: &str, output: &str) -> PathBuf {
+  let remote = std::env::temp_dir().join(format!("vekro-git-hook-{name}-{}", std::process::id()));
+  let _ = fs::remove_dir_all(&remote);
+  git2::Repository::init_opts(&remote, git2::RepositoryInitOptions::new().bare(true).initial_head("main")).unwrap();
+  let hook = remote.join("hooks/pre-receive");
+  fs::create_dir_all(remote.join("hooks")).unwrap();
+  // The hook's first lines are progress reports, like a host's: they must not end up in the message.
+  fs::write(
+    &hook,
+    format!("#!/bin/sh\necho 'Resolving deltas:  43% (20/46)' >&2\necho 'Resolving deltas:  45% (21/46)' >&2\necho '{output}' >&2\nexit 1\n"),
+  )
+  .unwrap();
+  std::process::Command::new("chmod").arg("+x").arg(&hook).status().unwrap();
+  remote
+}
+
+#[test]
+fn a_rejected_push_gives_the_reason_not_git_s_last_line() {
+  let remote = refusing_remote("reason", "protected branch: no pushes today");
+  let dir = repository("reason");
+  fs::write(dir.join("a.txt"), "a").unwrap();
+  commit_all(&dir, "first");
+  git2::Repository::open(&dir).unwrap().remote("origin", remote.to_str().unwrap()).unwrap();
+  let error = vekro_git::push(&dir, None, |_| {}).unwrap_err();
+  assert!(error.contains("[remote rejected]") && error.contains("protected branch: no pushes today"), "{error}");
+  assert!(!error.contains("failed to push some refs") && !error.contains("Resolving deltas"), "{error}");
+  assert!(!error.contains(vekro_git::WORKFLOWS_REFUSED));
+  fs::remove_dir_all(dir).unwrap();
+  fs::remove_dir_all(remote).unwrap();
+}
+
+#[test]
+fn a_push_refused_for_workflow_files_says_which_permission_is_missing() {
+  let remote = refusing_remote(
+    "workflow",
+    "refusing to allow a Personal Access Token to create or update workflow .github/workflows/ci.yml without workflow scope",
+  );
+  let dir = repository("workflow");
+  fs::write(dir.join("a.txt"), "a").unwrap();
+  commit_all(&dir, "first");
+  git2::Repository::open(&dir).unwrap().remote("origin", remote.to_str().unwrap()).unwrap();
+  let error = vekro_git::push(&dir, None, |_| {}).unwrap_err();
+  assert!(error.contains(vekro_git::WORKFLOWS_REFUSED) && error.contains("`workflow` scope") && error.contains(".github/workflows"), "{error}");
+  fs::remove_dir_all(dir).unwrap();
+  fs::remove_dir_all(remote).unwrap();
+}

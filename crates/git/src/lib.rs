@@ -429,14 +429,54 @@ fn last_line(text: &str) -> String {
   text.split(['\r', '\n']).rev().find(|line| !line.trim().is_empty()).unwrap_or("").trim().to_string()
 }
 
+/// What the message of a failed push says when the server accepted the login but refused commits that change workflow files
+/// (GitHub does so unless the token may change workflows): the interface looks for it to mark the account as having a problem.
+pub const WORKFLOWS_REFUSED: &str = "Workflows: Read and write";
+
+/// Whether a line is git's progress report ("Resolving deltas:  43% (20/46)", "Counting objects: …"), not something to tell the user.
+fn is_progress(line: &str) -> bool {
+  const STEPS: [&str; 7] =
+    ["Resolving deltas", "Counting objects", "Compressing objects", "Enumerating objects", "Writing objects", "Delta compression", "Total "];
+  STEPS.iter().any(|step| line.starts_with(step)) || line.contains("% (")
+}
+
+/// Why a git command failed, in a sentence. git ends its output with a line such as "failed to push some refs", which says nothing;
+/// the reason is in the line about the rejected branch or in what the remote said.
+fn failure_reason(stderr: &str, failure: &str) -> String {
+  let lines: Vec<&str> = stderr.split(['\r', '\n']).map(str::trim).filter(|line| !line.is_empty()).collect();
+  let mut message = match lines.iter().find(|line| line.contains("[remote rejected]") || line.contains("[rejected]")) {
+    Some(rejected) => {
+      // The remote's own words, when it said any, come with the rejection.
+      let mut said: Vec<&str> =
+        lines.iter().filter_map(|line| line.strip_prefix("remote:")).map(str::trim).filter(|line| !line.is_empty() && !is_progress(line)).collect();
+      said.dedup();
+      let rejected = rejected.trim_start_matches('!').trim();
+      if said.is_empty() {
+        rejected.to_string()
+      } else {
+        format!("{rejected}: {}", said.join(" "))
+      }
+    }
+    None => match last_line(stderr) {
+      line if line.is_empty() => failure.to_string(),
+      line => line,
+    },
+  };
+  let lowered = stderr.to_lowercase();
+  if lowered.contains("workflow") && (lowered.contains("scope") || lowered.contains("permission")) {
+    message.push_str(&format!(
+      " The token needs the {WORKFLOWS_REFUSED} permission (a classic token, the `workflow` scope), because the commits change files in .github/workflows."
+    ));
+  }
+  message
+}
+
 fn finish(result: (bool, String), failure: &str) -> Result<String, String> {
   let (success, stderr) = result;
-  let line = last_line(&stderr);
-  match (success, line.is_empty()) {
-    (true, _) => Ok(line),
-    (false, true) => Err(failure.to_string()),
-    (false, false) => Err(line),
+  if success {
+    return Ok(last_line(&stderr));
   }
+  Err(failure_reason(&stderr, failure))
 }
 
 /// What the message of a failed push, fetch or pull says when the server turned down the connected account's token (and the user's own
