@@ -172,7 +172,7 @@ development builds, and only for Apple Silicon Macs.
   and for Azure DevOps only reading can be tried, so an information notice says that pushing and pull requests were not checked (a warning appears only for a permission that is certainly missing). A refused
   request later names the permission it needs. A connected
   account is used to browse and clone your repositories, to list and create pull requests, and to give Git the token for that host
-  over HTTPS (clone, fetch, pull and push; SSH remotes keep using your keys). **Disconnect** removes the account and its token.
+  over HTTPS (clone, fetch, pull and push; SSH remotes keep using your keys; if the host refuses the token, Git's own login is tried before an error is shown). **Disconnect** removes the account and its token.
 - **Updates:** see Updates above.
 - **OpenCommit:** how commit messages are generated.
 - **About:** the version and the data folder.

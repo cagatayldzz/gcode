@@ -141,8 +141,8 @@ file or a log). Everything that touches the network or the Keychain runs on a ba
 account is connected, listing repositories (Clone tab), listing and creating pull requests (`Workspace::load_pull_requests`,
 `PullRequestForm`). For `clone`, `push`, `fetch` and `pull` of an HTTPS remote, `connections::credentials_for_repository` finds
 the account for the remote's host and gives the `git` program the user name and token through environment variables read by a
-one-command credential helper (`vekro_git::CREDENTIAL_HELPER`), so they appear in no command line or file; SSH remotes keep the
-user's keys. Self-hosted GitHub Enterprise and GitLab are reached by naming the host; Azure DevOps uses the organization.
+one-command credential helper (`vekro_git::CREDENTIAL_HELPER`), so they appear in no command line or file; if the server refuses the token (HTTP 401/403), the command is run once more with the
+user's own Git login, and a message names both when both fail. SSH remotes keep the user's keys. Self-hosted GitHub Enterprise and GitLab are reached by naming the host; Azure DevOps uses the organization.
 
 ## Persistence
 

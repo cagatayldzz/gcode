@@ -251,3 +251,42 @@ fn credentials_reach_git_through_the_helper_and_stay_out_of_debug_output() {
   fs::remove_dir_all(dir).unwrap();
   fs::remove_dir_all(remote).unwrap();
 }
+
+/// A server that answers every request with 403 and counts them.
+fn refusing_server() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+  use std::io::{Read, Write};
+  let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+  let url = format!("http://{}/owner/repo.git", listener.local_addr().unwrap());
+  let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+  let counter = seen.clone();
+  std::thread::spawn(move || {
+    for stream in listener.incoming() {
+      let Ok(mut stream) = stream else { break };
+      let mut buffer = [0u8; 4096];
+      let _ = stream.read(&mut buffer);
+      counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+      let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+    }
+  });
+  (url, seen)
+}
+
+#[test]
+fn a_refused_token_is_followed_by_the_users_own_login_and_the_message_says_both_failed() {
+  let (url, seen) = refusing_server();
+  let dir = repository("refused");
+  fs::write(dir.join("a.txt"), "a").unwrap();
+  commit_all(&dir, "first");
+  git2::Repository::open(&dir).unwrap().remote("origin", &url).unwrap();
+  let credentials = vekro_git::Credentials { username: "me".into(), password: "tok".into() };
+
+  let error = vekro_git::push(&dir, Some(&credentials), |_| {}).unwrap_err();
+  assert!(error.contains("403") && error.contains("refused the token of the connected account") && error.contains("own Git login"), "{error}");
+  assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 2, "the token was tried, then the user's own login");
+
+  // Without a connected account there is only one attempt and the plain message.
+  let error = vekro_git::push(&dir, None, |_| {}).unwrap_err();
+  assert!(error.contains("403") && !error.contains("connected account"), "{error}");
+  assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 3);
+  fs::remove_dir_all(dir).unwrap();
+}

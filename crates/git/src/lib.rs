@@ -439,25 +439,53 @@ fn finish(result: (bool, String), failure: &str) -> Result<String, String> {
   }
 }
 
-/// Pushes the current branch with the `git` program, so the user's own credentials apply; a branch without an upstream is
-/// published to `origin`. `on_progress` gets git's progress lines ("Writing objects: 45% …") while it runs.
-pub fn push(path: &Path, credentials: Option<&Credentials>, mut on_progress: impl FnMut(&str)) -> Result<String, String> {
-  let mut result = run_git(path, &["push"], credentials, &mut on_progress)?;
-  if !result.0 && result.1.contains("no upstream branch") {
-    result = run_git(path, &["push", "--set-upstream", "origin", "HEAD"], credentials, &mut on_progress)?;
+/// Whether git's message says the server turned the login down (rather than, say, a network failure).
+fn login_refused(message: &str) -> bool {
+  ["403", "401", "Authentication failed", "denied", "could not read Username", "Permission to"].iter().any(|sign| message.contains(sign))
+}
+
+/// Runs a command that talks to the remote with the connected account's token; if the server refuses that login, it is run
+/// once more with the user's own Git login (SSH key, credential helper), which is what happened before an account was
+/// connected. When both are refused, the message says so.
+fn with_login(credentials: Option<&Credentials>, mut command: impl FnMut(Option<&Credentials>) -> Result<String, String>) -> Result<String, String> {
+  match (command(credentials), credentials) {
+    (Err(first), Some(_)) if login_refused(&first) => command(None).map_err(|second| {
+      if login_refused(&second) {
+        format!(
+          "The server refused the token of the connected account ({}). Your own Git login could not be used either ({}). Give the token write access in Settings → Accounts (reconnect the account with a new token), or sign in once with `git push` in a terminal.",
+          first.trim_end_matches('.'),
+          second.trim_end_matches('.')
+        )
+      } else {
+        second
+      }
+    }),
+    (result, _) => result,
   }
-  finish(result, "git push failed.")
+}
+
+/// Pushes the current branch with the `git` program, so the user's own credentials apply; a branch without an upstream is
+/// published to `origin`. `on_progress` gets git's progress lines ("Writing objects: 45% …") while it runs. With `credentials`
+/// (a connected account's token) they are tried first, and the user's own login after a refusal.
+pub fn push(path: &Path, credentials: Option<&Credentials>, mut on_progress: impl FnMut(&str)) -> Result<String, String> {
+  with_login(credentials, |credentials| {
+    let mut result = run_git(path, &["push"], credentials, &mut on_progress)?;
+    if !result.0 && result.1.contains("no upstream branch") {
+      result = run_git(path, &["push", "--set-upstream", "origin", "HEAD"], credentials, &mut on_progress)?;
+    }
+    finish(result, "git push failed.")
+  })
 }
 
 /// Fetches the remote of the current branch (`git fetch`). Changes nothing in the working tree.
-pub fn fetch(path: &Path, credentials: Option<&Credentials>, on_progress: impl FnMut(&str)) -> Result<String, String> {
-  finish(run_git(path, &["fetch"], credentials, on_progress)?, "git fetch failed.")
+pub fn fetch(path: &Path, credentials: Option<&Credentials>, mut on_progress: impl FnMut(&str)) -> Result<String, String> {
+  with_login(credentials, |credentials| finish(run_git(path, &["fetch"], credentials, &mut on_progress)?, "git fetch failed."))
 }
 
 /// Brings in the remote's new commits with `git pull --ff-only`: it only moves the branch forward, never creates a merge, and
 /// refuses (with git's message) when the branches have diverged or local changes are in the way.
-pub fn pull(path: &Path, credentials: Option<&Credentials>, on_progress: impl FnMut(&str)) -> Result<String, String> {
-  finish(run_git(path, &["pull", "--ff-only"], credentials, on_progress)?, "git pull failed.")
+pub fn pull(path: &Path, credentials: Option<&Credentials>, mut on_progress: impl FnMut(&str)) -> Result<String, String> {
+  with_login(credentials, |credentials| finish(run_git(path, &["pull", "--ff-only"], credentials, &mut on_progress)?, "git pull failed."))
 }
 
 /// The URL of the remote the current branch follows, else `origin`, else the first remote; `None` without remotes.
