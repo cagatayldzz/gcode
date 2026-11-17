@@ -15,7 +15,7 @@ use crate::{
     init_settings, settings_view, AccountRecheckRequested, AccountRemoveRequested, AddAllProjectsRequested, CommitSettingsRequested,
     ConnectAccountRequested, SettingsGlobal, SettingsModel,
   },
-  terminal::{Terminal, TerminalExited},
+  terminal::{Terminal, TerminalAttentionChanged, TerminalExited},
   terminal_layout::{Arrangement, Direction, Node},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
@@ -3121,6 +3121,7 @@ impl Workspace {
       div().relative().child(button).children(badge)
     });
     let attention = self.settings.read(cx).accounts.items.iter().any(|account| account.issue.is_some());
+    let terminal_attention = self.terminal_tabs.values().any(|tabs| tabs.panes().iter().any(|terminal| terminal.read(cx).needs_attention()));
     let terminal =
       rail_button("terminal-toggle", Icon::empty().path("icons/terminal.svg"), "Terminal", self.terminal_open, true, &palette, |_, window, cx| {
         window.dispatch_action(Box::new(ToggleTerminal), cx)
@@ -3161,7 +3162,21 @@ impl Workspace {
       .border_r_1()
       .border_color(palette.border)
       .children(buttons)
-      .child(terminal)
+      .child(div().relative().child(terminal).when(terminal_attention, |button| {
+        button.child(
+          div()
+            .absolute()
+            .bottom_0()
+            .right_0()
+            .size_4()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .bg(theme.warning)
+            .child(Icon::empty().path("icons/triangle-alert.svg").size_3().text_color(palette.on_accent)),
+        )
+      }))
       .child(div().flex_1())
       .child(settings)
   }

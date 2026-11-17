@@ -10,6 +10,12 @@ use vekro_ui::{
 /// Starts the application and runs it until it quits.
 pub fn run() {
   let app = gpui_kit::application().with_assets(Assets);
+  app.on_reopen(|cx| {
+    if cx.windows().is_empty() {
+      open_window(cx);
+    }
+    cx.activate(true);
+  });
   app.run(move |cx| {
     gpui_kit::init(cx);
     vekro_ui::init(cx);
@@ -33,12 +39,6 @@ pub fn run() {
     cx.set_menus(vekro_ui::menus(None));
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &NewWindow, cx| open_window(cx));
-    cx.on_window_closed(|cx, _| {
-      if cx.windows().is_empty() {
-        cx.quit();
-      }
-    })
-    .detach();
     open_window(cx);
   });
 }

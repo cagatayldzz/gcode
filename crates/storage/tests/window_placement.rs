@@ -26,3 +26,26 @@ fn a_size_that_is_not_a_real_size_is_ignored() {
   assert_eq!(WindowPlacement::load(&file), None);
   std::fs::remove_dir_all(file.parent().unwrap()).unwrap();
 }
+
+#[test]
+fn malformed_and_incomplete_window_files_are_ignored() {
+  let file = temp_file("invalid");
+  std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+  for contents in ["{", "[]", r#"{"x":0,"y":0,"width":800}"#, r#"{"x":1e100,"y":0,"width":800,"height":600}"#] {
+    std::fs::write(&file, contents).unwrap();
+    assert_eq!(WindowPlacement::load(&file), None, "{contents}");
+  }
+  std::fs::remove_dir_all(file.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn saving_again_replaces_the_previous_window_placement() {
+  let file = temp_file("replace");
+  let first = WindowPlacement { x: -400., y: 20., width: 800., height: 600., mode: WindowMode::Fullscreen };
+  let second = WindowPlacement { x: 0., y: 0., width: 1000., height: 700., mode: WindowMode::Windowed };
+  first.save(&file).unwrap();
+  second.save(&file).unwrap();
+
+  assert_eq!(WindowPlacement::load(&file), Some(second));
+  std::fs::remove_dir_all(file.parent().unwrap()).unwrap();
+}

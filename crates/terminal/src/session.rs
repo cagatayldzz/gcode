@@ -24,6 +24,8 @@ use std::{
 pub enum SessionEvent {
   /// The screen changed.
   Wakeup,
+  /// The program rang the terminal bell.
+  Bell,
   /// The program set a window title.
   Title(String),
   /// The shell reported its working directory.
@@ -85,6 +87,7 @@ impl EventListener for Proxy {
   fn send_event(&self, event: Event) {
     match event {
       Event::Wakeup => (self.notify)(SessionEvent::Wakeup),
+      Event::Bell => (self.notify)(SessionEvent::Bell),
       Event::Title(title) => (self.notify)(SessionEvent::Title(title)),
       Event::ResetTitle => (self.notify)(SessionEvent::Title(String::new())),
       Event::ClipboardStore(_, text) => (self.notify)(SessionEvent::ClipboardStore(text)),

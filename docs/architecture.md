@@ -14,12 +14,14 @@ apps/vekro ─► app ─► ui ─► terminal
 
 `terminal`, `git`, `opencommit`, `hosting`, `updater`, `version` and `storage` never depend on the interface and are tested without a window.
 `app` depends on `ui` only.
+`visual-check` is a standalone development tool; the application does not depend on it.
 
 ## Code map
 
 | Path | Owns |
 | --- | --- |
 | `apps/vekro/src/main.rs` | executable entry point only; calls `vekro_app::run` |
+| `crates/visual-check/` | offline screenshot pixel inspection and coordinate conversion |
 | `crates/app/src/lib.rs` | startup: key bindings, quit, opening and closing windows |
 | `crates/ui/src/workspace.rs` | `Workspace` (one per window): projects, the title bar (repository switcher, tabs), the sidebar, the status bar, the dock and the terminals of every project |
 | `crates/ui/src/editor.rs` | `EditorPanel`: tabs (`Tabs`) of file editors, shown with the Kit default `TabBar` that the panel draws itself (the dock title bar is off), or the empty state |

@@ -62,6 +62,7 @@ Required Actions secrets: `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWOR
 | `vekro-hosting` | lib | GitHub, GitLab and Azure DevOps accounts, repositories and pull requests |
 | `vekro-version` | lib | version comparison for update detection |
 | `vekro-updater` | lib | self-update from GitHub releases |
+| `vekro-visual-check` | tool | inspect screenshot pixels and map them to window coordinates |
 
 Code map and data flow: [architecture](architecture.md).
 
@@ -72,6 +73,26 @@ Tests live in `crates/<crate>/tests/`, never inline. Terminal session tests run 
 the data directory use temporary directories; `VEKRO_DATA_DIR` overrides the location.
 
 Shell tests for the scripts and workflows live in `scripts/tests/`. The interface has no automated tests; check a change by running `bun run dev`.
+
+## Visual inspection with a computer-use agent
+
+Run `bun run dev` with a scratch `VEKRO_DATA_DIR`. Use the agent's computer-use tool to select the development app by bundle ID
+`com.cagatayldzz.vekro.dev`, inspect its accessibility tree, and take a fresh window screenshot. Prefer accessible controls; use
+coordinates from the current screenshot when a control is not exposed. After each action, inspect the new state before continuing.
+The operating system may require Screen Recording and Accessibility permissions for the computer-use host.
+
+For precise color or coordinate inspection of a saved PNG, run:
+
+```sh
+cargo run -p vekro-visual-check -- /tmp/vekro-window.png 200 100 800 600
+```
+
+This prints the image dimensions, the RGBA value at image pixel `(200, 100)`, and its center in an 800 × 600 logical-point
+window. The conversion assumes the PNG contains exactly the window, without a shadow or cropping. It returns coordinates relative
+to that window; add the window's screen origin if the computer-use tool expects screen coordinates. Window movement, display
+scaling, and screenshots that include decorations or shadows change the mapping: capture and measure again after those changes.
+The tool does not capture the screen or send input; use the computer-use tool for those actions. Screenshots can contain private
+paths or terminal history, so keep them in a scratch location and do not commit them.
 
 ## Running the app in isolation
 

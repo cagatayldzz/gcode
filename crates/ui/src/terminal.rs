@@ -2,6 +2,7 @@
 
 use crate::{
   selection::{extend_selection, move_endpoint, word_range},
+  theme::colors,
   ClearBuffer, CloseTab, CopySelection, NewTerminal, NewWindow, PasteClipboard, SplitDown, SplitRight,
 };
 use futures::StreamExt as _;
@@ -25,7 +26,7 @@ use std::{
 };
 use unicode_width::UnicodeWidthChar as _;
 use vekro_terminal::{
-  encode_key, encode_mouse, paste_bytes, CursorShape, Modes, Modifiers as TermModifiers, MouseAction, MouseButton as TermButton,
+  dropped_paths, encode_key, encode_mouse, paste_bytes, CursorShape, Modes, Modifiers as TermModifiers, MouseAction, MouseButton as TermButton,
   MouseEvent as TermMouse, Palette, Rgb, Session, SessionEvent, SessionOptions, Snapshot,
 };
 
@@ -36,6 +37,9 @@ const PADDING: Pixels = px(10.);
 
 /// Sent when the shell of a terminal exits.
 pub(crate) struct TerminalExited;
+
+/// Sent when the terminal attention indicator changes.
+pub(crate) struct TerminalAttentionChanged;
 
 /// A running shell that is not yet in a view.
 pub(crate) struct Started {
@@ -48,6 +52,7 @@ pub(crate) struct Started {
 pub(crate) struct Terminal {
   session: Rc<Session>,
   title: SharedString,
+  attention: bool,
   directory: Option<PathBuf>,
   focus_handle: FocusHandle,
   content_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -64,6 +69,8 @@ pub(crate) struct Terminal {
 }
 
 impl EventEmitter<TerminalExited> for Terminal {}
+
+impl EventEmitter<TerminalAttentionChanged> for Terminal {}
 
 impl Terminal {
   /// Starts the login shell in `directory`. Kept apart from [`Terminal::new`] so a failure can be reported
@@ -97,6 +104,7 @@ impl Terminal {
     Self {
       session: Rc::new(session),
       title: title.into(),
+      attention: false,
       directory: Some(directory),
       focus_handle: cx.focus_handle(),
       content_bounds: Rc::new(Cell::new(None)),
@@ -114,9 +122,24 @@ impl Terminal {
     self.title.clone()
   }
 
+  pub fn needs_attention(&self) -> bool {
+    self.attention
+  }
+
+  fn clear_attention(&mut self, cx: &mut Context<Self>) {
+    if self.attention {
+      self.attention = false;
+      cx.emit(TerminalAttentionChanged);
+    }
+  }
+
   fn handle_event(&mut self, event: SessionEvent, cx: &mut Context<Self>) {
     match event {
       SessionEvent::Wakeup => {}
+      SessionEvent::Bell => {
+        self.attention = true;
+        cx.emit(TerminalAttentionChanged);
+      }
       SessionEvent::Title(title) => self.title = title.into(),
       SessionEvent::Directory(path) => self.directory = Some(path),
       SessionEvent::ClipboardStore(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
@@ -165,6 +188,7 @@ impl Terminal {
 
   fn paste(&mut self, cx: &mut Context<Self>) {
     let Some(item) = cx.read_from_clipboard() else { return };
+    self.clear_attention(cx);
     if item.entries.iter().any(|entry| matches!(entry, ClipboardEntry::Image(_))) {
       // Programs such as Codex read image data from the clipboard themselves.
       self.session.write(vec![0x16]);
@@ -226,6 +250,7 @@ impl Terminal {
     }
     let modifiers = TermModifiers { control: held.control, alt: held.alt, shift: held.shift, command: held.platform };
     let Some(bytes) = encode_key(&keystroke.key, keystroke.key_char.as_deref(), modifiers, self.session.modes().app_cursor) else { return };
+    self.clear_attention(cx);
     self.session.write(bytes);
     self.selection = None;
     cx.stop_propagation();
@@ -243,10 +268,13 @@ impl Focusable for Terminal {
 pub(crate) fn palette(cx: &App) -> Palette {
   let dark = cx.theme().is_dark();
   let mut palette = if dark { Palette::dark() } else { Palette::light() };
-  let (background, foreground) =
-    if dark { (Rgb::new(0x0f, 0x13, 0x19), Rgb::new(0xe7, 0xea, 0xf0)) } else { (Rgb::new(0xff, 0xff, 0xff), Rgb::new(0x1b, 0x22, 0x30)) };
-  palette.background = background;
-  palette.foreground = foreground;
+  let theme = colors(cx);
+  let terminal_color = |color: Hsla| {
+    let color: Rgba = color.into();
+    Rgb::new((color.r * 255.).round() as u8, (color.g * 255.).round() as u8, (color.b * 255.).round() as u8)
+  };
+  palette.background = terminal_color(theme.background);
+  palette.foreground = terminal_color(theme.text);
   palette
 }
 
@@ -346,6 +374,13 @@ impl Render for Terminal {
       .key_context("Terminal")
       .track_focus(&self.focus_handle)
       .on_key_down(cx.listener(Self::on_key_down))
+      .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+        let text = dropped_paths(paths.paths().iter().map(|path| path.as_path()));
+        this.session.write(paste_bytes(&text, this.session.modes().bracketed_paste));
+        this.focus_handle.focus(window, cx);
+        this.selection = None;
+        cx.notify();
+      }))
       .on_action(cx.listener(|this, _: &CopySelection, _, cx| this.copy(cx)))
       .on_action(cx.listener(|this, _: &PasteClipboard, _, cx| this.paste(cx)))
       .on_action(cx.listener(|this, _: &ClearBuffer, _, cx| this.clear(cx)))

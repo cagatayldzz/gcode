@@ -338,3 +338,15 @@ fn growing_keeps_a_prompt_that_followed_padded_row_on_its_own_line() {
   assert!(!snapshot.line_text(0).contains("PROMPT"), "{:?}", snapshot.line_text(0));
   assert!(snapshot.line_text(1).starts_with("PROMPT"), "{:?}", snapshot.line_text(1));
 }
+
+#[test]
+fn terminal_bell_is_reported_to_the_interface() {
+  let (_session, receiver) = run("printf '\\a'; sleep 1");
+  let deadline = Instant::now() + Duration::from_secs(5);
+  while Instant::now() < deadline {
+    if let Ok(SessionEvent::Bell) = receiver.recv_timeout(Duration::from_millis(100)) {
+      return;
+    }
+  }
+  panic!("the terminal bell was not reported");
+}
