@@ -101,7 +101,11 @@ impl Render for ChangeView {
         .child(Label::new("Loading…").text_color(theme.muted_foreground))
         .into_any_element(),
       Load::Failed(message) => Label::new(message.clone()).p_4().text_color(theme.muted_foreground).into_any_element(),
-      Load::Ready(state) => Diff::new(state).soft_wrap(true).border_0().text_size(code_font_size(cx)).size_full().into_any_element(),
+      Load::Ready(state) =>
+      // The path is in the header above: the diff does not repeat it.
+      {
+        Diff::new(state).header_visible(false).soft_wrap(true).border_0().text_size(code_font_size(cx)).size_full().into_any_element()
+      }
     };
     v_flex().size_full().bg(theme.background).child(header).child(div().flex_1().min_h_0().child(body))
   }

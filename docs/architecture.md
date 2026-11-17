@@ -23,7 +23,8 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/app/src/lib.rs` | startup: key bindings, quit, opening and closing windows |
 | `crates/ui/src/workspace.rs` | `Workspace` (one per window): projects, the title bar (repository switcher, tabs), the sidebar, the status bar, the dock and the terminals of every project |
 | `crates/ui/src/editor.rs` | `EditorPanel`: tabs (`Tabs`) of file editors, shown with the Kit default `TabBar` that the panel draws itself (the dock title bar is off), or the empty state |
-| `crates/ui/src/terminal.rs` | `Terminal` (a view): draws a `Session`, handles keys, mouse, selection, scrolling and paste |
+| `crates/ui/src/terminal.rs` | `Terminal` (a view): draws a `Session`, handles keys, mouse, selection, scrolling, paste and its right-click menu |
+| `crates/ui/src/terminal_layout.rs` | the tabs and split panes of a project's terminals as plain data (`Arrangement`, `Node`, `Direction`), tested without a window |
 | `crates/ui/src/commit_settings.rs` | the OpenCommit settings dialog (model, diff size, language, message style, instructions, push after commit) |
 | `crates/ui/src/change_view.rs` | `ChangeView`: the diff of the chosen file of the Changes view in the main area, in place of the editor (re-read every refresh, redrawn only when it differs) |
 | `crates/ui/src/commit_view.rs` | `CommitView`: a commit of the History view in the main area (message, changed files, the diff of the chosen one) |
@@ -47,30 +48,31 @@ apps/vekro ─► app ─► ui ─► terminal
 
 ## Window layout
 
-The `Workspace` renders the title band (right of the traffic lights: the **repository switcher**, a fixed first tab with a filterable, category-grouped menu of every project and an Add button; then the Add and Settings buttons), then a row of the **sidebar** (an
-icon `TabBar` that switches between Explorer and Git, and the selected view, in a Kit `h_resizable` pane,
-200–960 px) and, right of it, a column with the Kit **`DockArea`** and the status bar below it, so the sidebar runs down to the bottom of the window. The sidebar is plain
+The `Workspace` renders the title band (right of the traffic lights: the **repository switcher**, a fixed first tab with a filterable, category-grouped menu of every project and an Add button; then the Add button), then a row of the **activity bar** (`render_activity_bar`: a 48 px strip with one button each for Explorer and
+Git, which choose `sidebar_tab`, the terminal button under them, and Settings at the bottom with the account warning badge) and the **sidebar** (the selected view, in a Kit `h_resizable` pane, 200–960 px) and, right of it, a column with the Kit **`DockArea`** and the status bar below it, so the sidebar runs down to the bottom of the window. The sidebar is plain
 workspace content, not a dock panel, so it has no tab bar. The dock holds only the center: `EditorPanel`. The terminals are
-not dock panels: the title bar's terminal button (`ToggleTerminal`, `⌘J`; `terminal_open`) shows a panel under the dock, in a Kit
-`v_resizable` split so its height can be dragged, with the open project's shell, or two side by side (`render_terminal_area`: a
-title row with the buttons, then the shells). Hiding the panel keeps the shells running.
+not dock panels: the activity bar's terminal button (`ToggleTerminal`, `⌘J`; `terminal_open`) makes them fill everything right of the activity bar in place of the sidebar, the dock and the status bar
+(`render_terminal_area`): a tab strip when there are several tabs, and the shown tab as a tree of panes (`terminal_layout.rs`: `Node`,
+`Arrangement`; splits are Kit `h_resizable`/`v_resizable` groups, a pane has a header when its tab has several). `⌘T`, `⌘D`,
+`⇧⌘D` and `⌘W` act on the shell that has the keyboard; a terminal's right-click menu (`terminal.rs`) uses the same actions.
+Showing the editor again keeps the shells running.
 
 The Kit draws the dock chrome of the editor (the title, zoom button and `…` menu).
 
 ## Projects and terminals
 
 - `Workspace.projects` is the `ProjectList`, shown in the repository menu of the title bar; the active project decides what the sidebar, the editor
-  tree, the Git summary and the terminal panel show.
+  tree, the Git summary and the terminals show.
 - `Workspace::switch_project` is the only way the open project changes. It puts the old project's Explorer and Git
   selections away (`Workspace.views`) and its editor
   tabs away (`EditorPanel::switch_project`, `saved`), applies the change, restores the new project's views, and
   makes sure the new project has a shell (`ensure_terminal`). Editors that other projects have open are never evicted
   from the cache.
-- `Workspace.terminals` maps each project folder to its terminals; the entities stay alive in the map while another
-  project is open, so their shells keep running. `active_terminal` says which one the terminal panel shows and
-  `split_terminals` which projects show two side by side. A project with no terminal gets one.
-- A shell that exits sends `TerminalExited`, and Kill terminal does the same job (`close_terminal`): the workspace
-  removes the terminal and, if the project has none left, starts another.
+- `Workspace.terminal_tabs` maps each project folder to an `Arrangement` of its terminals (tabs, each a tree of panes); the entities
+  stay alive in the map while another project is open, so their shells keep running. A project with no terminal gets one when
+  it is opened or when the terminals are shown.
+- A shell that exits sends `TerminalExited`, and closing a pane does the same job (`close_pane`): the workspace takes the pane
+  out (its sibling takes its place, an empty tab goes) and, if the project has no shell left, shows the editor again.
 
 ## Opening files quickly
 
@@ -148,7 +150,7 @@ A refused token marks its account: `Account.issue` (in `accounts.json`) holds wh
 is in the error of a push, pull or fetch, when a pull request is refused (`PullRequestEvent::Refused`), or when connecting finds a
 permission missing; it is cleared by `Workspace::recheck_account`, which runs `vekro_hosting::verify_permissions` (the push
 advertisement `info/refs?service=git-receive-pack` and an empty pull request, neither of which changes anything) on a background
-thread. While any account has an issue, the title bar's gear shows a warning badge that opens the Accounts page.
+thread. While any account has an issue, the gear at the bottom of the activity bar shows a warning badge that opens the Accounts page.
 
 ## Persistence
 

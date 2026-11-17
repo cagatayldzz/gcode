@@ -17,11 +17,13 @@ pub struct Project {
   pub icon: Option<String>,
   /// The color of the avatar, as `#rrggbb`.
   pub color: Option<String>,
+  /// Starred by the user: listed first in the project menu.
+  pub favorite: bool,
 }
 
 impl Project {
   pub fn new(path: PathBuf) -> Self {
-    Self { path, category: None, name: None, icon: None, color: None }
+    Self { path, category: None, name: None, icon: None, color: None, favorite: false }
   }
 
   /// The folder's name.
@@ -79,6 +81,7 @@ impl ProjectList {
               name: text(object, "name").filter(|name| !name.is_empty()),
               icon: text(object, "icon"),
               color: text(object, "color"),
+              favorite: object.get("favorite").and_then(Value::as_bool).unwrap_or(false),
             }),
             _ => None,
           })
@@ -116,6 +119,7 @@ impl ProjectList {
           "name": project.name,
           "icon": project.icon,
           "color": project.color,
+          "favorite": project.favorite,
         })).collect::<Vec<_>>(),
       "categories": self.categories.iter().map(|category| json!({ "id": category.id, "name": category.name, "collapsed": category.collapsed })).collect::<Vec<_>>(),
       "active": self.active.as_ref().map(|path| path.to_string_lossy()),
@@ -163,6 +167,18 @@ impl ProjectList {
     if self.active.as_deref() == Some(path) {
       self.active = self.projects.first().map(|project| project.path.clone());
     }
+  }
+
+  /// Stars or unstars a project.
+  pub fn set_favorite(&mut self, path: &Path, favorite: bool) {
+    if let Some(project) = self.projects.iter_mut().find(|project| project.path == path) {
+      project.favorite = favorite;
+    }
+  }
+
+  /// The starred projects, in list order.
+  pub fn favorites(&self) -> impl Iterator<Item = &Project> {
+    self.projects.iter().filter(|project| project.favorite)
   }
 
   /// The projects in the category with this id, or outside any category for `None`, in list order.

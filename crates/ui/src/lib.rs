@@ -18,6 +18,7 @@ mod repository_picker;
 mod selection;
 mod settings;
 mod terminal;
+mod terminal_layout;
 mod theme;
 mod updates;
 mod workspace;
@@ -27,7 +28,26 @@ use gpui_kit::*;
 pub use assets::Assets;
 pub use workspace::{Workspace, TOOLBAR_HEIGHT};
 
-actions!(vekro, [Quit, NewWindow, AddProject, OpenSettings, NewTerminal, SaveFile, CloseTab, ToggleTerminal]);
+actions!(
+  vekro,
+  [
+    Quit,
+    NewWindow,
+    AddProject,
+    OpenSettings,
+    NewTerminal,
+    SaveFile,
+    CloseTab,
+    ToggleTerminal,
+    // Terminal panes: split side by side, split one above the other.
+    SplitRight,
+    SplitDown,
+    // In a terminal: copy the selection, paste, clear the history.
+    CopySelection,
+    PasteClipboard,
+    ClearBuffer
+  ]
+);
 
 /// Loads the bundled fonts.
 pub fn init(cx: &mut App) {

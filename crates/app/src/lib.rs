@@ -1,7 +1,10 @@
 //! The Vekro application: startup, windows and key bindings. `apps/vekro` only calls [`run`].
 
 use gpui_kit::{component::TitleBar, *};
-use vekro_ui::{Assets, CloseTab, NewTerminal, NewWindow, OpenSettings, Quit, SaveFile, ToggleTerminal, Workspace, TOOLBAR_HEIGHT};
+use vekro_ui::{
+  Assets, ClearBuffer, CloseTab, CopySelection, NewTerminal, NewWindow, OpenSettings, PasteClipboard, Quit, SaveFile, SplitDown, SplitRight,
+  ToggleTerminal, Workspace, TOOLBAR_HEIGHT,
+};
 
 /// Starts the application and runs it until it quits.
 pub fn run() {
@@ -18,6 +21,12 @@ pub fn run() {
       KeyBinding::new("cmd-s", SaveFile, None),
       KeyBinding::new("cmd-w", CloseTab, None),
       KeyBinding::new("cmd-j", ToggleTerminal, None),
+      KeyBinding::new("cmd-d", SplitRight, None),
+      KeyBinding::new("cmd-shift-d", SplitDown, None),
+      // The terminal's own: they act on the selection and the screen of the shell that has the keyboard.
+      KeyBinding::new("cmd-c", CopySelection, Some("Terminal")),
+      KeyBinding::new("cmd-v", PasteClipboard, Some("Terminal")),
+      KeyBinding::new("cmd-k", ClearBuffer, Some("Terminal")),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &NewWindow, cx| open_window(cx));

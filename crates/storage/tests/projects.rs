@@ -200,3 +200,28 @@ fn dropping_a_project_before_another_moves_it_into_that_category_and_place() {
   assert!(!list.move_project_before(&c, &c));
   assert!(!list.move_project_before(&c, &PathBuf::from("/work/missing")));
 }
+
+#[test]
+fn favorites_are_starred_listed_in_order_and_survive_a_save() {
+  let mut list = ProjectList::default();
+  for name in ["a", "b", "c"] {
+    list.add(PathBuf::from(format!("/work/{name}")));
+  }
+  assert_eq!(list.favorites().count(), 0, "nothing is starred at first");
+  list.set_favorite(&PathBuf::from("/work/c"), true);
+  list.set_favorite(&PathBuf::from("/work/a"), true);
+  list.set_favorite(&PathBuf::from("/work/missing"), true);
+  assert_eq!(list.favorites().map(|project| project.path.clone()).collect::<Vec<_>>(), [PathBuf::from("/work/a"), PathBuf::from("/work/c")]);
+
+  let dir = std::env::temp_dir().join(format!("vekro-projects-favorites-{}", std::process::id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  let file = dir.join("projects.json");
+  list.save(&file).unwrap();
+  let loaded = ProjectList::load(&file);
+  assert_eq!(loaded.favorites().count(), 2);
+  list.set_favorite(&PathBuf::from("/work/a"), false);
+  assert_eq!(list.favorites().count(), 1);
+  std::fs::write(&file, r#"{"projects": ["/work/a", {"path": "/work/b"}]}"#).unwrap();
+  assert_eq!(ProjectList::load(&file).favorites().count(), 0, "files from before favorites have none");
+  std::fs::remove_dir_all(dir).unwrap();
+}

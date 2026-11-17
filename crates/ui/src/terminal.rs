@@ -1,10 +1,14 @@
 //! A shell in a view: draws the screen of a [`Session`] and sends it keys, mouse events and pastes.
 
-use crate::selection::{extend_selection, move_endpoint, word_range};
+use crate::{
+  selection::{extend_selection, move_endpoint, word_range},
+  ClearBuffer, CloseTab, CopySelection, NewTerminal, NewWindow, PasteClipboard, SplitDown, SplitRight,
+};
 use futures::StreamExt as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
+    menu::{ContextMenuExt as _, PopupMenuItem},
     scroll::{ScrollableElement as _, ScrollbarHandle},
     ActiveTheme as _,
   },
@@ -152,6 +156,13 @@ impl Terminal {
     cx.write_to_clipboard(ClipboardItem::new_string(copied.trim_end_matches('\n').to_owned()));
   }
 
+  /// Clears the history above the screen.
+  fn clear(&mut self, cx: &mut Context<Self>) {
+    self.session.clear_history();
+    self.selection = None;
+    cx.notify();
+  }
+
   fn paste(&mut self, cx: &mut Context<Self>) {
     let Some(item) = cx.read_from_clipboard() else { return };
     if item.entries.iter().any(|entry| matches!(entry, ClipboardEntry::Image(_))) {
@@ -180,10 +191,8 @@ impl Terminal {
           return;
         }
         "k" => {
-          self.session.clear_history();
-          self.selection = None;
+          self.clear(cx);
           cx.stop_propagation();
-          cx.notify();
           return;
         }
         _ => {}
@@ -337,6 +346,11 @@ impl Render for Terminal {
       .key_context("Terminal")
       .track_focus(&self.focus_handle)
       .on_key_down(cx.listener(Self::on_key_down))
+      .on_action(cx.listener(|this, _: &CopySelection, _, cx| this.copy(cx)))
+      .on_action(cx.listener(|this, _: &PasteClipboard, _, cx| this.paste(cx)))
+      .on_action(cx.listener(|this, _: &ClearBuffer, _, cx| this.clear(cx)))
+      // A right click puts the keyboard in this shell, so the menu's Copy, Paste and Clear act on it.
+      .on_mouse_down(MouseButton::Right, cx.listener(|this, _: &MouseDownEvent, window, cx| this.focus_handle.focus(window, cx)))
       .relative()
       .size_full()
       .overflow_hidden()
@@ -513,6 +527,20 @@ impl Render for Terminal {
         )
       })
       .when(has_scrollbar, |this| this.child(div().id("terminal-scrollbar").absolute().size_full().vertical_scrollbar(&scroll_handle)))
+      .context_menu(|menu, _, _| {
+        menu
+          .item(PopupMenuItem::new("New Window").action(Box::new(NewWindow)))
+          .item(PopupMenuItem::new("New Tab").action(Box::new(NewTerminal)))
+          .separator()
+          .item(PopupMenuItem::new("Split Pane Vertically").action(Box::new(SplitRight)))
+          .item(PopupMenuItem::new("Split Pane Horizontally").action(Box::new(SplitDown)))
+          .separator()
+          .item(PopupMenuItem::new("Copy").action(Box::new(CopySelection)))
+          .item(PopupMenuItem::new("Paste").action(Box::new(PasteClipboard)))
+          .item(PopupMenuItem::new("Clear Buffer").action(Box::new(ClearBuffer)))
+          .separator()
+          .item(PopupMenuItem::new("Close").action(Box::new(CloseTab)))
+      })
   }
 }
 

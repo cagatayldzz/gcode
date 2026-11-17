@@ -2,8 +2,9 @@
 
 A Vekro window has these parts:
 
-- the **title bar**: the current project (a menu of every project grouped by category, with a filter and Add) fixed at the left, the `+` button (Add project) right of it, and Settings at the far right;
-- the **sidebar**: three icon tabs. **Explorer** shows the folder tree of the open project, under a row with the project's name and four
+- the **title bar**: the current project (a menu of every project grouped by category, with a filter and Add) fixed at the left, the `+` button (Add project) right of it;
+- the **activity bar**, a narrow strip at the far left: the Explorer and Git buttons (they choose the view of the sidebar), the terminal button under them, and Settings at the bottom;
+- the **sidebar**, next to the activity bar: **Explorer** shows the folder tree of the open project, under a row with the project's name and four
   buttons: new file, new folder (created inside the selected folder, next to the selected file, or in the project folder; type the name and
   press Enter, `dir/name.rs` makes the subfolder too), refresh and collapse all folders. **Git** shows the branch
   and the changed files, each with a checkbox (click a file to see its diff in the main area; right-click for **Open in Editor** and
@@ -11,11 +12,10 @@ A Vekro window has these parts:
   is the commit box: type a **Summary** (required) and, if you like, a **Description**, then **Commit N files to
   <branch>**. Only the ticked files go into the commit; the others (staged or not) stay as they are, so they show up
   again in the list. A commit needs `user.name` and `user.email` in your Git configuration.
-- the **main area**: tabs of files, filling the rest of the window (in the Git tab it shows the diff of the chosen file or commit instead), with the **terminal panel**
-  at its bottom while it is shown (see Terminals below).
+- the **main area**: tabs of files, filling the rest of the window (in the Git tab it shows the diff of the chosen file or commit instead), (the terminals take it over while they are shown, see Terminals below).
 
 The editor has a zoom button in its title bar (also **Zoom In** in the `…` menu). Drag the edge of the sidebar to resize it
-(up to 960 px); it keeps that width when the window is resized (full screen, smaller), and so does the terminal panel's height: only the main area changes. A thin **status bar** under the editor and the terminal panel (the sidebar runs down to the bottom of the window) shows the branch and the number of changed files on the left, the project
+(up to 960 px); it keeps that width when the window is resized (full screen, smaller), only the main area changes. A thin **status bar** under the editor (in the Explorer view; not in the Git view or under the terminals; the sidebar runs down to the bottom of the window) shows the branch and the number of changed files on the left, the project
 folder in the middle and the open file's cursor position, indentation, encoding, line ending and language on the right (`Ln 12, Col 5`, `Spaces: 2`, `UTF-8`, `LF`, `Rust`).
 
 ## Projects
@@ -38,6 +38,13 @@ Projects are only listed in the project menu; nothing Vekro does deletes a proje
 project's folder is deleted (in Finder, by a command, by another app), Vekro takes it out of the list on its own, at
 the next start, when the window comes back to the front and every few seconds, and says which it removed. A folder that
 cannot be read (no permission, an unmounted disk) is not counted as deleted.
+
+### Favorites
+
+Star the projects you use most: in the project menu of the title bar, press the star at the right of a project (it appears while the
+pointer is on the row; a favorite's star stays, filled), or right-click it and choose **Add to favorites**. Favorites are listed first,
+under **Favorites**, and are not repeated under their category; the star (or **Remove from favorites**) takes them out again.
+Projects without a category are listed under **No category**. Favorites are kept in `projects.json`.
 
 ### Categories
 
@@ -85,19 +92,27 @@ Press Save (or Enter in the name field). Clearing the name, choosing **Default**
 
 ## Terminals
 
-The **terminal button** in the title bar, left of Settings (also `⌘J`), shows or hides the terminal panel at the bottom of the
-window, under the editor and above the status bar. Drag its top edge to make it taller or shorter. Each project starts with
-one `zsh` (your login shell) in the project folder. The shells keep running while the panel is hidden.
+The **terminal button** in the activity bar, under Git (also `⌘J`), makes the terminals fill the main area, the right part of the window,
+like a terminal window: everything right of the activity bar, with no sidebar and no status bar. Choosing Explorer or Git (or pressing the terminal button or `⌘J` again) gives
+the main area back to the editor. Each project starts with one `zsh` (your login shell) in the project folder. The shells keep
+running while the editor is shown.
 
-The row above the terminal has its title and these buttons: **+** (new terminal, also `⌘T`, which shows the panel), **▾** (the
-sessions of the project, to pick one; New terminal, Split terminal, Kill terminal), **Split** (two shells side by side; it
-starts a second shell if there is only one), **Trash** (stops the shell that is shown) and **×** (hides the panel).
-
-A shell that exits (`exit`, `⌃D`) closes its terminal; a project is never left without one. Each project keeps its own
-shells and which one is shown.
+- **Tabs** (`⌘T`): each is a shell, or several. With more than one tab a strip appears on top, with the title of each tab, **×** to
+  close it and **+** to open another.
+- **Panes** (`⌘D` splits side by side, `⇧⌘D` one above the other): the shell that has the keyboard is split and the new shell gets
+  the keyboard. A tab with several panes gives each a small header with **×** (close), the title of the shell and **⋯** (New Tab,
+  Split Pane Vertically, Split Pane Horizontally, Close). Drag the divider between panes to resize them.
+- **Right-click** in a terminal for New Window `⌘N`, New Tab `⌘T`, Split Pane Vertically `⌘D`, Split Pane Horizontally `⇧⌘D`,
+  Copy `⌘C`, Paste `⌘V`, Clear Buffer `⌘K` and Close `⌘W`.
+- **Closing** (`⌘W`, ×, Close): the pane's shell stops; its sibling takes the whole place; a tab left without panes goes; when the
+  last one goes the editor comes back. A shell that exits (`exit`, `⌃D`) closes its pane the same way. Each project keeps its own
+  tabs and panes.
 
 | Shortcut | Action |
 | --- | --- |
+| `⌘T` | New terminal tab |
+| `⌘D` / `⇧⌘D` | Split the pane side by side / one above the other |
+| `⌘W` | Close the pane |
 | `⌘C` / `⌘V` | Copy the selection / paste (an image on the clipboard is passed on to the program) |
 | `⌘K` | Clear the scrollback |
 | `⇧PageUp` / `⇧PageDown` | Scroll the history by a screen |
@@ -155,7 +170,7 @@ development builds, and only for Apple Silicon Macs.
 
 ## Settings
 
-`⌘,` or the gear in the title bar opens Settings, with a page list and a search field on the left:
+`⌘,` or the gear at the bottom of the activity bar opens Settings, with a page list and a search field on the left:
 
 - **General → Appearance → Theme:** System (follows macOS), Light or Dark. It applies at once in every window.
 - **General → Projects → Projects folder:** where new and cloned projects are created (the Local Path of the Add
@@ -174,7 +189,7 @@ development builds, and only for Apple Silicon Macs.
   account is used to browse and clone your repositories, to list and create pull requests, and to give Git the token for that host
   over HTTPS (clone, fetch, pull and push; SSH remotes keep using your keys; if the host refuses the token, Git's own login is tried before an error is shown). **Disconnect** removes the account and its token.
   When a host refuses the token (a push, pull or pull request is turned down, or connecting finds a permission missing), a small
-  warning appears at the corner of the Settings gear in the title bar; it opens Settings → Accounts, where the account shows what
+  warning appears at the corner of the Settings gear at the bottom of the activity bar; it opens Settings → Accounts, where the account shows what
   is missing and which permissions to give the token, with a button that opens the service's token page in the browser (GitHub
   tokens: `github.com/settings/personal-access-tokens`; it lists your tokens, as GitHub does not tell Vekro which one is in use). The warning stays until it is fixed: after changing the token's permissions
   (or connecting again with a new token) press **Check again**, which asks the service what the token may do (it can start a push
@@ -190,10 +205,10 @@ Settings are saved as soon as you change them.
 | Shortcut | Action |
 | --- | --- |
 | `⌘N` | New window |
-| `⌘T` | New terminal (shows the terminal panel) |
-| `⌘J` | Show or hide the terminal panel |
+| `⌘T` | New terminal tab (shows the terminals) |
+| `⌘J` | Show or hide the terminals (they fill the main area) |
 | `⌘S` | Save the open file |
-| `⌘W` | Close the open tab; pressed again, the remaining tabs from the last to the first (never the window) |
+| `⌘W` | Close the open editor tab; pressed again, the remaining tabs from the last to the first (never the window). In a terminal it closes the pane |
 | `⌘,` | Open Settings |
 | `⌘Q` | Quit |
 
