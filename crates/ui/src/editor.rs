@@ -9,11 +9,12 @@ use gpui_kit::{
     dock::{BasePanel, Panel, PanelControl, PanelEvent},
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     input::{Editor, EditorState, InputEvent},
-    v_flex, Icon, IconName, Sizable as _,
+    notification::Notification,
+    v_flex, ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _,
   },
   *,
 };
-use std::{collections::HashMap, fs, io, path::Path, path::PathBuf, time::Duration};
+use std::{collections::HashMap, fs, io, path::Path, path::PathBuf, sync::Arc, time::Duration};
 
 /// Files larger than this are not opened: the editor reads the whole text.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -61,6 +62,65 @@ struct ReadyFile {
   _changes: Subscription,
   /// Repaints the status bar when the cursor moves.
   _cursor: Subscription,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PreviewFormat {
+  Svg,
+  Icns,
+}
+
+impl PreviewFormat {
+  fn for_path(path: &Path) -> Option<Self> {
+    let extension = path.extension()?.to_str()?;
+    if extension.eq_ignore_ascii_case("svg") {
+      Some(Self::Svg)
+    } else if extension.eq_ignore_ascii_case("icns") {
+      Some(Self::Icns)
+    } else {
+      None
+    }
+  }
+
+  fn decode(self, path: &Path, source: Option<String>, renderer: SvgRenderer) -> Result<Arc<RenderImage>, String> {
+    match self {
+      Self::Svg => {
+        let bytes = match source {
+          Some(source) => source.into_bytes(),
+          None => {
+            let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+            if metadata.len() > MAX_FILE_BYTES {
+              return Err("The SVG is too large to preview.".into());
+            }
+            fs::read(path).map_err(|error| error.to_string())?
+          }
+        };
+        renderer.render_single_frame(&bytes, 1.0).map_err(|error| error.to_string())
+      }
+      Self::Icns => {
+        let scratch = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let png = scratch.path().join("preview.png");
+        let output = std::process::Command::new("/usr/bin/sips")
+          .args(["-s", "format", "png", "-Z", "1024"])
+          .arg(path)
+          .arg("--out")
+          .arg(&png)
+          .output()
+          .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+          return Err("macOS could not decode the icon.".into());
+        }
+        let bytes = fs::read(png).map_err(|error| error.to_string())?;
+        Image::from_bytes(ImageFormat::Png, bytes).to_image_data(renderer).map_err(|error| error.to_string())
+      }
+    }
+  }
+}
+
+enum ImagePreview {
+  Loading { _task: Task<()> },
+  Ready(Arc<RenderImage>),
+  Failed(SharedString),
 }
 
 /// The tabs of a project and the one that is shown.
@@ -117,6 +177,8 @@ pub(crate) struct EditorPanel {
   tabs: Tabs,
   /// Editors that are ready, by path. Reopening one is instant and keeps its unsaved text.
   files: HashMap<PathBuf, ReadyFile>,
+  images: HashMap<PathBuf, ImagePreview>,
+  svg_source: std::collections::HashSet<PathBuf>,
   /// What each project that is not open was showing.
   saved: HashMap<PathBuf, Tabs>,
   /// Paths in `files`, least recently used first.
@@ -152,6 +214,8 @@ impl EditorPanel {
     Self {
       tabs: Tabs::default(),
       files: HashMap::new(),
+      images: HashMap::new(),
+      svg_source: std::collections::HashSet::new(),
       saved: HashMap::new(),
       recent: Vec::new(),
       warmup: None,
@@ -206,23 +270,66 @@ impl EditorPanel {
 
   /// Closes a tab. A file with unsaved text keeps it in memory: opening the file again brings it back.
   fn close_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+    if let Some(path) = self.tabs.items.get(index) {
+      self.images.remove(path);
+      self.svg_source.remove(path);
+    }
     self.tabs.remove(index);
     self.announce(cx);
   }
 
-  /// Opens a text file for editing, at once if its editor is already ready.
+  /// Opens a text editor or image preview in a file tab.
   pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
-    self.prepare(&path, window, cx)?;
-    if let Some(file) = self.files.get_mut(&path) {
-      file.painted = true;
+    if let Some(format) = PreviewFormat::for_path(&path) {
+      if !self.images.contains_key(&path) {
+        self.load_image(path.clone(), format, cx);
+      }
+    } else {
+      self.prepare(&path, window, cx)?;
+      if let Some(file) = self.files.get_mut(&path) {
+        file.painted = true;
+      }
+      self.touch(&path);
     }
-    self.touch(&path);
     self.tabs.show(path.clone(), |open| *open == path);
     self.announce(cx);
     Ok(())
   }
 
+  fn load_image(&mut self, path: PathBuf, format: PreviewFormat, cx: &mut Context<Self>) {
+    let renderer = cx.svg_renderer();
+    let source = self.files.get(&path).map(|file| file.state.read(cx).value().to_string());
+    let input_path = path.clone();
+    let work = cx.background_executor().spawn(async move { format.decode(&input_path, source, renderer) });
+    let key = path.clone();
+    let task = cx.spawn(async move |this, cx| {
+      let result = work.await;
+      let _ = this.update(cx, |this, cx| {
+        let preview = match result {
+          Ok(image) => ImagePreview::Ready(image),
+          Err(error) => ImagePreview::Failed(error.into()),
+        };
+        this.images.insert(key, preview);
+        cx.notify();
+      });
+    });
+    self.images.insert(path, ImagePreview::Loading { _task: task });
+  }
+
+  fn show_svg_source(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    if let Err(message) = self.prepare(path, window, cx) {
+      window.push_notification(Notification::error(message), cx);
+      return false;
+    }
+    self.svg_source.insert(path.to_path_buf());
+    cx.notify();
+    true
+  }
+
   pub fn reveal_position(&mut self, path: &Path, line: usize, column: usize, window: &mut Window, cx: &mut Context<Self>) {
+    if PreviewFormat::for_path(path) == Some(PreviewFormat::Svg) && !self.show_svg_source(path, window, cx) {
+      return;
+    }
     if let Some(file) = self.files.get(path) {
       file.state.update(cx, |state, cx| {
         state.set_cursor_position(gpui_kit::component::input::Position { line: line as u32, character: column as u32 }, window, cx);
@@ -234,7 +341,7 @@ impl EditorPanel {
   /// which is when the highlighting happens, so the click only has to show it. Errors are ignored: opening the
   /// file for real reports them.
   pub fn prefetch(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-    if fs::metadata(path).map_or(true, |metadata| metadata.len() > PREFETCH_MAX_BYTES) {
+    if PreviewFormat::for_path(path).is_some() || fs::metadata(path).map_or(true, |metadata| metadata.len() > PREFETCH_MAX_BYTES) {
       return;
     }
     if self.prepare(path, window, cx).is_err() {
@@ -314,6 +421,14 @@ impl EditorPanel {
   /// its tab.
   pub fn forget(&mut self, path: &Path, cx: &mut Context<Self>) {
     self.files.remove(path);
+    self.images.remove(path);
+    self.svg_source.remove(path);
+    for tabs in self.saved.values_mut() {
+      if let Some(index) = tabs.items.iter().position(|open| open == path) {
+        tabs.remove(index);
+        tabs.close_order.reset();
+      }
+    }
     self.recent.retain(|recent| recent != path);
     let kept: Vec<PathBuf> = self.tabs.items.iter().filter(|open| open.as_path() != path).cloned().collect();
     if kept.len() != self.tabs.items.len() {
@@ -343,6 +458,13 @@ impl EditorPanel {
     match self.tabs.current() {
       None => Vec::new(),
       Some(path) => {
+        if let Some(format) = PreviewFormat::for_path(path).filter(|_| !self.svg_source.contains(path)) {
+          return vec![match format {
+            PreviewFormat::Svg => "SVG preview",
+            PreviewFormat::Icns => "ICNS preview",
+          }
+          .into()];
+        }
         let Some(file) = self.files.get(path) else { return Vec::new() };
         let cursor = file.state.read(cx).cursor_position();
         vec![
@@ -471,14 +593,54 @@ impl Render for EditorPanel {
             .description(EmptyDescription::new().child("Choose a file in the Explorer.")),
         )
         .into_any_element(),
-      Some(path) => match self.files.get(path) {
-        Some(file) => Editor::new(&file.state).appearance(false).bordered(false).size_full().into_any_element(),
-        None => div().into_any_element(),
-      },
+      Some(path) => {
+        let show_source = self.svg_source.contains(path);
+        let body = match self.images.get(path).filter(|_| !show_source) {
+          Some(ImagePreview::Ready(image)) => {
+            div().absolute().inset_4().child(img(image.clone()).size_full().min_w_0().min_h_0().object_fit(ObjectFit::Contain)).into_any_element()
+          }
+          Some(ImagePreview::Loading { .. }) => {
+            Empty::new().size_full().header(EmptyHeader::new().title(EmptyTitle::new().child("Loading image…"))).into_any_element()
+          }
+          Some(ImagePreview::Failed(error)) => Empty::new()
+            .size_full()
+            .header(
+              EmptyHeader::new()
+                .title(EmptyTitle::new().child("Image preview unavailable"))
+                .description(EmptyDescription::new().child(error.clone())),
+            )
+            .into_any_element(),
+          None => self.files.get(path).map_or_else(
+            || div().into_any_element(),
+            |file| Editor::new(&file.state).appearance(false).bordered(false).size_full().into_any_element(),
+          ),
+        };
+        if PreviewFormat::for_path(path) == Some(PreviewFormat::Svg) {
+          let path = path.clone();
+          v_flex()
+            .size_full()
+            .child(div().flex().justify_end().px_2().py_1().border_b_1().border_color(cx.theme().border).child(
+              Button::new("toggle-svg-preview").ghost().small().label(if show_source { "Preview" } else { "Source" }).on_click(cx.listener(
+                move |this, _, window, cx| {
+                  if this.svg_source.remove(&path) {
+                    this.load_image(path.clone(), PreviewFormat::Svg, cx);
+                    cx.notify();
+                  } else {
+                    this.show_svg_source(&path, window, cx);
+                  }
+                },
+              )),
+            ))
+            .child(div().relative().flex_1().min_h_0().child(body))
+            .into_any_element()
+        } else {
+          body
+        }
+      }
     };
     let hidden = self.preview.clone().or_else(|| self.warmup.clone());
     let tabs = (!self.tabs.items.is_empty()).then(|| self.render_tabs(cx));
-    v_flex().relative().size_full().children(tabs).child(div().flex_1().min_h_0().child(content)).when_some(hidden, |this, state| {
+    v_flex().relative().size_full().children(tabs).child(div().relative().flex_1().min_h_0().child(content)).when_some(hidden, |this, state| {
       this.child(div().absolute().top_0().left_0().w(px(1.)).h(px(1.)).overflow_hidden().opacity(0.).child(Editor::new(&state)))
     })
   }

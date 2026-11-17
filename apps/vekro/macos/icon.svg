@@ -1,33 +1,35 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#151a22"/>
-      <stop offset="1" stop-color="#090b10"/>
+    <linearGradient id="body" x2="0%" y2="100%">
+      <stop stop-color="#1c2532"/>
+      <stop offset="1" stop-color="#0a0e16"/>
     </linearGradient>
-    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.2"/>
-      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.02"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0.06"/>
+    <radialGradient id="glow" cx="76%" cy="22%" r="76%">
+      <stop stop-color="#3568b4" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#3568b4" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x2="0%" y2="100%">
+      <stop stop-color="#c7dcff" stop-opacity="0.34"/>
+      <stop offset="0.54" stop-color="#819cbf" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#acc6eb" stop-opacity="0.18"/>
     </linearGradient>
-    <linearGradient id="left" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#d5dbe6"/>
+    <linearGradient id="left" x2="72%" y2="100%">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#c4d4ed"/>
     </linearGradient>
-    <linearGradient id="right" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#6aa4ff"/>
-      <stop offset="1" stop-color="#2f6bff"/>
+    <linearGradient id="right" x1="23%" x2="78%" y2="100%">
+      <stop stop-color="#8cc0ff"/>
+      <stop offset="1" stop-color="#397aff"/>
     </linearGradient>
-    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
   </defs>
-  <rect x="100" y="112" width="824" height="824" rx="185" fill="#000" opacity="0.45" filter="url(#soft)"/>
+  <rect x="100" y="112" width="824" height="824" rx="185" fill="#020611" opacity="0.45" filter="url(#soft)"/>
   <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
-  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="url(#rim)" stroke-width="3"/>
-  <!--
-    A solid V split down its axis into two halves: the left an editor page, the right a terminal accent.
-    Centered on the tile; the slit is as wide as the tile's own background.
-  -->
-  <g transform="translate(0 -28)">
-    <path d="M260 290 H410 L506 480 V790 Z" fill="url(#left)"/>
-    <path d="M518 480 L614 290 H764 L518 790 Z" fill="url(#right)"/>
-  </g>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#glow)"/>
+  <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="url(#rim)" stroke-width="4"/>
+  <!-- The two halves share one silhouette, with a clear seam at small sizes. -->
+  <path d="M273 276 H397 Q408 276 413 286 L502 460 V747 Q502 759 496 748 L263 292 Q255 276 273 276 Z" fill="url(#left)"/>
+  <path d="M522 460 L611 286 Q616 276 627 276 H751 Q769 276 761 292 L528 748 Q522 759 522 747 Z" fill="url(#right)"/>
 </svg>

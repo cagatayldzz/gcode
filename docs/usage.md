@@ -132,7 +132,7 @@ hold `⇧` to select text instead. Copying joins lines that only wrapped at the 
 
 ## Editor
 
-Click a file in the folder tree to open it in a tab. Text files up to 2 MB open; anything else is refused with
+Click a file in the folder tree to open it in a tab. SVG and macOS ICNS files show an image preview. Use **Source** to edit an SVG and **Preview** to see the result. Other files must be text and at most 2 MB, or they are refused with
 a notification. Open as many as you like: the tabs sit in a row on top of the editor area, the shown one is raised. Click
 a tab to show its file, **×** on it closes it (a click on a file that is already open shows its tab). The Explorer selects
 the file of the shown tab. `⌘S` writes the shown file; a `•` after the name means unsaved changes. Closing a tab keeps

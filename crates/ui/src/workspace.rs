@@ -28,6 +28,7 @@ use gpui_kit::{
     button::{Button, ButtonCustomVariant, ButtonVariant, ButtonVariants as _},
     checkbox::Checkbox,
     dock::{panel_handle, DockArea, DockLayout, DockSkin},
+    empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
     label::Label,
@@ -35,7 +36,7 @@ use gpui_kit::{
     notification::Notification,
     popover::Popover,
     resizable::{h_resizable, resizable_panel, v_resizable},
-    scroll::{ScrollableElement as _, Scrollbar, ScrollbarAxis},
+    scroll::{ScrollableElement as _, Scrollbar, ScrollbarAxis, ScrollbarMode},
     spinner::Spinner,
     status_bar::StatusBar,
     tab::{Tab, TabBar},
@@ -251,6 +252,7 @@ pub struct Workspace {
   commit_description: Entity<TextareaState>,
   /// A commit is being made.
   committing: bool,
+  discarding: bool,
   /// The open pull requests the branch menu lists.
   /// Which tab of the branch menu is shown.
   branch_tab: BranchTab,
@@ -365,6 +367,7 @@ impl Workspace {
       commit_summary: commit_summary.clone(),
       commit_description: commit_description.clone(),
       committing: false,
+      discarding: false,
       branch_tab: BranchTab::Branches,
       git_view: GitView::Changes,
       history: Vec::new(),
@@ -1352,47 +1355,126 @@ impl Workspace {
     }
   }
 
-  /// Asks before throwing away the changes of one file: that cannot be undone.
-  pub(crate) fn confirm_discard_changes(&mut self, file: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-    let (workspace, title) = (cx.entity(), SharedString::from(format!("Discard changes to {}?", file.display())));
+  fn show_change_in_finder(root: PathBuf, file: PathBuf, window: &mut Window, cx: &mut App) {
+    let work = cx.background_executor().spawn(async move {
+      let path = vekro_git::workdir_file(&root, &file).ok_or("The repository's working folder is unavailable.")?;
+      let mut command = std::process::Command::new("/usr/bin/open");
+      if path.exists() {
+        command.arg("-R").arg(path);
+      } else {
+        let folder = path.parent().and_then(|parent| parent.ancestors().find(|folder| folder.is_dir()));
+        command.arg(folder.ok_or("No containing folder is available.")?);
+      }
+      let result = command.output().map_err(|error| error.to_string())?;
+      if result.status.success() {
+        return Ok(());
+      }
+      let error = String::from_utf8_lossy(&result.stderr);
+      Err(if error.trim().is_empty() { result.status.to_string() } else { error.trim().to_owned() })
+    });
+    window
+      .spawn(cx, async move |cx| {
+        if let Err(error) = work.await {
+          let _ = cx.update(|window, cx| window.push_notification(Notification::error(format!("Could not show the file in Finder. {error}")), cx));
+        }
+      })
+      .detach();
+  }
+
+  /// Confirms the exact set of files before starting an irreversible discard.
+  fn confirm_discard_changes(&self, files: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    if files.is_empty() || self.committing || self.discarding {
+      return;
+    }
+    let count = files.len();
+    let (title, description) = if let [file] = files.as_slice() {
+      (
+        format!("Discard changes to {}?", file.display()),
+        "Staged and unstaged changes will be lost. New files will be deleted. This cannot be undone.".to_owned(),
+      )
+    } else {
+      let mut names = files.iter().take(5).map(|file| file.display().to_string()).collect::<Vec<_>>().join("\n");
+      if count > 5 {
+        names.push_str(&format!("\n… and {} more", count - 5));
+      }
+      (
+        format!("Discard changes to {count} files?"),
+        format!("Staged and unstaged changes will be lost. New files will be deleted. This cannot be undone.\n\n{names}"),
+      )
+    };
+    let workspace = cx.entity();
+    let (title, description) = (SharedString::from(title), SharedString::from(description));
     window.open_alert_dialog(cx, move |alert, _, _| {
-      let (workspace, file) = (workspace.clone(), file.clone());
+      let (workspace, root, files) = (workspace.clone(), root.clone(), files.clone());
       alert
         .title(title.clone())
-        .description("Every change to this file, staged or not, is lost. A new file is deleted. This cannot be undone.")
+        .description(description.clone())
         .width(px(430.))
         .confirm()
         .ok_text("Discard")
         .ok_variant(ButtonVariant::Danger)
         .on_ok(move |_, window, cx| {
-          workspace.update(cx, |this, cx| this.discard_changes(&file, window, cx));
+          workspace.update(cx, |this, cx| this.discard_changes(root.clone(), files.clone(), window, cx));
           true
         })
     });
   }
 
-  fn discard_changes(&mut self, file: &Path, window: &mut Window, cx: &mut Context<Self>) {
-    let Some(root) = self.projects.active.clone() else { return };
-    match vekro_git::discard_changes(&root, file) {
-      Ok(()) => {
-        if let Some(path) = vekro_git::workdir_file(&root, file) {
-          self.editor_panel.update(cx, |editor, cx| editor.forget(&path, cx));
-        }
-        if self.selected_change.as_deref() == Some(file) {
-          self.selected_change = None;
-        }
-        self.refresh_project();
-        window.push_notification(Notification::info(format!("Discarded the changes to {}.", file.display())), cx);
-        cx.notify();
-      }
-      Err(message) => window.push_notification(Notification::error(message), cx),
+  fn discard_changes(&mut self, root: PathBuf, files: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+    if self.committing || self.discarding || self.projects.active.as_ref() != Some(&root) {
+      return;
     }
+    self.discarding = true;
+    let work_root = root.clone();
+    let work = cx.background_executor().spawn(async move {
+      let mut discarded = Vec::new();
+      let mut failures = Vec::new();
+      for file in files {
+        match vekro_git::discard_changes(&work_root, &file) {
+          Ok(()) => discarded.push((vekro_git::workdir_file(&work_root, &file), file)),
+          Err(error) => failures.push(format!("{}: {error}", file.display())),
+        }
+      }
+      (discarded, failures)
+    });
+    cx.spawn_in(window, async move |this, cx| {
+      let (discarded, failures) = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.discarding = false;
+        let active = this.projects.active.as_ref() == Some(&root);
+        for (path, file) in &discarded {
+          if let Some(path) = path {
+            this.editor_panel.update(cx, |editor, cx| editor.forget(path, cx));
+          }
+          if active {
+            this.excluded.remove(file);
+            if this.selected_change.as_ref() == Some(file) {
+              this.selected_change = None;
+            }
+          }
+        }
+        if active {
+          this.refresh_in_background(cx);
+        }
+        let count = discarded.len();
+        if let Some(error) = failures.first() {
+          window.push_notification(Notification::error(format!("Discarded {count} of {} files. {error}", count + failures.len())), cx);
+        } else {
+          let message = if count == 1 { "Discarded changes to 1 file.".to_owned() } else { format!("Discarded changes to {count} files.") };
+          window.push_notification(Notification::info(message), cx);
+        }
+        cx.notify();
+      });
+    })
+    .detach();
+    cx.notify();
   }
 
   /// Commits the changed files that are ticked, with the summary and description typed below the list.
   fn commit_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
-    if self.committing {
+    if self.committing || self.discarding {
       return;
     }
     let files: Vec<PathBuf> = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).map(|change| change.path.clone()).collect();
@@ -2164,7 +2246,7 @@ impl Workspace {
     let palette = colors(cx);
     let current = SharedString::from(current.to_string());
     let trigger = Button::new("branch-trigger")
-      .custom(ButtonCustomVariant::new(cx).color(palette.surface_alt).foreground(palette.text).hover(palette.hover).active(palette.selected))
+      .custom(ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.hover).active(palette.selected))
       .border_0()
       .h_12()
       .w_48()
@@ -2566,7 +2648,7 @@ impl Workspace {
         }
       };
       Button::new("sync-remote")
-        .custom(ButtonCustomVariant::new(cx).color(palette.surface_alt).foreground(palette.text).hover(palette.hover).active(palette.selected))
+        .custom(ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.hover).active(palette.selected))
         .border_0()
         .h_12()
         .w_56()
@@ -2623,7 +2705,7 @@ impl Workspace {
       h_flex()
         .flex_none()
         .h_12()
-        .bg(palette.surface_alt)
+        .bg(palette.rail)
         .border_b_1()
         .border_color(palette.border)
         .child(div().h_12().border_r_1().border_color(palette.border).child(picker))
@@ -2635,26 +2717,28 @@ impl Workspace {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     let git = self.git.as_ref()?;
+    let root = self.projects.active.as_ref()?;
     let changed = match git.changed() {
       0 => "No changes".to_string(),
       1 => "1 changed file".to_string(),
       count => format!("{count} changed files"),
     };
+    let chosen = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).count();
     let workspace = cx.entity();
-    let changes_list = v_flex().id("git-changes").flex_1().min_h_0().overflow_y_scrollbar().children(git.changes.iter().map(|change| {
-      let file = change.path.clone();
-      let selected = self.selected_change.as_ref() == Some(&change.path);
-      let included = !self.excluded.contains(&change.path);
-      let name = change.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-      let folder = change.path.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
-      div().w_full().pr_3().child(
+    let changes_list =
+      v_flex().id("git-changes").flex_1().min_h_0().overflow_y_scrollbar().children(git.changes.iter().map(|change| {
+        let file = change.path.clone();
+        let selected = self.selected_change.as_ref() == Some(&change.path);
+        let included = !self.excluded.contains(&change.path);
+        let name = change.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        let folder = change.path.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
         h_flex()
           .id(SharedString::from(format!("change-row-{}", change.path.display())))
           .gap_1p5()
-          .pl_2()
-          .pr_2()
+          .px_3()
           .py_1()
-          .rounded_md()
+          .border_b_1()
+          .border_color(palette.border)
           .items_center()
           .when(selected, |row| row.bg(palette.selected))
           .hover(|row| row.bg(palette.hover))
@@ -2677,20 +2761,15 @@ impl Workspace {
               .gap_1p5()
               .items_center()
               .cursor_pointer()
-              .child(Label::new(change.kind.mark()).w_4().flex_none().text_color(kind_color(change.kind, &palette)))
-              .child(Label::new(name).min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
-              .when_some(folder, |row, folder| {
-                row.child(
-                  Label::new(folder)
-                    .text_size(FONT_SIZE_SM)
-                    .text_color(theme.muted_foreground)
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis(),
-                )
-              })
+              .child(
+                h_flex().flex_1().min_w_0().gap_2().child(Label::new(name).min_w_0().font_weight(FontWeight::MEDIUM).truncate()).when_some(
+                  folder,
+                  |row, folder| {
+                    row.child(Label::new(folder).flex_1().min_w_0().text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).truncate())
+                  },
+                ),
+              )
+              .child(Icon::empty().path(change_kind_icon(change.kind)).size_4().flex_none().text_color(kind_color(change.kind, &palette)))
               .on_click(cx.listener({
                 let file = file.clone();
                 move |this, _, _, cx| this.open_change(file.clone(), cx)
@@ -2698,23 +2777,37 @@ impl Workspace {
           )
           .context_menu({
             let (workspace, deleted) = (workspace.clone(), change.kind == vekro_git::ChangeKind::Deleted);
+            let root = root.clone();
+            let busy = self.committing || self.discarding;
             move |menu, _, _| {
               let (open_workspace, open_file) = (workspace.clone(), file.clone());
               let (discard_workspace, discard_file) = (workspace.clone(), file.clone());
+              let (finder_root, finder_file) = (root.clone(), file.clone());
+              let copy_path = file.to_string_lossy().into_owned();
               menu
                 .item(
                   PopupMenuItem::new("Open in Editor")
+                    .icon(Icon::empty().path("icons/file-pen-line.svg"))
                     .disabled(deleted)
                     .on_click(move |_, window, cx| open_workspace.update(cx, |this, cx| this.open_change_in_editor(&open_file, window, cx))),
                 )
-                .item(PopupMenuItem::new("Discard changes").on_click(move |_, window, cx| {
-                  discard_workspace.update(cx, |this, cx| this.confirm_discard_changes(discard_file.clone(), window, cx))
-                }))
+                .item(
+                  PopupMenuItem::new(if deleted { "Open Containing Folder" } else { "Show in Finder" })
+                    .icon(Icon::empty().path("icons/folder-open.svg"))
+                    .on_click(move |_, window, cx| Self::show_change_in_finder(finder_root.clone(), finder_file.clone(), window, cx)),
+                )
+                .item(
+                  PopupMenuItem::new("Copy Relative Path")
+                    .icon(Icon::empty().path("icons/copy.svg"))
+                    .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_path.clone()))),
+                )
+                .separator()
+                .item(PopupMenuItem::new("Discard Changes…").icon(Icon::empty().path("icons/trash.svg")).disabled(busy).on_click(
+                  move |_, window, cx| discard_workspace.update(cx, |this, cx| this.confirm_discard_changes(vec![discard_file.clone()], window, cx)),
+                ))
             }
-          }),
-      )
-    }));
-    let chosen = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).count();
+          })
+      }));
     let summary_filled = !self.commit_summary.read(cx).value().trim().is_empty();
     let label = match chosen {
       1 => format!("Commit 1 file to {}", git.branch),
@@ -2722,13 +2815,15 @@ impl Workspace {
     };
     let commit_box = v_flex()
       .flex_none()
-      .gap_2()
-      .pr_3()
-      .pb_3()
-      .pt_2()
-      .child(Input::new(&self.commit_summary))
+      .gap_1p5()
+      .px_3()
+      .py_2()
+      .border_t_1()
+      .border_color(palette.border)
+      .bg(palette.surface)
+      .child(Input::new(&self.commit_summary).small().bg(palette.surface_alt))
       .child(
-        div().relative().child(Textarea::new(&self.commit_description).h(px(88.))).child(
+        div().relative().child(Textarea::new(&self.commit_description).h(rems(4.5)).bg(palette.surface_alt)).child(
           h_flex()
             .absolute()
             .right_1()
@@ -2757,9 +2852,10 @@ impl Workspace {
       .child(
         Button::new("commit")
           .primary()
+          .small()
           .w_full()
           .label(label)
-          .disabled(chosen == 0 || !summary_filled || self.committing)
+          .disabled(chosen == 0 || !summary_filled || self.committing || self.discarding)
           .on_click(cx.listener(|this, _, window, cx| this.commit_changes(window, cx))),
       );
     let tabs = TabBar::new("git-view-tabs")
@@ -2771,22 +2867,56 @@ impl Workspace {
       GitView::Changes => v_flex()
         .flex_1()
         .min_h_0()
-        .gap_1()
         .child(
-          h_flex()
-            .px_2()
-            .py_1()
-            .gap_2()
-            .items_center()
-            .child(div().size_2().rounded_full().bg(if git.changed() > 0 { theme.primary } else { theme.muted_foreground }).mx_1())
-            .child(Label::new(changed).text_color(theme.muted_foreground)),
+          div()
+            .id("changes-header")
+            .px_3()
+            .py_2()
+            .bg(palette.surface_alt)
+            .border_b_1()
+            .border_color(palette.border)
+            .child(
+              Checkbox::new("include-all-changes")
+                .label(changed)
+                .checked(git.changed() > 0 && chosen == git.changed())
+                .indeterminate(chosen > 0 && chosen < git.changed())
+                .disabled(git.changed() == 0)
+                .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                  if let Some(git) = &this.git {
+                    for change in &git.changes {
+                      if *checked {
+                        this.excluded.remove(&change.path);
+                      } else {
+                        this.excluded.insert(change.path.clone());
+                      }
+                    }
+                    cx.notify();
+                  }
+                })),
+            )
+            .context_menu({
+              let disabled = git.changes.is_empty() || self.committing || self.discarding;
+              move |menu, _, _| {
+                let workspace = workspace.clone();
+                menu.item(PopupMenuItem::new("Discard All Changes…").icon(Icon::empty().path("icons/trash.svg")).disabled(disabled).on_click(
+                  move |_, window, cx| {
+                    workspace.update(cx, |this, cx| {
+                      if let Some(git) = &this.git {
+                        let files = git.changes.iter().map(|change| change.path.clone()).collect();
+                        this.confirm_discard_changes(files, window, cx);
+                      }
+                    });
+                  },
+                ))
+              }
+            }),
         )
         .child(div().flex_1().min_h_0().when(git.changed() > 0, |list| list.child(changes_list)))
         .child(commit_box)
         .into_any_element(),
-      GitView::History => self.render_history(cx).into_any_element(),
+      GitView::History => v_flex().flex_1().min_h_0().px_3().pt_2().child(self.render_history(cx)).into_any_element(),
     };
-    Some(v_flex().size_full().gap_1().child(div().pr_3().child(tabs)).child(body))
+    Some(v_flex().size_full().child(div().px_3().bg(palette.rail).child(tabs)).child(body))
   }
 
   /// The commits of the open project, newest first: the subject, who made it and when, the tags on it, and an arrow while the
@@ -2936,7 +3066,9 @@ impl Workspace {
           .children(rows)
           .children(more),
       )
-      .child(div().id("history-scrollbar").absolute().size_full().vertical_scrollbar(&self.history_scroll))
+      .child(div().absolute().inset_0().child(
+        Scrollbar::new(&self.history_scroll).id("history-scrollbar").axis(ScrollbarAxis::Vertical).mode(ScrollbarMode::Always).viewport_from_layout(),
+      ))
       .into_any_element()
   }
 
@@ -3353,10 +3485,13 @@ impl Workspace {
       SidebarTab::Explorer => self.render_explorer(cx).into_any_element(),
       SidebarTab::Git => match self.render_git(cx) {
         Some(git) => git.into_any_element(),
-        None => Label::new("Not a Git repository").text_color(cx.theme().muted_foreground).px_2().into_any_element(),
+        None => Label::new("Not a Git repository").text_color(cx.theme().muted_foreground).p_3().into_any_element(),
       },
     };
-    v_flex().size_full().bg(cx.theme().sidebar).child(v_flex().flex_1().min_h_0().pl_3().pt_3().child(content))
+    v_flex()
+      .size_full()
+      .bg(cx.theme().sidebar)
+      .child(v_flex().flex_1().min_h_0().when(self.sidebar_tab == SidebarTab::Explorer, |sidebar| sidebar.pl_3().pt_3()).child(content))
   }
 
   /// The narrow bar at the far left: one button for each view of the sidebar (Explorer, Git), the open one marked; the terminal
@@ -3778,6 +3913,16 @@ fn rail_button(
 }
 
 /// The color of a changed file's mark: green for new, red for deleted, amber for modified and so on.
+fn change_kind_icon(kind: vekro_git::ChangeKind) -> &'static str {
+  match kind {
+    vekro_git::ChangeKind::New => "icons/file-plus.svg",
+    vekro_git::ChangeKind::Modified => "icons/file-pen-line.svg",
+    vekro_git::ChangeKind::Deleted => "icons/file-minus.svg",
+    vekro_git::ChangeKind::Renamed => "icons/file-symlink.svg",
+    vekro_git::ChangeKind::Conflicted => "icons/file-exclamation-point.svg",
+  }
+}
+
 fn kind_color(kind: vekro_git::ChangeKind, palette: &crate::theme::Colors) -> Hsla {
   match kind {
     vekro_git::ChangeKind::New => palette.new,
@@ -3798,6 +3943,22 @@ impl Render for Workspace {
       self.commit_view.clone().into_any_element()
     } else if change_shown {
       self.change_view.clone().into_any_element()
+    } else if self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::Changes {
+      let changed = self.git.as_ref().map_or(0, Summary::changed);
+      let (title, description) = if changed == 0 {
+        ("No changes to preview", "Changed files will appear here when you select them.")
+      } else {
+        ("Select a changed file", "Choose a file in Changes to preview its diff.")
+      };
+      Empty::new()
+        .size_full()
+        .child(
+          EmptyHeader::new()
+            .media(EmptyMedia::new().with_variant(EmptyMediaVariant::Icon).child(Icon::empty().path("icons/file-diff.svg")))
+            .title(EmptyTitle::new().child(title))
+            .description(EmptyDescription::new().child(description)),
+        )
+        .into_any_element()
     } else {
       self.dock.clone().into_any_element()
     };

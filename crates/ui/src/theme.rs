@@ -1,7 +1,5 @@
 //! Vekro's light and dark colors and fonts, switched with the system appearance.
-//!
-//! Both palettes follow Google Chrome: a gray (light) or near-black (dark) frame around the title band,
-//! white or dark-gray pages, and one blue accent.
+//! The palettes use semantic colors from GitHub Primer (https://github.com/primer/primitives).
 
 use gpui_kit::{
   component::{ActiveTheme as _, Theme, ThemeMode},
@@ -39,18 +37,22 @@ pub(crate) struct Colors {
   /// The row that is chosen.
   pub selected: Hsla,
   pub hover: Hsla,
-  /// The title band: Chrome's window frame.
+  /// The window title band.
   pub rail: Hsla,
   pub rail_hover: Hsla,
   /// The hover color of an item on a `rail_hover` background, such as the inside of a category.
   pub rail_item_hover: Hsla,
   pub rail_text: Hsla,
-  /// The accent: Chrome's blue.
+  /// The accent for selection controls and badges.
   pub accent: Hsla,
   pub accent_hover: Hsla,
   /// Text and icons drawn on the accent color.
   pub on_accent: Hsla,
+  pub primary_button: Hsla,
+  pub primary_button_hover: Hsla,
+  pub primary_button_active: Hsla,
   pub link: Hsla,
+  pub link_hover: Hsla,
   /// Marks for new, deleted, modified, renamed and conflicted files.
   pub new: Hsla,
   pub deleted: Hsla,
@@ -82,59 +84,65 @@ pub(crate) fn project_color(value: &str) -> Option<Hsla> {
 }
 
 impl Colors {
-  /// Chrome's dark theme: a dark frame, lighter toolbar grays and the light blue of its buttons.
   fn dark() -> Self {
     Self {
-      background: hex(0x202124),
-      text: hex(0xe8eaed),
-      text_secondary: hex(0x9aa0a6),
-      surface: hex(0x292a2d),
-      surface_alt: hex(0x35363a),
-      border: hex(0x3c4043),
-      control_border: hex(0x5f6368),
-      selected: hex(0x394457),
-      hover: hex(0x35363a),
-      rail: hex(0x171717),
-      rail_hover: hex(0x2d2e31),
-      rail_item_hover: hex(0x3c4043),
-      rail_text: hex(0x9aa0a6),
-      accent: hex(0x8ab4f8),
-      accent_hover: hex(0xaecbfa),
-      on_accent: hex(0x062e6f),
-      link: hex(0x8ab4f8),
-      new: hex(0x81c995),
-      deleted: hex(0xf28b82),
-      modified: hex(0xfdd663),
-      renamed: hex(0x8ab4f8),
-      conflicted: hex(0xfcad70),
+      background: hex(0x0d1117),
+      text: hex(0xf0f6fc),
+      text_secondary: hex(0x9198a1),
+      surface: hex(0x0d1117),
+      surface_alt: hex(0x151b23),
+      border: hex(0x252c35),
+      control_border: hex(0x3d444d),
+      selected: hex(0x172b45),
+      hover: hex(0x151b23),
+      rail: hex(0x010409),
+      rail_hover: hex(0x151b23),
+      rail_item_hover: hex(0x212830),
+      rail_text: hex(0x9198a1),
+      accent: hex(0x1f6feb),
+      accent_hover: hex(0x1c62d2),
+      on_accent: hex(0xffffff),
+      primary_button: hex(0x238636),
+      primary_button_hover: hex(0x29903b),
+      primary_button_active: hex(0x216e39),
+      link: hex(0x4493f8),
+      link_hover: hex(0x79b8ff),
+      new: hex(0x3fb950),
+      deleted: hex(0xf85149),
+      modified: hex(0xd29922),
+      renamed: hex(0x4493f8),
+      conflicted: hex(0xdb6d28),
     }
   }
 
-  /// Chrome's light theme: a gray frame, white pages and toolbars, Google blue.
   fn light() -> Self {
     Self {
       background: hex(0xffffff),
-      text: hex(0x202124),
-      text_secondary: hex(0x5f6368),
-      surface: hex(0xf8f9fa),
-      surface_alt: hex(0xf1f3f4),
-      border: hex(0xdadce0),
-      control_border: hex(0x80868b),
-      selected: hex(0xe8f0fe),
-      hover: hex(0xf1f3f4),
-      rail: hex(0xdee1e6),
-      rail_hover: hex(0xd0d4da),
-      rail_item_hover: hex(0xc4c8ce),
-      rail_text: hex(0x3c4043),
-      accent: hex(0x1a73e8),
-      accent_hover: hex(0x1b66c9),
+      text: hex(0x1f2328),
+      text_secondary: hex(0x59636e),
+      surface: hex(0xffffff),
+      surface_alt: hex(0xf6f8fa),
+      border: hex(0xe2e7ec),
+      control_border: hex(0x818b98),
+      selected: hex(0xddf4ff),
+      hover: hex(0xf6f8fa),
+      rail: hex(0xf6f8fa),
+      rail_hover: hex(0xeaeef2),
+      rail_item_hover: hex(0xd1d9e0),
+      rail_text: hex(0x59636e),
+      accent: hex(0x0969da),
+      accent_hover: hex(0x0759bd),
       on_accent: hex(0xffffff),
-      link: hex(0x1a73e8),
-      new: hex(0x188038),
-      deleted: hex(0xd93025),
-      modified: hex(0xb06000),
-      renamed: hex(0x1a73e8),
-      conflicted: hex(0xe8710a),
+      primary_button: hex(0x1f883d),
+      primary_button_hover: hex(0x1a7f37),
+      primary_button_active: hex(0x116329),
+      link: hex(0x0969da),
+      link_hover: hex(0x0550ae),
+      new: hex(0x1a7f37),
+      deleted: hex(0xd1242f),
+      modified: hex(0x9a6700),
+      renamed: hex(0x0969da),
+      conflicted: hex(0xbc4c00),
     }
   }
 }
@@ -158,15 +166,16 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
   let c = colors(cx);
   Theme::update(cx, |theme| {
     theme.font_family = SANS_FONT.into();
-    theme.font_size = px(16.);
     theme.mono_font_family = MONO_FONT.into();
     theme.mono_font_size = px(code_font_size as f32);
     // Dialogs and notifications are rounded with `radius_lg`; fields, buttons and menu items with `radius`.
     theme.radius = px(6.);
-    theme.radius_lg = px(12.);
+    theme.radius_lg = px(10.);
     theme.notification.width = px(360.);
     let style = &mut std::sync::Arc::make_mut(&mut theme.highlight_theme).style;
     // The design shows no highlight on the line of the cursor.
+    style.editor_background = Some(c.background);
+    style.editor_gutter_background = Some(c.background);
     style.editor_active_line = Some(c.background);
     style.editor_active_line_number = Some(c.text);
     let colors = &mut theme.colors;
@@ -181,11 +190,21 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     colors.sidebar_primary_foreground = c.on_accent;
     colors.border = c.border;
     colors.input = c.control_border;
+    colors.title_bar = c.rail;
+    colors.title_bar_border = c.border;
+    colors.status_bar = c.surface_alt;
+    colors.status_bar_border = c.border;
+    colors.group_box = c.surface;
+    colors.group_box_foreground = c.text;
+    colors.tab = c.surface;
+    colors.tab_bar = c.surface;
     colors.tab_bar_segmented = c.surface_alt;
+    colors.tab_foreground = c.text_secondary;
+    colors.tab_active_foreground = c.text;
     // A switch that is off is a gray track.
     colors.switch = c.rail_item_hover;
     colors.tab_active = c.selected;
-    colors.popover = c.surface;
+    colors.popover = c.surface_alt;
     colors.popover_foreground = c.text;
     colors.muted = c.surface_alt;
     colors.muted_foreground = c.text_secondary;
@@ -197,16 +216,35 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     colors.primary_hover = c.accent_hover;
     colors.primary_active = c.accent;
     colors.primary_foreground = c.on_accent;
-    colors.ring = c.accent;
+    colors.button_primary = c.primary_button;
+    colors.button_primary_hover = c.primary_button_hover;
+    colors.button_primary_active = c.primary_button_active;
+    colors.button_primary_foreground = c.on_accent;
+    colors.button_secondary = c.surface_alt;
+    colors.button_secondary_hover = c.rail_item_hover;
+    colors.button_secondary_active = c.selected;
+    colors.button_secondary_foreground = c.text;
+    colors.ring = c.link;
     colors.caret = c.text;
     colors.link = c.link;
-    colors.link_hover = c.accent_hover;
-    colors.link_active = c.accent;
+    colors.link_hover = c.link_hover;
+    colors.link_active = c.link_hover;
     colors.list = c.surface;
     colors.list_even = c.surface;
     colors.list_hover = c.hover;
     colors.list_active = c.selected;
     colors.list_head = c.surface_alt;
+    colors.list_active_border = c.link;
+    colors.table = c.background;
+    colors.table_even = c.surface;
+    colors.table_head = c.surface_alt;
+    colors.table_head_foreground = c.text_secondary;
+    colors.table_hover = c.hover;
+    colors.table_active = c.selected;
+    colors.table_active_border = c.link;
+    colors.table_row_border = c.border;
+    colors.scrollbar_thumb = c.text_secondary.opacity(0.6);
+    colors.scrollbar_thumb_hover = c.text_secondary;
     colors.success = c.new;
     colors.danger = c.deleted;
     colors.warning = c.modified;
