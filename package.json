@@ -5,9 +5,10 @@
   "scripts": {
     "dev": "bash scripts/app.sh --dev",
     "build": "bash scripts/app.sh release --build",
+    "release": "bash scripts/release.sh",
     "check": "bash scripts/app.sh --check",
     "icon": "bash scripts/app.sh --icon",
-    "test": "cargo test --locked --workspace",
+    "test": "bash scripts/tests/run.sh && cargo test --locked --workspace",
     "commit": "git add -A && oco --yes"
   }
 }

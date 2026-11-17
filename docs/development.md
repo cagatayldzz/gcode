@@ -15,10 +15,38 @@ runs it). After cloning run `bun install`.
 | --- | --- |
 | `bun run dev` | debug build, launch `dist/Vekro.app` |
 | `bun run build` | release build → `dist/Vekro.app` |
-| `bun run check` | `cargo fmt --check`, clippy with warnings as errors, tests (run before finishing a change) |
-| `bun run test` | `cargo test --locked --workspace` |
+| `bun run check` | script syntax and shell tests, `cargo fmt --check`, clippy with warnings as errors, tests (run before finishing a change) |
+| `bun run test` | shell tests, then `cargo test --locked --workspace` |
+| `bun run release` | request a release: dispatches the Release workflow for the pushed default branch (needs `gh`) |
 | `bun run icon` | redraw `AppIcon.icns` and `DevIcon.icns` from `apps/vekro/macos/icon.svg` (needs Google Chrome) |
 | `bun run commit` | `git add -A && oco --yes` (needs [OpenCommit](https://github.com/di-sukharev/opencommit)) |
+
+## Scripts
+
+Automation uses only shell and Rust; there is no TypeScript or other runtime in scripts or workflows.
+
+| Path | Purpose |
+| --- | --- |
+| `scripts/app.sh` | build, bundle, sign, launch, check (`--dev`, `[debug\|release] --build`, `--check`, `--icon`) |
+| `scripts/release.sh` | request a release; in CI: `prepare` (next version, stamping), `notes`, `package`, `finalize` (assets, checksums) |
+| `scripts/notarize-app.sh` | sign with Developer ID and notarize `dist/Vekro.app` (macOS tools, release secrets) |
+| `scripts/tests/*.sh` | shell tests, run by `scripts/tests/run.sh` (version, notes, packaging, workflow guarantees) |
+
+## Releases
+
+`bun run release` (or running the Release workflow by hand) releases the pushed default branch. The version comes
+from Conventional Commits since the latest `v*` tag: a breaking change (`!:` or `BREAKING CHANGE:`) is major,
+`feat` is minor, everything else is patch. The workflow then:
+
+1. **Validate**: Apple secrets are present, shell tests, `cargo fmt`, clippy and tests of `vekro-terminal`, `vekro-git`, `vekro-storage`.
+2. **Prepare**: choose the version, stamp `Cargo.toml`, `Cargo.lock`, `package.json` and `Info.plist` in the CI checkout, write `RELEASE_NOTES.md` (commit titles grouped as New Features, Bug Fixes, Documentation, Chores, with a changelog link).
+3. **Build** (macOS, in parallel): workspace clippy and tests; release build, Developer ID signature, notarization, `Vekro-<tag>-macos-arm64.zip`.
+4. **Verify**: exactly the expected assets, none empty, `SHA256SUMS.txt`.
+5. **Publish**: checksums verified, draft GitHub release, then published as latest.
+
+Required Actions secrets: `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`,
+`APPLE_APP_SPECIFIC_PASSWORD`. The version in the repository is stamped only in CI; the tag is the source of truth.
+`CI` (`.github/workflows/ci.yml`) runs the shell tests, formatting, and clippy and tests of the three plain-Rust crates on Linux.
 
 ## Packages
 
@@ -39,7 +67,7 @@ Tests live in `crates/<crate>/tests/`, never inline. Terminal session tests run 
 (`/bin/sh -c …`) through a PTY. Git tests create repositories in temporary directories. Tests that touch
 the data directory use temporary directories; `VEKRO_DATA_DIR` overrides the location.
 
-The interface has no automated tests; check a change by running `bun run dev`.
+Shell tests for the scripts and workflows live in `scripts/tests/`. The interface has no automated tests; check a change by running `bun run dev`.
 
 ## Running the app in isolation
 

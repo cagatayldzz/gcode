@@ -1,0 +1,40 @@
+name: Build native release
+description: Build, sign, notarize, and package the macOS application.
+inputs:
+  arch:
+    description: Target processor architecture.
+    required: true
+  release-tag:
+    description: Prepared release tag.
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v8
+      with:
+        name: release-inputs
+        path: .
+    - name: Install stable Rust
+      shell: bash
+      run: |
+        rustup toolchain install stable --profile minimal
+        rustup default stable
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: release-macos-${{ inputs.arch }}
+    - name: Build macOS application
+      shell: bash
+      run: bash scripts/app.sh release --build
+    - name: Sign and notarize macOS application
+      shell: bash
+      run: bash scripts/notarize-app.sh
+    - name: Package the application
+      env:
+        RELEASE_TAG: ${{ inputs.release-tag }}
+      shell: bash
+      run: bash scripts/release.sh package
+    - uses: actions/upload-artifact@v7
+      with:
+        name: release-macos-${{ inputs.arch }}
+        if-no-files-found: error
+        path: dist/Vekro-*.zip
