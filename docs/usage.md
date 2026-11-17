@@ -6,12 +6,12 @@ A Vekro window has these parts:
 - the **sidebar**: three icon tabs. **Explorer** shows the folder tree of the open project, under a row with the project's name and four
   buttons: new file, new folder (created inside the selected folder, next to the selected file, or in the project folder; type the name and
   press Enter, `dir/name.rs` makes the subfolder too), refresh and collapse all folders. **Git** shows the branch
-  and the changed files, each with a checkbox (click a file for its diff; right-click for **Open in Editor** and
+  and the changed files, each with a checkbox (click a file to see its diff in the main area; right-click for **Open in Editor** and
   **Discard changes**, which asks first, throws away every change to that file and deletes it if it is new). Below the list
   is the commit box: type a **Summary** (required) and, if you like, a **Description**, then **Commit N files to
   <branch>**. Only the ticked files go into the commit; the others (staged or not) stay as they are, so they show up
   again in the list. A commit needs `user.name` and `user.email` in your Git configuration.
-- the **main area**: tabs of files and of the diffs of changed files, filling the rest of the window, with the **terminal panel**
+- the **main area**: tabs of files, filling the rest of the window (in the Git tab it shows the diff of the chosen file or commit instead), with the **terminal panel**
   at its bottom while it is shown (see Terminals below).
 
 The editor has a zoom button in its title bar (also **Zoom In** in the `…` menu). Drag the edge of the sidebar to resize it
@@ -30,7 +30,7 @@ Press `+` in the title bar to open the **Add project** dialog:
 
 The new or imported project opens at once. Click an avatar to switch; hover it to see the project's name.
 Everything in the window belongs to the open project: the Git summary, the folder tree (with the folders you had
-opened and the file you had selected), the file or diff in the editor and the terminals. Switching puts the
+opened and the file you had selected), the file in the editor and the terminals. Switching puts the
 project you leave away and brings back what the other one showed. Its shells keep running, so a dev server in
 project A is still running when you come back to it.
 
@@ -117,13 +117,20 @@ a notification. Open as many as you like: the tabs sit in a row on top of the ed
 a tab to show its file, **×** on it closes it (a click on a file that is already open shows its tab). The Explorer selects
 the file of the shown tab. `⌘S` writes the shown file; a `•` after the name means unsaved changes. Closing a tab keeps
 its unsaved text in memory, and opening the file again brings it back, so nothing is lost silently; the text is only
-written by saving. A changed file opens its diff in a tab of its own (`name (changes)`). Each project keeps its own tabs.
+written by saving. Each project keeps its own tabs.
 
 ## Git
 
-The sidebar shows the branch and every changed file with a mark: **A** new, **M** modified,
+The Git tab has two views, **Changes** and **History**. **History** lists the commits of the current branch, newest first (up to
+300): the subject, who made it and when, any tags, and an arrow while the remote does not have the commit yet. Choose one to see it
+in the main area, in place of the editor: its message, the files it changed (with `+`/`-` totals) and the diff of the chosen file;
+the first commit is shown when you open the view, and the editor tabs come back when you return to Changes or another sidebar tab.
+
+**Changes** shows every changed file with a mark: **A** new, **M** modified,
 **D** deleted, **R** renamed, **!** conflicted. Click a file to see its diff against the last commit
-in the editor area (staged and unstaged changes together; a new file is shown as all added).
+in the main area, in place of the editor, with the path on top (staged and unstaged changes together; a new file is shown as all
+added). Choosing another file replaces it, no tab is added; it updates as you save, and the editor tabs come back when you leave the
+Changes view.
 
 A bar above the editor holds the **current branch** and a button that keeps the branch in step with its remote (**Publish branch**,
 **Push origin**, **Pull origin** or **Fetch origin**, with the number of commits and the last fetch; while it works it shows git's
@@ -136,6 +143,15 @@ description with OpenCommit.
 
 The summary refreshes when you return to the window and every 2 seconds while it is open, so changes made
 in another app show up by themselves.
+
+## Updates
+
+When a newer release is published on GitHub, Vekro tells you once with a notification. **Settings → Updates** shows the status and
+its release notes; **Check for updates** looks again, **Download & Install** downloads the new version and verifies it (checksum,
+code signature, macOS Gatekeeper, same developer as the installed app), and **Restart to Update** swaps it in and reopens Vekro. If
+the swap fails, the old version is restored. Vekro checks when it starts unless you turn off **Check for updates on launch**; it only
+asks GitHub for the latest release and sends nothing about you. Updates work in release builds that run from `Vekro.app`, not in
+development builds, and only for Apple Silicon Macs.
 
 ## Settings
 
@@ -157,6 +173,7 @@ in another app show up by themselves.
   request later names the permission it needs. A connected
   account is used to browse and clone your repositories, to list and create pull requests, and to give Git the token for that host
   over HTTPS (clone, fetch, pull and push; SSH remotes keep using your keys). **Disconnect** removes the account and its token.
+- **Updates:** see Updates above.
 - **OpenCommit:** how commit messages are generated.
 - **About:** the version and the data folder.
 

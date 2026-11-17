@@ -10,6 +10,7 @@ fn preferences_survive_a_save_and_load() {
     projects_dir: Some(PathBuf::from("/work")),
     code_font_size: 15,
     commit_instructions: Some("Be brief.".into()),
+    check_updates: false,
   };
   saved.save(&file).unwrap();
   assert_eq!(Preferences::load(&file), saved);
@@ -54,5 +55,18 @@ fn commit_instructions_distinguish_the_built_in_text_from_none_at_all() {
     saved.save(&file).unwrap();
     assert_eq!(Preferences::load(&file), saved);
   }
+  std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn update_checks_are_on_unless_turned_off() {
+  let dir = std::env::temp_dir().join(format!("vekro-preferences-updates-{}", std::process::id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  let file = dir.join("preferences.json");
+  assert!(Preferences::default().check_updates);
+  std::fs::write(&file, r#"{"theme": "dark"}"#).unwrap();
+  assert!(Preferences::load(&file).check_updates, "a file from before the setting keeps checking");
+  std::fs::write(&file, r#"{"check_updates": false}"#).unwrap();
+  assert!(!Preferences::load(&file).check_updates);
   std::fs::remove_dir_all(dir).unwrap();
 }

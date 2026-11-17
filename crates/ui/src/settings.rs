@@ -3,6 +3,7 @@
 use crate::{
   connections::{accounts_path, AccountsList},
   project_manager::ProjectManager,
+  updates::{UpdatePanel, UpdateState, UPDATES_ENABLED},
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -28,6 +29,8 @@ pub(crate) struct SettingsModel {
   pub opencommit: Config,
   /// The connected hosting accounts (`accounts.json`); their tokens are in the Keychain.
   pub accounts: Accounts,
+  /// Vekro's own updates.
+  pub updates: UpdateState,
 }
 
 /// Sent when the user asks to add every project in the projects folder.
@@ -61,8 +64,13 @@ pub(crate) fn init_settings(cx: &mut App) -> Entity<SettingsModel> {
     preferences: Preferences::load(&Preferences::default_path()),
     opencommit: Config::load(&config_path()),
     accounts: Accounts::load(&accounts_path()),
+    updates: UpdateState::new(),
   });
   cx.set_global(SettingsGlobal(model.clone()));
+  // The first window asks GitHub for a newer release, unless that is turned off.
+  if UPDATES_ENABLED && model.read(cx).preferences.check_updates {
+    model.update(cx, |model, cx| model.check_update(cx));
+  }
   model
 }
 
@@ -99,7 +107,12 @@ fn choose_projects_folder(cx: &mut App) {
 }
 
 /// The Settings pages. `fallback_dir` is the projects folder shown while none is chosen.
-pub(crate) fn settings_view(fallback_dir: PathBuf, projects: Entity<ProjectManager>, accounts: Entity<AccountsList>) -> Settings {
+pub(crate) fn settings_view(
+  fallback_dir: PathBuf,
+  projects: Entity<ProjectManager>,
+  accounts: Entity<AccountsList>,
+  updates: Entity<UpdatePanel>,
+) -> Settings {
   let shown_dir = fallback_dir.clone();
   Settings::new("vekro-settings").with_group_variant(GroupBoxVariant::Outline).sidebar_width(px(180.)).pages(vec![
     SettingPage::new("General").icon(IconName::Settings).default_open(true).resettable(false).groups(vec![
@@ -220,10 +233,27 @@ pub(crate) fn settings_view(fallback_dir: PathBuf, projects: Entity<ProjectManag
         .description("The sparkle button beside a commit's description writes the summary and description with OpenCommit. Choose the model, language and message style here."),
       ),
     ),
+    SettingPage::new("Updates").icon(IconName::ArrowDown).resettable(false).groups(vec![
+      SettingGroup::new().title("Vekro").item(SettingItem::render(move |_, _, _| updates.clone())),
+      SettingGroup::new().title("Automatic").item(
+        SettingItem::new(
+          "Check for updates on launch",
+          SettingField::switch(
+            |cx: &App| preferences(cx).check_updates,
+            |value: bool, cx: &mut App| update(cx, |preferences| preferences.check_updates = value),
+          ),
+        )
+        .description("Vekro asks GitHub (api.github.com) for the latest release of its repository. Nothing about you or your projects is sent. An update is only downloaded when you choose to."),
+      ),
+    ]),
     SettingPage::new("About").icon(IconName::Info).resettable(false).group(
       SettingGroup::new()
         .title("Vekro")
         .item(SettingItem::new("Version", SettingField::render(|_, _, _| Label::new(env!("CARGO_PKG_VERSION")).text_sm())))
+        .item(SettingItem::new(
+          "Repository",
+          SettingField::render(|_, _, cx| Label::new(vekro_updater::repository_slug().unwrap_or("—")).text_sm().text_color(cx.theme().muted_foreground)),
+        ))
         .item(SettingItem::new(
           "Data folder",
           SettingField::render(|_, _, cx| Label::new(crate::components::display_path(&data_dir())).text_sm().text_color(cx.theme().muted_foreground)),

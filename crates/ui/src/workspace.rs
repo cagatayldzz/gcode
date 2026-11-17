@@ -1,5 +1,7 @@
 use crate::{
+  change_view::ChangeView,
   commit_settings::{CommitSettings, CommitSettingsSaved},
+  commit_view::CommitView,
   components::{avatar_look, display_path},
   connect_account::{AccountConnected, ConnectAccount},
   connections::{accounts_path, credentials_for_repository, describe, AccountsList},
@@ -15,6 +17,7 @@ use crate::{
   },
   terminal::{Terminal, TerminalExited},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
+  updates::{AppUpdate, UpdatePanel},
   AddProject, CloseTab, NewTerminal, OpenSettings, SaveFile, ToggleTerminal,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -46,7 +49,7 @@ use std::{
   sync::{Arc, Mutex},
   time::Duration,
 };
-use vekro_git::Summary;
+use vekro_git::{CommitInfo, Summary};
 use vekro_hosting::{KeychainStore, PullRequest, RepoRef};
 use vekro_opencommit::DEFAULT_INSTRUCTIONS;
 use vekro_storage::{Category, Preferences, Project, ProjectList};
@@ -134,6 +137,16 @@ enum PullRequests {
   Failed(SharedString),
 }
 
+/// The two views of the Git tab: the files to commit, and the commits already made.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GitView {
+  Changes,
+  History,
+}
+
+/// How many commits the History view lists.
+const HISTORY_LIMIT: usize = 300;
+
 /// The two tabs of the branch menu.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BranchTab {
@@ -172,9 +185,18 @@ pub struct Workspace {
   /// The open pull requests the branch menu lists.
   /// Which tab of the branch menu is shown.
   branch_tab: BranchTab,
+  /// The view of the Git tab, the commits it lists, the one chosen and the view of it in the main area.
+  git_view: GitView,
+  history: Vec<CommitInfo>,
+  selected_commit: Option<String>,
+  commit_view: Entity<CommitView>,
+  /// The changes of the chosen file of the Changes view, shown in the main area.
+  change_view: Entity<ChangeView>,
   pull_requests: PullRequests,
   /// Which load the listed pull requests belong to, so a slow answer for another project is ignored.
   pr_epoch: u64,
+  /// Which read of the history the listed commits belong to.
+  history_epoch: u64,
   /// The terminal panel at the bottom of the window is shown.
   terminal_open: bool,
   /// A commit message is being generated.
@@ -250,8 +272,14 @@ impl Workspace {
       commit_description: commit_description.clone(),
       committing: false,
       branch_tab: BranchTab::Branches,
+      git_view: GitView::Changes,
+      history: Vec::new(),
+      selected_commit: None,
+      commit_view: cx.new(|_| CommitView::new()),
+      change_view: cx.new(|_| ChangeView::new()),
       pull_requests: PullRequests::Idle,
       pr_epoch: 0,
+      history_epoch: 0,
       terminal_open: false,
       generating: false,
       remote_work: None,
@@ -269,7 +297,8 @@ impl Workspace {
       ],
       _settings_subscriptions: vec![
         // Any change to a setting is saved and applied in every window.
-        cx.observe_in(&settings, window, |_, settings, window, cx| {
+        cx.observe_in(&settings, window, |this, settings, window, cx| {
+          this.announce_update(window, cx);
           let preferences = settings.read(cx).preferences.clone();
           if let Err(error) = preferences.save(&Preferences::default_path()) {
             eprintln!("Could not save the settings: {error}");
@@ -317,10 +346,6 @@ impl Workspace {
             this.selected_entry = Some(path.clone());
             this.selected_change = None;
           }
-          ActiveTab::Diff(name) => {
-            this.selected_entry = None;
-            this.selected_change = Some(PathBuf::from(name));
-          }
           ActiveTab::Nothing => {
             this.selected_entry = None;
             this.selected_change = None;
@@ -334,6 +359,7 @@ impl Workspace {
       }),
       _activation: cx.observe_window_activation(window, |this, window, cx| {
         if window.is_window_active() {
+          this.announce_update(window, cx);
           this.refresh_in_background(cx);
           this.sync_projects(window, cx);
         }
@@ -502,6 +528,7 @@ impl Workspace {
     let workspace = cx.entity();
     let projects = cx.new(|cx| ProjectManager::new(workspace, cx));
     let accounts = cx.new(AccountsList::new);
+    let updates = cx.new(UpdatePanel::new);
     window.open_dialog(cx, move |dialog, _, _| {
       // The dialog's own padding is removed so that the page list reaches the edges of the window.
       dialog.p_0().width(px(820.)).child(
@@ -509,7 +536,7 @@ impl Workspace {
           .rounded_b_lg()
           .overflow_hidden()
           .child(Label::new("Settings").text_lg().font_weight(FontWeight::SEMIBOLD).px_6().py_4())
-          .child(div().h(px(520.)).child(settings_view(fallback.clone(), projects.clone(), accounts.clone()))),
+          .child(div().h(px(520.)).child(settings_view(fallback.clone(), projects.clone(), accounts.clone(), updates.clone()))),
       )
     });
   }
@@ -702,13 +729,21 @@ impl Workspace {
       eprintln!("Could not save the project list: {error}");
     }
     self.excluded.clear();
+    self.history.clear();
+    self.selected_commit = None;
     let after = self.projects.active.clone();
     let view = after.as_ref().and_then(|root| self.views.remove(root)).unwrap_or_default();
     self.expanded = view.expanded;
     self.selected_entry = view.selected_entry;
     self.selected_change = view.selected_change;
+    if let (Some(root), Some(file)) = (after.clone(), self.selected_change.clone()) {
+      self.change_view.update(cx, |view, cx| view.show(root, file, cx));
+    }
     self.editor_panel.update(cx, |editor, cx| editor.switch_project(before, after, cx));
     self.refresh_project();
+    if self.git_view == GitView::History {
+      self.load_history(cx);
+    }
     self.ensure_terminal(window, cx);
     cx.notify();
   }
@@ -769,6 +804,17 @@ impl Workspace {
           this.git = git;
           this.rows = rows;
           cx.notify();
+        }
+        if this.sidebar_tab == SidebarTab::Git && this.git_view == GitView::History {
+          this.load_history(cx);
+        }
+        // The file shown in the Changes view was edited, saved or committed elsewhere: show what it is now.
+        if let Some(file) = this.selected_change.clone() {
+          if this.git.as_ref().is_some_and(|git| git.changes.iter().any(|change| change.path == file)) {
+            this.change_view.update(cx, |view, cx| view.reload(cx));
+          } else {
+            this.selected_change = None;
+          }
         }
       });
     })
@@ -865,18 +911,12 @@ impl Workspace {
     cx.notify();
   }
 
-  /// Opens the diff of a changed file in the editor area.
-  fn open_change(&mut self, file: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+  /// Shows the changes of a changed file in the main area, in place of the editor. Choosing another file replaces them.
+  fn open_change(&mut self, file: PathBuf, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
-    let name = file.display().to_string();
-    let result = vekro_git::file_diff(&root, &file).and_then(|patch| self.editor_panel.update(cx, |editor, cx| editor.open_diff(name, &patch, cx)));
-    match result {
-      Ok(()) => {
-        self.selected_change = Some(file);
-        self.selected_entry = None;
-      }
-      Err(message) => window.push_notification(Notification::error(message), cx),
-    }
+    self.change_view.update(cx, |view, cx| view.show(root, file.clone(), cx));
+    self.selected_change = Some(file);
+    self.selected_entry = None;
     cx.notify();
   }
 
@@ -910,8 +950,7 @@ impl Workspace {
     match vekro_git::discard_changes(&root, file) {
       Ok(()) => {
         if let Some(path) = vekro_git::workdir_file(&root, file) {
-          let name = file.display().to_string();
-          self.editor_panel.update(cx, |editor, cx| editor.forget(&path, &name, cx));
+          self.editor_panel.update(cx, |editor, cx| editor.forget(&path, cx));
         }
         if self.selected_change.as_deref() == Some(file) {
           self.selected_change = None;
@@ -959,7 +998,7 @@ impl Workspace {
             // The diff of a file that was just committed has nothing left to show.
             if let Some(open) = this.selected_change.clone().filter(|open| files.contains(open)) {
               if let Some(path) = vekro_git::workdir_file(&root, &open) {
-                this.editor_panel.update(cx, |editor, cx| editor.forget(&path, &open.display().to_string(), cx));
+                this.editor_panel.update(cx, |editor, cx| editor.forget(&path, cx));
               }
               this.selected_change = None;
             }
@@ -976,6 +1015,26 @@ impl Workspace {
       });
     })
     .detach();
+  }
+
+  /// Tells the user once that a newer Vekro is available, in the window they are using.
+  fn announce_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if !window.is_window_active() {
+      return;
+    }
+    let announce = {
+      let state = &self.settings.read(cx).updates;
+      match &state.update {
+        AppUpdate::Available(release) if state.announced.as_deref() != Some(release.tag.as_str()) => {
+          Some((release.tag.clone(), release.version.clone()))
+        }
+        _ => None,
+      }
+    };
+    if let Some((tag, version)) = announce {
+      self.settings.update(cx, |model, _| model.updates.announced = Some(tag));
+      window.push_notification(Notification::info(format!("Vekro {version} is available. Download it in Settings → Updates.")), cx);
+    }
   }
 
   /// Opens the dialog that connects a GitHub, GitLab or Azure DevOps account.
@@ -1165,6 +1224,58 @@ impl Workspace {
     let url = self.git.as_ref()?.sync.as_ref()?.url.clone();
     let accounts = &self.settings.read(cx).accounts;
     accounts.items.iter().find_map(|account| RepoRef::for_account(account, &url)).map(|repository| (url, repository))
+  }
+
+  /// Switches the Git tab between the files to commit and the commits already made.
+  fn set_git_view(&mut self, view: GitView, cx: &mut Context<Self>) {
+    if self.git_view == view {
+      return;
+    }
+    self.git_view = view;
+    if view == GitView::History {
+      self.load_history(cx);
+    }
+    cx.notify();
+  }
+
+  /// Reads the commits of the open project off the interface thread; the first one is shown when none is chosen.
+  fn load_history(&mut self, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    self.history_epoch += 1;
+    let epoch = self.history_epoch;
+    let work = cx.background_executor().spawn({
+      let root = root.clone();
+      async move { vekro_git::history(&root, HISTORY_LIMIT) }
+    });
+    cx.spawn(async move |this, cx| {
+      let found = work.await.unwrap_or_default();
+      let _ = this.update(cx, |this, cx| {
+        if this.history_epoch != epoch || this.projects.active.as_ref() != Some(&root) {
+          return;
+        }
+        let known = this.selected_commit.as_ref().is_some_and(|id| found.iter().any(|commit| &commit.id == id));
+        let first = found.first().map(|commit| commit.id.clone());
+        if this.history != found {
+          this.history = found;
+          cx.notify();
+        }
+        if !known {
+          match first {
+            Some(id) => this.select_commit(id, cx),
+            None => this.selected_commit = None,
+          }
+        }
+      });
+    })
+    .detach();
+  }
+
+  /// Shows a commit of the History view in the main area.
+  fn select_commit(&mut self, id: String, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    self.selected_commit = Some(id.clone());
+    self.commit_view.update(cx, |view, cx| view.show(root, id, cx));
+    cx.notify();
   }
 
   /// Shows a tab of the branch menu, with an empty filter.
@@ -1815,7 +1926,7 @@ impl Workspace {
               })
               .on_click(cx.listener({
                 let file = file.clone();
-                move |this, _, window, cx| this.open_change(file.clone(), window, cx)
+                move |this, _, _, cx| this.open_change(file.clone(), cx)
               })),
           )
           .context_menu({
@@ -1884,9 +1995,15 @@ impl Workspace {
           .disabled(chosen == 0 || !summary_filled || self.committing)
           .on_click(cx.listener(|this, _, window, cx| this.commit_changes(window, cx))),
       );
-    Some(
-      v_flex()
-        .size_full()
+    let tabs = TabBar::new("git-view-tabs")
+      .underline()
+      .selected_index(usize::from(self.git_view == GitView::History))
+      .on_click(cx.listener(|this, index: &usize, _, cx| this.set_git_view(if *index == 1 { GitView::History } else { GitView::Changes }, cx)))
+      .children([Tab::new().label("Changes"), Tab::new().label("History")]);
+    let body = match self.git_view {
+      GitView::Changes => v_flex()
+        .flex_1()
+        .min_h_0()
         .gap_1()
         .child(
           h_flex()
@@ -1898,8 +2015,93 @@ impl Workspace {
             .child(Label::new(changed).text_color(theme.muted_foreground)),
         )
         .child(div().flex_1().min_h_0().when(git.changed() > 0, |list| list.child(changes_list)))
-        .child(commit_box),
-    )
+        .child(commit_box)
+        .into_any_element(),
+      GitView::History => self.render_history(cx).into_any_element(),
+    };
+    Some(v_flex().size_full().gap_1().child(div().pr_3().child(tabs)).child(body))
+  }
+
+  /// The commits of the open project, newest first: the subject, who made it and when, the tags on it, and an arrow while the
+  /// remote does not have it yet. Choosing one shows it in the main area.
+  fn render_history(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let theme = cx.theme().clone();
+    let palette = colors(cx);
+    if self.history.is_empty() {
+      return Label::new("No commits yet").px_2().py_2().text_color(theme.muted_foreground).into_any_element();
+    }
+    let rows = self.history.iter().map(|commit| {
+      let id = commit.id.clone();
+      let selected = self.selected_commit.as_deref() == Some(commit.id.as_str());
+      let initial: String = commit.author.chars().take(1).flat_map(char::to_uppercase).collect();
+      h_flex()
+        .id(SharedString::from(format!("commit-{}", commit.id)))
+        .gap_2()
+        .px_2()
+        .py_1p5()
+        .items_center()
+        .rounded_md()
+        .cursor_pointer()
+        .when(selected, |row| row.bg(palette.selected))
+        .hover(|row| row.bg(palette.hover))
+        .child(
+          v_flex()
+            .flex_1()
+            .min_w_0()
+            .gap_0p5()
+            .child(Label::new(commit.summary.clone()).font_weight(FontWeight::MEDIUM).overflow_hidden().whitespace_nowrap().text_ellipsis())
+            .child(
+              h_flex()
+                .gap_1p5()
+                .items_center()
+                .child(
+                  div()
+                    .size_4()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .rounded_full()
+                    .bg(palette.hover)
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(initial),
+                )
+                .child(
+                  Label::new(format!("{} · {}", commit.author, ago_long(commit.time)))
+                    .text_size(FONT_SIZE_SM)
+                    .text_color(theme.muted_foreground)
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis(),
+                ),
+            ),
+        )
+        .children(
+          commit
+            .tags
+            .iter()
+            .take(2)
+            .map(|tag| div().px_1p5().rounded_md().bg(palette.hover).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).child(tag.clone())),
+        )
+        .when(commit.unpushed, |row| {
+          row.child(
+            div()
+              .id(SharedString::from(format!("unpushed-{}", commit.id)))
+              .size_5()
+              .flex()
+              .flex_none()
+              .items_center()
+              .justify_center()
+              .rounded_full()
+              .bg(palette.hover)
+              .tooltip(|window, cx| Tooltip::new("Not pushed yet").build(window, cx))
+              .child(Icon::empty().path("icons/arrow-up.svg").size_4().text_color(theme.muted_foreground)),
+          )
+        })
+        .on_click(cx.listener(move |this, _, _, cx| this.select_commit(id.clone(), cx)))
+    });
+    v_flex().id("history-list").flex_1().min_h_0().pr_3().overflow_y_scrollbar().children(rows).into_any_element()
   }
 
   /// One line of the folder tree.
@@ -2185,6 +2387,22 @@ fn project_menu(
   menu
 }
 
+/// How long ago a commit was made, in words: "2 minutes ago", "3 hours ago", "yesterday".
+fn ago_long(seconds_since_epoch: i64) -> String {
+  let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs() as i64);
+  let seconds = (now - seconds_since_epoch).max(0);
+  let plural = |count: i64, unit: &str| if count == 1 { format!("1 {unit} ago") } else { format!("{count} {unit}s ago") };
+  match seconds {
+    0..=59 => "just now".to_string(),
+    60..=3599 => plural(seconds / 60, "minute"),
+    3600..=86399 => plural(seconds / 3600, "hour"),
+    86400..=172799 => "yesterday".to_string(),
+    172800..=2_591_999 => plural(seconds / 86400, "day"),
+    2_592_000..=31_535_999 => plural(seconds / 2_592_000, "month"),
+    _ => plural(seconds / 31_536_000, "year"),
+  }
+}
+
 /// How long ago `time` was, for a label: "just now", "5m ago", "3h ago", "2d ago".
 fn time_ago(time: std::time::SystemTime) -> String {
   let seconds = time.elapsed().map_or(0, |elapsed| elapsed.as_secs());
@@ -2249,13 +2467,22 @@ impl Render for Workspace {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     // The terminal panel sits under the editor, above the status bar, and can be dragged taller or shorter.
+    let commit_shown = self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::History && self.selected_commit.is_some();
+    let change_shown = self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::Changes && self.selected_change.is_some();
+    let editor_area: AnyElement = if commit_shown {
+      self.commit_view.clone().into_any_element()
+    } else if change_shown {
+      self.change_view.clone().into_any_element()
+    } else {
+      self.dock.clone().into_any_element()
+    };
     let main_area = if self.terminal_open {
       v_resizable("editor-terminal-split")
-        .child(resizable_panel().child(self.dock.clone()))
+        .child(resizable_panel().child(editor_area))
         .child(resizable_panel().size(TERMINAL_HEIGHT).size_range(TERMINAL_MIN_HEIGHT..TERMINAL_MAX_HEIGHT).child(self.render_terminal_area(cx)))
         .into_any_element()
     } else {
-      self.dock.clone().into_any_element()
+      editor_area
     };
     v_flex()
       .id("workspace")

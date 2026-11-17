@@ -49,11 +49,13 @@ pub struct Preferences {
   pub code_font_size: u32,
   /// The instructions the commit message generator follows besides its rules; `None` is the built-in text, `Some("")` none at all.
   pub commit_instructions: Option<String>,
+  /// Ask GitHub for a newer Vekro release when the app starts.
+  pub check_updates: bool,
 }
 
 impl Default for Preferences {
   fn default() -> Self {
-    Self { theme: ThemeChoice::default(), projects_dir: None, code_font_size: DEFAULT_CODE_FONT_SIZE, commit_instructions: None }
+    Self { theme: ThemeChoice::default(), projects_dir: None, code_font_size: DEFAULT_CODE_FONT_SIZE, commit_instructions: None, check_updates: true }
   }
 }
 
@@ -75,6 +77,7 @@ impl Preferences {
         .and_then(Value::as_u64)
         .map_or(DEFAULT_CODE_FONT_SIZE, |size| size.clamp(*CODE_FONT_SIZES.start() as u64, *CODE_FONT_SIZES.end() as u64) as u32),
       commit_instructions: root.get("commit_instructions").and_then(Value::as_str).map(str::to_owned),
+      check_updates: root.get("check_updates").and_then(Value::as_bool).unwrap_or(true),
     }
   }
 
@@ -87,6 +90,7 @@ impl Preferences {
       "projects_dir": self.projects_dir.as_ref().map(|path| path.to_string_lossy()),
       "code_font_size": self.code_font_size,
       "commit_instructions": self.commit_instructions,
+      "check_updates": self.check_updates,
     });
     fs::write(path, serde_json::to_string_pretty(&value)?)
   }

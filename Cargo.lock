@@ -7417,7 +7417,20 @@ dependencies = [
  "vekro-opencommit",
  "vekro-storage",
  "vekro-terminal",
+ "vekro-updater",
 ]
+
+[[package]]
+name = "vekro-updater"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "vekro-version",
+]
+
+[[package]]
+name = "vekro-version"
+version = "0.1.0"
 
 [[package]]
 name = "version_check"

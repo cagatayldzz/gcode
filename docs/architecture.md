@@ -7,11 +7,12 @@ apps/vekro ─► app ─► ui ─► terminal
                 │      ├──► git
                 │      ├──► opencommit
                 │      ├──► hosting
+                │      ├──► updater ─► version
                 │      └──► storage
                 └─────────► (ui only)
 ```
 
-`terminal`, `git`, `opencommit`, `hosting` and `storage` never depend on the interface and are tested without a window.
+`terminal`, `git`, `opencommit`, `hosting`, `updater`, `version` and `storage` never depend on the interface and are tested without a window.
 `app` depends on `ui` only.
 
 ## Code map
@@ -21,9 +22,11 @@ apps/vekro ─► app ─► ui ─► terminal
 | `apps/vekro/src/main.rs` | executable entry point only; calls `vekro_app::run` |
 | `crates/app/src/lib.rs` | startup: key bindings, quit, opening and closing windows |
 | `crates/ui/src/workspace.rs` | `Workspace` (one per window): projects, the title bar (repository switcher, tabs), the sidebar, the status bar, the dock and the terminals of every project |
-| `crates/ui/src/editor.rs` | `EditorPanel`: tabs (`Tabs`) of file editors and file diffs, shown with the Kit default `TabBar` that the panel draws itself (the dock title bar is off), or the empty state |
+| `crates/ui/src/editor.rs` | `EditorPanel`: tabs (`Tabs`) of file editors, shown with the Kit default `TabBar` that the panel draws itself (the dock title bar is off), or the empty state |
 | `crates/ui/src/terminal.rs` | `Terminal` (a view): draws a `Session`, handles keys, mouse, selection, scrolling and paste |
 | `crates/ui/src/commit_settings.rs` | the OpenCommit settings dialog (model, diff size, language, message style, instructions, push after commit) |
+| `crates/ui/src/change_view.rs` | `ChangeView`: the diff of the chosen file of the Changes view in the main area, in place of the editor (re-read every refresh, redrawn only when it differs) |
+| `crates/ui/src/commit_view.rs` | `CommitView`: a commit of the History view in the main area (message, changed files, the diff of the chosen one) |
 | `crates/ui/src/project_setup.rs` | the Add project dialog (New, Clone, Import) |
 | `crates/ui/src/project_settings.rs` | the dialog for a project's name, icon and color |
 | `crates/ui/src/project_manager.rs` | the Project bar page of Settings: every project and category with its actions |
@@ -34,7 +37,9 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/{components,assets}.rs` | the blue "chosen" button style; Kit icons |
 | `crates/terminal/src/session.rs` | `Session`: PTY, `alacritty_terminal`, shell directory lookup |
 | `crates/terminal/src/{snapshot,palette,keys,mouse,search}.rs` | styled screen snapshot, colors, key and mouse encoding, scrollback search |
-| `crates/git/src/lib.rs` | `summary` (branch, changed files, and `Sync`: remote, ahead/behind, last fetch), `file_diff`, `diff_files`, `branches`, `create_branch`, `switch_branch`, `commit`, `push`, `fetch`, `pull`, `create_project`, `clone`, `repository_name`, `find_repositories` |
+| `crates/git/src/lib.rs` | `summary` (branch, changed files, and `Sync`: remote, ahead/behind, last fetch), `file_diff`, `diff_files`, `history`, `commit_detail`, `commit_file_diff`, `branches`, `create_branch`, `switch_branch`, `commit`, `push`, `fetch`, `pull`, `create_project`, `clone`, `repository_name`, `find_repositories` |
+| `crates/updater/src/`, `crates/version/src/` | release lookup, download, verification, installer script; version comparison |
+| `crates/ui/src/updates.rs` | the update state of the shared settings model (`UpdateState`, `AppUpdate`) with its actions, and `UpdatePanel`, the Updates page of Settings |
 | `crates/hosting/src/` | `accounts.rs` (`Account`, `Accounts`, `TokenStore`: the macOS Keychain through `security`, or memory), `api.rs` (verify, repositories, pull requests per service), `remote.rs` (`RepoRef`: which repository a remote URL names) |
 | `crates/ui/src/{connections,connect_account,repository_picker,pull_request}.rs` | the accounts list in Settings and the helpers that find the login for a remote; the Connect dialog; the repository list of the Clone tab; the Create pull request dialog |
 | `crates/opencommit/src/` | `config.rs` (`Config`, the `~/.opencommit` file), `prompt.rs` (rules, diff splitting, parsing the answer), `client.rs` (`generate`, the chat API request) |
@@ -102,7 +107,7 @@ milliseconds; the cost is the first time the highlighter draws a text (up to ~0.
 `vekro_git::summary` reads the branch and changed files (libgit2). `Workspace::refresh_in_background` runs
 it, with the folder tree read, on a background thread when the window is activated and every 2 seconds
 (`REFRESH_INTERVAL`), and applies the result only if the project and the expanded folders are unchanged and
-the data differs. `file_diff` produces a unified patch that `EditorPanel` hands to the Kit `Diff`.
+the data differs. `file_diff` produces a unified patch that `ChangeView` hands to the Kit `Diff`.
 `clone`, `push`, `fetch` and `pull` (`--ff-only`) run the `git` program (not libgit2) so the user's credentials apply. In the Git tab a toolbar above the editor (`render_git_toolbar`) holds the current branch, whose menu has two tabs: the local branches, and the open pull requests when a connected account serves the remote (`branches`, filtered by typing) with a way to create one, and one button that publishes, pushes, pulls or fetches, whichever the branch needs (`sync_remote`); `switch_branch` uses a safe checkout, so
 changes it would overwrite stop the switch instead of being lost.
 
@@ -115,6 +120,18 @@ file, each part is summarized, and the summaries are merged in a last request. N
 live in the user's `~/.opencommit` (shared with the `oco` command; unknown lines are kept, the file is mode 0600; the
 `VEKRO_OPENCOMMIT_CONFIG` variable names another file for scratch runs); the commit instructions are in `preferences.json`.
 With "Push after commit" the commit button pushes with the `git` program after committing.
+
+## Updates
+
+`vekro_updater::check` asks the GitHub API for the latest release of the repository in `[workspace.package]`, and `vekro_version::is_newer`
+decides whether it is newer than the running version (`CARGO_PKG_VERSION`, stamped by the release workflow). The release's assets
+must be `Vekro-<tag>-macos-arm64.zip` and `SHA256SUMS.txt` under that repository's own download URLs, so a tampered answer cannot
+point the updater elsewhere. Only on request (`SettingsModel::download_update`) is the archive downloaded, next to the running app,
+and verified: SHA-256 against the checksums, `codesign --verify`, `spctl`, the same Team ID as the installed app, the same bundle
+identifier and the release's version. **Restart to Update** (`restart_to_update`) quits and runs `SWAP_SCRIPT`, which waits for
+the app to exit, swaps `Vekro.app` and reopens it, restoring the old app if the swap fails. All of it runs on background
+threads; progress reaches the model through a channel. Development builds (`debug_assertions`) never check or install. The first
+window checks at launch unless `check_updates` is off in `preferences.json`, and announces an available release once.
 
 ## Hosting accounts
 

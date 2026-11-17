@@ -60,6 +60,8 @@ Required Actions secrets: `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWOR
 | `vekro-storage` | lib | data directory, project list, preferences |
 | `vekro-opencommit` | lib | commit message generation, `~/.opencommit` settings |
 | `vekro-hosting` | lib | GitHub, GitLab and Azure DevOps accounts, repositories and pull requests |
+| `vekro-version` | lib | version comparison for update detection |
+| `vekro-updater` | lib | self-update from GitHub releases |
 
 Code map and data flow: [architecture](architecture.md).
 

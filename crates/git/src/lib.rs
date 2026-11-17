@@ -192,6 +192,11 @@ pub fn file_diff(path: &Path, file: &Path) -> Result<String, String> {
   let mut options = DiffOptions::new();
   options.pathspec(file).include_untracked(true).show_untracked_content(true).recurse_untracked_dirs(true);
   let diff = repository.diff_tree_to_workdir_with_index(head.as_ref(), Some(&mut options)).map_err(|error| error.message().to_string())?;
+  patch_text(&diff)
+}
+
+/// A diff as the text of a unified patch.
+fn patch_text(diff: &git2::Diff) -> Result<String, String> {
   let mut patch = String::new();
   diff
     .print(DiffFormat::Patch, |_, _, line| {
@@ -478,6 +483,153 @@ pub fn head_summary(path: &Path) -> Option<String> {
   let repository = Repository::discover(path).ok()?;
   let commit = repository.head().ok()?.peel_to_commit().ok()?;
   commit.summary().map(str::to_string)
+}
+
+/// A commit in the history list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitInfo {
+  /// The full id.
+  pub id: String,
+  /// The first seven characters of the id.
+  pub short: String,
+  /// The first line of the message.
+  pub summary: String,
+  pub author: String,
+  /// When it was made, in seconds since 1970.
+  pub time: i64,
+  /// Not on the remote yet: the branch's upstream does not have it (or, without an upstream, no remote branch does).
+  pub unpushed: bool,
+  /// The tags that point at it.
+  pub tags: Vec<String>,
+}
+
+/// A commit with what it changed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitDetail {
+  pub info: CommitInfo,
+  /// The message after its first line.
+  pub body: String,
+  /// The files it changed, sorted by path (against its first parent; a first commit against nothing).
+  pub files: Vec<Change>,
+  pub additions: usize,
+  pub deletions: usize,
+}
+
+fn commit_info(
+  commit: &git2::Commit,
+  unpushed: &std::collections::HashSet<git2::Oid>,
+  tags: &std::collections::HashMap<git2::Oid, Vec<String>>,
+) -> CommitInfo {
+  let id = commit.id().to_string();
+  CommitInfo {
+    short: id.chars().take(7).collect(),
+    id,
+    summary: commit.summary().unwrap_or("").to_string(),
+    author: commit.author().name().unwrap_or("").to_string(),
+    time: commit.time().seconds(),
+    unpushed: unpushed.contains(&commit.id()),
+    tags: tags.get(&commit.id()).cloned().unwrap_or_default(),
+  }
+}
+
+/// The last `limit` commits reachable from HEAD, newest first, with which of them are not on the remote yet and their tags.
+pub fn history(path: &Path, limit: usize) -> Result<Vec<CommitInfo>, String> {
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  if repository.head().is_err() {
+    return Ok(Vec::new());
+  }
+  // Commits the remote does not have: from HEAD without what the upstream (else every remote branch) reaches.
+  let mut unpushed = std::collections::HashSet::new();
+  if repository.remotes().map(|remotes| !remotes.is_empty()).unwrap_or(false) {
+    let mut walk = repository.revwalk().map_err(|error| error.message().to_string())?;
+    walk.push_head().map_err(|error| error.message().to_string())?;
+    let upstream = repository
+      .head()
+      .ok()
+      .and_then(|head| head.shorthand().map(str::to_string))
+      .and_then(|name| repository.find_branch(&name, git2::BranchType::Local).ok())
+      .and_then(|branch| branch.upstream().ok())
+      .and_then(|upstream| upstream.get().target());
+    match upstream {
+      Some(target) => {
+        let _ = walk.hide(target);
+      }
+      None => {
+        let _ = walk.hide_glob("refs/remotes/*");
+      }
+    }
+    unpushed.extend(walk.filter_map(Result::ok));
+  }
+  let mut tags: std::collections::HashMap<git2::Oid, Vec<String>> = std::collections::HashMap::new();
+  let _ = repository.tag_foreach(|id, name| {
+    if let Some(commit) = repository.find_object(id, None).ok().and_then(|object| object.peel_to_commit().ok()) {
+      tags.entry(commit.id()).or_default().push(String::from_utf8_lossy(name).trim_start_matches("refs/tags/").to_string());
+    }
+    true
+  });
+  let mut walk = repository.revwalk().map_err(|error| error.message().to_string())?;
+  walk.set_sorting(git2::Sort::TIME).map_err(|error| error.message().to_string())?;
+  walk.push_head().map_err(|error| error.message().to_string())?;
+  Ok(
+    walk
+      .filter_map(Result::ok)
+      .filter_map(|id| repository.find_commit(id).ok())
+      .take(limit)
+      .map(|commit| commit_info(&commit, &unpushed, &tags))
+      .collect(),
+  )
+}
+
+fn commit_diff<'a>(repository: &'a Repository, commit: &git2::Commit, file: Option<&Path>) -> Result<git2::Diff<'a>, String> {
+  let tree = commit.tree().map_err(|error| error.message().to_string())?;
+  let parent = commit.parent(0).ok().and_then(|parent| parent.tree().ok());
+  let mut options = DiffOptions::new();
+  if let Some(file) = file {
+    options.pathspec(file);
+  }
+  repository.diff_tree_to_tree(parent.as_ref(), Some(&tree), Some(&mut options)).map_err(|error| error.message().to_string())
+}
+
+/// What a commit says and changed.
+pub fn commit_detail(path: &Path, id: &str) -> Result<CommitDetail, String> {
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  let commit =
+    repository.find_commit(git2::Oid::from_str(id).map_err(|error| error.message().to_string())?).map_err(|error| error.message().to_string())?;
+  let diff = commit_diff(&repository, &commit, None)?;
+  let mut files: Vec<Change> = diff
+    .deltas()
+    .filter_map(|delta| {
+      let kind = match delta.status() {
+        git2::Delta::Added | git2::Delta::Untracked => ChangeKind::New,
+        git2::Delta::Deleted => ChangeKind::Deleted,
+        git2::Delta::Renamed => ChangeKind::Renamed,
+        git2::Delta::Conflicted => ChangeKind::Conflicted,
+        _ => ChangeKind::Modified,
+      };
+      let file = if kind == ChangeKind::Deleted { delta.old_file().path() } else { delta.new_file().path() }?;
+      Some(Change { path: file.to_path_buf(), kind })
+    })
+    .collect();
+  files.sort_by(|a, b| a.path.cmp(&b.path));
+  let stats = diff.stats().map_err(|error| error.message().to_string())?;
+  let message = commit.message().unwrap_or("");
+  let body = message.split_once('\n').map(|(_, rest)| rest.trim().to_string()).unwrap_or_default();
+  Ok(CommitDetail {
+    info: commit_info(&commit, &std::collections::HashSet::new(), &std::collections::HashMap::new()),
+    body,
+    files,
+    additions: stats.insertions(),
+    deletions: stats.deletions(),
+  })
+}
+
+/// The unified diff of one file in a commit, against its first parent. `file` is relative to the repository.
+pub fn commit_file_diff(path: &Path, id: &str, file: &Path) -> Result<String, String> {
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  let commit =
+    repository.find_commit(git2::Oid::from_str(id).map_err(|error| error.message().to_string())?).map_err(|error| error.message().to_string())?;
+  let diff = commit_diff(&repository, &commit, Some(file))?;
+  patch_text(&diff)
 }
 
 /// The folders directly inside `folder` that are Git repositories, sorted by name. Folders that cannot be read are skipped.

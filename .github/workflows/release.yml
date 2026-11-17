@@ -38,9 +38,9 @@ jobs:
         with:
           shared-key: core
       - name: Lint core packages
-        run: cargo clippy --locked -p vekro-terminal -p vekro-git -p vekro-storage --all-targets -- -D warnings
+        run: cargo clippy --locked -p vekro-terminal -p vekro-git -p vekro-storage -p vekro-opencommit -p vekro-hosting -p vekro-version -p vekro-updater --all-targets -- -D warnings
       - name: Test core packages
-        run: cargo test --locked -p vekro-terminal -p vekro-git -p vekro-storage
+        run: cargo test --locked -p vekro-terminal -p vekro-git -p vekro-storage -p vekro-opencommit -p vekro-hosting -p vekro-version -p vekro-updater
 
   prepare:
     name: 2 · Prepare version
