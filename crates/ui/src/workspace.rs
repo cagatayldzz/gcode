@@ -19,7 +19,7 @@ use crate::{
   terminal_layout::{Arrangement, Direction, Node},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
-  AddProject, CloseTab, NewTerminal, OpenSettings, SaveFile, SplitDown, SplitRight, ToggleTerminal,
+  AddProject, CloseTab, NewTerminal, OpenSettings, SaveFile, SplitDown, SplitRight, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -30,7 +30,7 @@ use gpui_kit::{
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
     label::Label,
-    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     notification::Notification,
     popover::Popover,
     resizable::{h_resizable, resizable_panel, v_resizable},
@@ -58,11 +58,18 @@ use vekro_storage::{Category, Preferences, Project, ProjectList};
 /// Height of the top band: the traffic lights and the title.
 pub const TOOLBAR_HEIGHT: Pixels = px(40.);
 
+/// The count on the Git button: how small its digits are, and how far it reaches past the button's right edge.
+const BADGE_FONT_SIZE: Pixels = px(10.);
+const BADGE_OVERHANG: Pixels = px(4.);
+
 /// The width of the bar at the far left that chooses the view of the sidebar.
-const ACTIVITY_BAR_WIDTH: Pixels = px(48.);
+const ACTIVITY_BAR_WIDTH: Pixels = px(56.);
 
 /// The width of the branch menu and of a category's project list.
 const MENU_WIDTH: Pixels = px(280.);
+
+/// The width of the project menu: wider, as each project also shows what is waiting in it.
+const PROJECT_MENU_WIDTH: Pixels = px(380.);
 
 /// How tall the branch list and a category's project list get before they scroll.
 const MENU_LIST_MAX_HEIGHT: Pixels = px(320.);
@@ -113,6 +120,15 @@ impl SidebarTab {
   }
 }
 
+/// What the project menu shows beside a project.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProjectStatus {
+  /// Files with uncommitted changes.
+  changed: usize,
+  /// Commits are waiting to be pushed.
+  push: bool,
+}
+
 /// What the window shows for a project that is not open at the moment.
 #[derive(Default)]
 struct ProjectView {
@@ -151,8 +167,14 @@ enum GitView {
   History,
 }
 
-/// How many commits the History view lists.
-const HISTORY_LIMIT: usize = 300;
+/// How many commits the History view loads at first, and loads more of each time the list is scrolled to its end.
+const HISTORY_PAGE: usize = 50;
+
+/// How long after a scroll the History list is checked for its end.
+const HISTORY_SCROLL_SETTLE: Duration = Duration::from_millis(80);
+
+/// How close to the end of the History list counts as its end.
+const HISTORY_END_MARGIN: Pixels = px(80.);
 
 /// The two tabs of the branch menu.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -204,10 +226,18 @@ pub struct Workspace {
   pr_epoch: u64,
   /// Which read of the history the listed commits belong to.
   history_epoch: u64,
+  /// How many commits the History view asks for now, and its scroll position (to load more near the end).
+  history_limit: usize,
+  history_scroll: ScrollHandle,
+  /// The window is the one in front, and what the Repository menu said last.
+  window_active: bool,
+  menu_host: Option<String>,
   /// The terminals fill the main area (the right part of the window) in place of the editor.
   terminal_open: bool,
   /// A commit message is being generated.
   generating: bool,
+  /// What each project holds, read when the project menu opens and while it is open.
+  project_status: HashMap<PathBuf, ProjectStatus>,
   /// The push, pull or fetch that is running.
   remote_work: Option<RemoteWork>,
   /// The branch menu is open, with the local branches it lists and the field that filters them.
@@ -283,8 +313,13 @@ impl Workspace {
       pull_requests: PullRequests::Idle,
       pr_epoch: 0,
       history_epoch: 0,
+      history_limit: HISTORY_PAGE,
+      history_scroll: ScrollHandle::new(),
+      window_active: true,
+      menu_host: None,
       terminal_open: false,
       generating: false,
+      project_status: HashMap::new(),
       remote_work: None,
       branch_menu_open: false,
       branches: Vec::new(),
@@ -364,7 +399,9 @@ impl Workspace {
         cx.notify();
       }),
       _activation: cx.observe_window_activation(window, |this, window, cx| {
+        this.window_active = window.is_window_active();
         if window.is_window_active() {
+          this.sync_menus(true, cx);
           this.announce_update(window, cx);
           this.refresh_in_background(cx);
           this.sync_projects(window, cx);
@@ -557,6 +594,33 @@ impl Workspace {
       }
     }
     cx.notify();
+  }
+
+  /// The page of the open project's repository on the service that hosts it, and the service's name.
+  fn web_repository(&self, cx: &App) -> Option<vekro_hosting::WebRepository> {
+    let url = self.git.as_ref()?.sync.as_ref()?.url.clone();
+    vekro_hosting::web_repository(&url, &self.settings.read(cx).accounts.items)
+  }
+
+  /// Puts the service of the open project's remote in the Repository menu ("View on GitHub"). Menus belong to the application,
+  /// so only the window in front sets them: always when it comes to the front, else only when the service changed.
+  fn sync_menus(&mut self, always: bool, cx: &mut Context<Self>) {
+    if !self.window_active {
+      return;
+    }
+    let host = self.web_repository(cx).map(|found| found.service);
+    if always || host != self.menu_host {
+      cx.set_menus(crate::menus(host.as_deref()));
+      self.menu_host = host;
+    }
+  }
+
+  /// Repository → View on GitHub, GitLab or Azure DevOps: opens the repository's page in the browser.
+  pub fn view_on_host(&mut self, _: &ViewOnHost, window: &mut Window, cx: &mut Context<Self>) {
+    match self.web_repository(cx) {
+      Some(found) => cx.open_url(&found.url),
+      None => window.push_notification(Notification::error("This project has no remote on a hosting service."), cx),
+    }
   }
 
   /// Opens the Settings dialog.
@@ -877,6 +941,7 @@ impl Workspace {
     }
     self.excluded.clear();
     self.history.clear();
+    self.history_limit = HISTORY_PAGE;
     self.selected_commit = None;
     let after = self.projects.active.clone();
     let view = after.as_ref().and_then(|root| self.views.remove(root)).unwrap_or_default();
@@ -954,6 +1019,11 @@ impl Workspace {
         }
         if this.sidebar_tab == SidebarTab::Git && this.git_view == GitView::History {
           this.load_history(cx);
+        }
+        this.sync_menus(false, cx);
+        // While the project menu is open, what each project holds is kept up to date.
+        if this.projects_menu_open {
+          this.load_project_status(cx);
         }
         // The file shown in the Changes view was edited, saved or committed elsewhere: show what it is now.
         if let Some(file) = this.selected_change.clone() {
@@ -1404,9 +1474,10 @@ impl Workspace {
     let Some(root) = self.projects.active.clone() else { return };
     self.history_epoch += 1;
     let epoch = self.history_epoch;
+    let limit = self.history_limit;
     let work = cx.background_executor().spawn({
       let root = root.clone();
-      async move { vekro_git::history(&root, HISTORY_LIMIT) }
+      async move { vekro_git::history(&root, limit) }
     });
     cx.spawn(async move |this, cx| {
       let found = work.await.unwrap_or_default();
@@ -1429,6 +1500,59 @@ impl Workspace {
       });
     })
     .detach();
+  }
+
+  /// Takes the last commit back, keeping its changes: they return to the Changes view with the commit's message in the commit box.
+  fn undo_commit(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    let work = cx.background_executor().spawn(async move { vekro_git::undo_commit(&root, &id) });
+    cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        match result {
+          Ok((summary, description)) => {
+            this.commit_summary.update(cx, |input, cx| input.set_value(summary, window, cx));
+            this.commit_description.update(cx, |input, cx| input.set_value(description, window, cx));
+            this.refresh_project();
+            this.selected_commit = None;
+            this.git_view = GitView::Changes;
+            window
+              .push_notification(Notification::info("Undid the commit: its changes are back in Changes, with its message in the commit box."), cx);
+          }
+          Err(message) => window.push_notification(Notification::error(message), cx),
+        }
+        cx.notify();
+      });
+    })
+    .detach();
+  }
+
+  /// Asks for a name and tags a commit with it.
+  fn create_tag(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+    let short: String = id.chars().take(7).collect();
+    self.ask_name(format!("Create a tag at {short}"), "Tag name, such as v1.0.0", "", window, cx, move |this, name, window, cx| {
+      let root = this.projects.active.clone().ok_or("Open a project first.")?;
+      vekro_git::create_tag(&root, &id, name)?;
+      this.load_history(cx);
+      window.push_notification(Notification::info(format!("Tagged {short} as {}. The tag is local until you push it.", name.trim())), cx);
+      Ok(())
+    });
+  }
+
+  /// Loads the next page of commits when the History list has been scrolled to its end. Called after the list was scrolled, once its
+  /// position has settled, and by the button at the end of the list.
+  fn load_more_history(&mut self, only_at_end: bool, cx: &mut Context<Self>) {
+    let more_may_exist = self.history.len() >= self.history_limit;
+    let at_end = {
+      let (offset, max) = (self.history_scroll.offset(), self.history_scroll.max_offset());
+      let (travelled, total) = (offset.y.abs(), max.y.abs());
+      total <= px(0.) || travelled >= total - HISTORY_END_MARGIN
+    };
+    if self.git_view != GitView::History || !more_may_exist || (only_at_end && !at_end) {
+      return;
+    }
+    self.history_limit += HISTORY_PAGE;
+    self.load_history(cx);
   }
 
   /// Shows a commit of the History view in the main area.
@@ -1571,11 +1695,33 @@ impl Workspace {
   fn set_projects_menu(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
     self.projects_menu_open = open;
     if open {
+      self.load_project_status(cx);
       self.project_filter.update(cx, |input, cx| input.set_value("", window, cx));
       let focus = self.project_filter.read(cx).focus_handle(cx);
       window.defer(cx, move |window, cx| focus.focus(window, cx));
     }
     cx.notify();
+  }
+
+  /// Reads what every project holds (changed files, commits to push) off the interface thread, for the project menu.
+  fn load_project_status(&mut self, cx: &mut Context<Self>) {
+    let paths: Vec<PathBuf> = self.projects.projects.iter().map(|project| project.path.clone()).collect();
+    let work = cx.background_executor().spawn(async move {
+      paths
+        .into_iter()
+        .filter_map(|path| vekro_git::quick_status(&path).map(|(changed, push)| (path, ProjectStatus { changed, push })))
+        .collect::<HashMap<_, _>>()
+    });
+    cx.spawn(async move |this, cx| {
+      let found = work.await;
+      let _ = this.update(cx, |this, cx| {
+        if this.project_status != found {
+          this.project_status = found;
+          cx.notify();
+        }
+      });
+    })
+    .detach();
   }
 
   /// ⌘W: closes the open tab of the editor, then the others from the last to the first, and keeps the focus in the window so
@@ -1901,17 +2047,11 @@ impl Workspace {
       .trigger(trigger)
       .content(move |_, _, cx| {
         let theme = cx.theme().clone();
-        let (filter, query, list) = {
+        let (filter, query, list, statuses) = {
           let this = workspace.read(cx);
-          (this.project_filter.clone(), this.project_filter.read(cx).value().to_lowercase(), this.projects.clone())
+          (this.project_filter.clone(), this.project_filter.read(cx).value().to_lowercase(), this.projects.clone(), this.project_status.clone())
         };
         let active = list.active.clone();
-        let categories: Vec<(String, SharedString)> = list
-          .categories
-          .iter()
-          .enumerate()
-          .map(|(index, category)| (category.id.clone(), SharedString::from(category_label(index, category))))
-          .collect();
         let matches = |project: &&Project| query.is_empty() || project.name().to_lowercase().contains(&query);
         // The starred projects come first, and are not listed again under their category.
         let mut groups: Vec<(SharedString, Vec<&Project>)> = vec![(SharedString::from("Favorites"), list.favorites().filter(matches).collect())];
@@ -1938,7 +2078,9 @@ impl Workspace {
             );
           }
           rows.extend(
-            projects.into_iter().map(|project| project_list_row(&workspace, project, active.as_ref() == Some(&project.path), &categories, cx)),
+            projects
+              .into_iter()
+              .map(|project| project_list_row(&workspace, project, active.as_ref() == Some(&project.path), statuses.get(&project.path), cx)),
           );
         }
         let add = {
@@ -1951,15 +2093,33 @@ impl Workspace {
             window.dispatch_action(Box::new(AddProject), cx);
           })
         };
-        v_flex().w(MENU_WIDTH).gap_1().child(h_flex().gap_2().items_center().child(div().flex_1().child(Input::new(&filter))).child(add)).child(
-          v_flex()
-            .id("repository-list")
-            .max_h(MENU_LIST_MAX_HEIGHT)
-            .overflow_y_scrollbar()
-            .gap_0p5()
-            .when(rows.is_empty(), |list| list.child(Label::new("No matching projects").px_2().py_1().text_color(theme.muted_foreground)))
-            .children(rows),
-        )
+        // Sorting, grouping and renaming projects is done in Settings → Project list.
+        let sort = {
+          let workspace = workspace.clone();
+          Button::new("repository-sort")
+            .outline()
+            .icon(Icon::empty().path("icons/arrow-up-down.svg"))
+            .tooltip("Sort and group the projects (Settings → Project list)")
+            .on_click(move |_, window, cx| {
+              workspace.update(cx, |this, cx| {
+                this.projects_menu_open = false;
+                this.open_settings_page("Project list", window, cx);
+              })
+            })
+        };
+        v_flex()
+          .w(PROJECT_MENU_WIDTH)
+          .gap_1()
+          .child(h_flex().gap_2().items_center().child(div().flex_1().child(Input::new(&filter))).child(add).child(sort))
+          .child(
+            v_flex()
+              .id("repository-list")
+              .max_h(MENU_LIST_MAX_HEIGHT)
+              .overflow_y_scrollbar()
+              .gap_0p5()
+              .when(rows.is_empty(), |list| list.child(Label::new("No matching projects").px_2().py_1().text_color(theme.muted_foreground)))
+              .children(rows),
+          )
       })
   }
 
@@ -2022,7 +2182,25 @@ impl Workspace {
                     .text_ellipsis(),
                 ),
             )
-            .when(count > 0, |row| row.child(div().px_1p5().rounded_full().bg(palette.selected).text_size(FONT_SIZE_SM).child(count.to_string()))),
+            // How many commits are waiting to be pushed (or pulled): a filled blue circle, easy to see.
+            .when(count > 0, |row| {
+              row.child(
+                div()
+                  .min_w_5()
+                  .h_5()
+                  .px_1p5()
+                  .flex()
+                  .flex_none()
+                  .items_center()
+                  .justify_center()
+                  .rounded_full()
+                  .bg(theme.primary)
+                  .text_color(palette.on_accent)
+                  .text_size(FONT_SIZE_SM)
+                  .font_weight(FontWeight::SEMIBOLD)
+                  .child(count.to_string()),
+              )
+            }),
         )
         .on_click(cx.listener(|this, _, window, cx| this.sync_remote(window, cx)))
     });
@@ -2204,9 +2382,14 @@ impl Workspace {
     if self.history.is_empty() {
       return Label::new("No commits yet").px_2().py_2().text_color(theme.muted_foreground).into_any_element();
     }
+    let workspace = cx.entity();
+    let tip = self.history.first().map(|commit| commit.id.clone());
     let rows = self.history.iter().map(|commit| {
       let id = commit.id.clone();
       let selected = self.selected_commit.as_deref() == Some(commit.id.as_str());
+      // Only the last commit, and only while the remote does not have it, can be undone.
+      let undoable = tip.as_deref() == Some(commit.id.as_str()) && commit.unpushed;
+      let (menu_workspace, menu_id) = (workspace.clone(), commit.id.clone());
       let initial: String = commit.author.chars().take(1).flat_map(char::to_uppercase).collect();
       h_flex()
         .id(SharedString::from(format!("commit-{}", commit.id)))
@@ -2274,8 +2457,56 @@ impl Workspace {
           )
         })
         .on_click(cx.listener(move |this, _, _, cx| this.select_commit(id.clone(), cx)))
+        .context_menu(move |menu, _, _| {
+          let (undo_workspace, undo_id) = (menu_workspace.clone(), menu_id.clone());
+          let (tag_workspace, tag_id) = (menu_workspace.clone(), menu_id.clone());
+          let copy_id = menu_id.clone();
+          menu
+            .item(
+              PopupMenuItem::new("Undo Commit…")
+                .disabled(!undoable)
+                .on_click(move |_, window, cx| undo_workspace.update(cx, |this, cx| this.undo_commit(undo_id.clone(), window, cx))),
+            )
+            .separator()
+            .item(
+              PopupMenuItem::new("Create Tag…")
+                .on_click(move |_, window, cx| tag_workspace.update(cx, |this, cx| this.create_tag(tag_id.clone(), window, cx))),
+            )
+            .separator()
+            .item(PopupMenuItem::new("Copy SHA").on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_id.clone()))))
+        })
     });
-    v_flex().id("history-list").flex_1().min_h_0().pr_3().overflow_y_scrollbar().children(rows).into_any_element()
+    // The next page of commits is loaded when the list is scrolled to its end (after the wheel stops), or with the button there.
+    let more = (self.history.len() >= self.history_limit).then(|| {
+      Button::new("history-more")
+        .ghost()
+        .small()
+        .label(format!("Load {HISTORY_PAGE} more commits"))
+        .on_click(cx.listener(|this, _, _, cx| this.load_more_history(false, cx)))
+    });
+    div()
+      .relative()
+      .flex_1()
+      .min_h_0()
+      .child(
+        v_flex()
+          .id("history-list")
+          .size_full()
+          .pr_3()
+          .overflow_y_scroll()
+          .track_scroll(&self.history_scroll)
+          .on_scroll(cx.listener(|_, _: &ScrollEvent, _, cx| {
+            cx.spawn(async move |this, cx| {
+              cx.background_executor().timer(HISTORY_SCROLL_SETTLE).await;
+              let _ = this.update(cx, |this, cx| this.load_more_history(true, cx));
+            })
+            .detach();
+          }))
+          .children(rows)
+          .children(more),
+      )
+      .child(div().id("history-scrollbar").absolute().size_full().vertical_scrollbar(&self.history_scroll))
+      .into_any_element()
   }
 
   /// One line of the folder tree.
@@ -2404,27 +2635,48 @@ impl Workspace {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     let workspace = cx.entity();
+    let changed = self.git.as_ref().map_or(0, Summary::changed);
     let buttons = SidebarTab::ALL.map(|tab| {
       let workspace = workspace.clone();
-      rail_button(tab.label(), tab.icon(), tab.label(), tab == self.sidebar_tab && !self.terminal_open, &palette, move |_, window, cx| {
-        workspace.update(cx, |this, cx| {
-          this.sidebar_tab = tab;
-          // The view of the sidebar and the editor come back when the terminals were taking the main area.
-          if this.terminal_open {
-            this.hide_terminal(window, cx);
-          }
-          cx.notify();
-        })
-      })
+      let button =
+        rail_button(tab.label(), tab.icon(), tab.label(), tab == self.sidebar_tab && !self.terminal_open, true, &palette, move |_, window, cx| {
+          workspace.update(cx, |this, cx| {
+            this.sidebar_tab = tab;
+            // The view of the sidebar and the editor come back when the terminals were taking the main area.
+            if this.terminal_open {
+              this.hide_terminal(window, cx);
+            }
+            cx.notify();
+          })
+        });
+      // The Git button shows how many files have changes, in a small blue circle at its top right.
+      let badge = (tab == SidebarTab::Git && changed > 0).then(|| {
+        div()
+          .absolute()
+          .top_0()
+          .right(-BADGE_OVERHANG)
+          .min_w_4()
+          .h_4()
+          .px_1()
+          .flex()
+          .items_center()
+          .justify_center()
+          .rounded_full()
+          .bg(theme.primary)
+          .text_color(palette.on_accent)
+          .text_size(BADGE_FONT_SIZE)
+          .child(if changed > 99 { "99+".to_string() } else { changed.to_string() })
+      });
+      div().relative().child(button).children(badge)
     });
     let attention = self.settings.read(cx).accounts.items.iter().any(|account| account.issue.is_some());
     let terminal =
-      rail_button("terminal-toggle", Icon::empty().path("icons/terminal.svg"), "Terminal", self.terminal_open, &palette, |_, window, cx| {
+      rail_button("terminal-toggle", Icon::empty().path("icons/terminal.svg"), "Terminal", self.terminal_open, true, &palette, |_, window, cx| {
         window.dispatch_action(Box::new(ToggleTerminal), cx)
       });
     let settings = div()
       .relative()
-      .child(rail_button("settings-open", Icon::new(IconName::Settings), "Settings", false, &palette, |_, window, cx| {
+      .child(rail_button("settings-open", Icon::new(IconName::Settings), "Settings", false, true, &palette, |_, window, cx| {
         window.dispatch_action(Box::new(OpenSettings), cx)
       }))
       // While an account has a permission problem, a small warning sits at the corner of the gear and opens Accounts.
@@ -2608,11 +2860,10 @@ impl Workspace {
 
 /// One project in a list (a category's list, the repository menu): its avatar and name; a click opens it and closes the list,
 /// a right click opens the project's menu.
-fn project_list_row(workspace: &Entity<Workspace>, project: &Project, selected: bool, categories: &[(String, SharedString)], cx: &App) -> AnyElement {
+fn project_list_row(workspace: &Entity<Workspace>, project: &Project, selected: bool, status: Option<&ProjectStatus>, cx: &App) -> AnyElement {
   let palette = colors(cx);
   let look = avatar_look(project, selected, cx);
   let (path, name) = (project.path.clone(), SharedString::from(project.name()));
-  let (menu_workspace, menu_path, categories, current) = (workspace.clone(), project.path.clone(), categories.to_vec(), project.category.clone());
   let (favorite, star_workspace, star_path) = (project.favorite, workspace.clone(), project.path.clone());
   let muted = cx.theme().muted_foreground;
   h_flex()
@@ -2626,22 +2877,7 @@ fn project_list_row(workspace: &Entity<Workspace>, project: &Project, selected: 
     .cursor_pointer()
     .when(selected, |row| row.bg(palette.selected))
     .hover(|row| row.bg(palette.hover))
-    .child(
-      div()
-        .size_6()
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .rounded_md()
-        .text_sm()
-        .text_color(look.text)
-        .when_some(look.fill, |avatar, fill| avatar.bg(fill))
-        .when_some(look.icon.clone(), |avatar, icon| avatar.child(Icon::empty().path(icon).size_4()))
-        .when(look.icon.is_none(), |avatar| avatar.child(look.letter.clone())),
-    )
-    .child(Label::new(name).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
-    // The star: filled and always shown for a favorite, an outline that appears while the pointer is on the row otherwise.
+    // The star, at the left: filled and always shown for a favorite, an outline that appears while the pointer is on the row otherwise.
     .child(
       div()
         .id(SharedString::from(format!("project-star-{}", path.display())))
@@ -2666,6 +2902,51 @@ fn project_list_row(workspace: &Entity<Workspace>, project: &Project, selected: 
           star_workspace.update(cx, |this, cx| this.toggle_favorite(&star_path, cx));
         }),
     )
+    .child(
+      div()
+        .size_6()
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded_md()
+        .text_sm()
+        .text_color(look.text)
+        .when_some(look.fill, |avatar, fill| avatar.bg(fill))
+        .when_some(look.icon.clone(), |avatar, icon| avatar.child(Icon::empty().path(icon).size_4()))
+        .when(look.icon.is_none(), |avatar| avatar.child(look.letter.clone())),
+    )
+    .child(Label::new(name).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+    // What is waiting in the project: commits to push (an arrow), and files with changes (a blue dot).
+    .when(status.is_some_and(|status| status.push), |row| {
+      row.child(
+        div()
+          .id(SharedString::from(format!("project-push-{}", path.display())))
+          .flex()
+          .flex_none()
+          .items_center()
+          .justify_center()
+          .px_2()
+          .rounded_full()
+          .bg(palette.hover)
+          .tooltip(|window, cx| Tooltip::new("Commits waiting to be pushed").build(window, cx))
+          .child(Icon::empty().path("icons/arrow-up.svg").size_3p5().text_color(muted)),
+      )
+    })
+    .when(status.is_some_and(|status| status.changed > 0), |row| {
+      let changed = status.map_or(0, |status| status.changed);
+      row.child(
+        div()
+          .id(SharedString::from(format!("project-changes-{}", path.display())))
+          .flex_none()
+          .size_2()
+          .rounded_full()
+          .bg(cx.theme().primary)
+          .tooltip(move |window, cx| {
+            Tooltip::new(if changed == 1 { "1 uncommitted change".to_string() } else { format!("{changed} uncommitted changes") }).build(window, cx)
+          }),
+      )
+    })
     .on_click({
       let workspace = workspace.clone();
       move |_, window, cx| {
@@ -2675,53 +2956,7 @@ fn project_list_row(workspace: &Entity<Workspace>, project: &Project, selected: 
         })
       }
     })
-    .context_menu(move |menu, _, _| project_menu(menu, &menu_workspace, &menu_path, &categories, current.as_deref(), favorite))
     .into_any_element()
-}
-
-/// The right-click menu of a project avatar: its settings, the categories it can move to, and making a new one.
-fn project_menu(
-  menu: PopupMenu,
-  workspace: &Entity<Workspace>,
-  path: &Path,
-  categories: &[(String, SharedString)],
-  current: Option<&str>,
-  favorite: bool,
-) -> PopupMenu {
-  let (favorite_workspace, favorite_path) = (workspace.clone(), path.to_path_buf());
-  let menu = menu.item(
-    PopupMenuItem::new(if favorite { "Remove from favorites" } else { "Add to favorites" })
-      .on_click(move |_, _, cx| favorite_workspace.update(cx, |this, cx| this.toggle_favorite(&favorite_path, cx))),
-  );
-  let (settings_workspace, settings_path) = (workspace.clone(), path.to_path_buf());
-  let mut menu = menu.item(
-    PopupMenuItem::new("Settings…")
-      .on_click(move |_, window, cx| settings_workspace.update(cx, |this, cx| this.open_project_settings(&settings_path, window, cx))),
-  );
-  menu = menu.separator();
-  if !categories.is_empty() {
-    menu = menu.label("Move to");
-    for (id, label) in categories {
-      let (workspace, path, id_owned) = (workspace.clone(), path.to_path_buf(), id.clone());
-      menu = menu.item(
-        PopupMenuItem::new(label.clone())
-          .checked(current == Some(id.as_str()))
-          .on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.move_project(&path, Some(&id_owned), cx))),
-      );
-    }
-    menu = menu.separator();
-  }
-  let (new_workspace, new_path) = (workspace.clone(), path.to_path_buf());
-  menu = menu.item(
-    PopupMenuItem::new("New category…")
-      .on_click(move |_, window, cx| new_workspace.update(cx, |this, cx| this.new_category(new_path.clone(), window, cx))),
-  );
-  if current.is_some() {
-    let (workspace, path) = (workspace.clone(), path.to_path_buf());
-    menu = menu
-      .item(PopupMenuItem::new("Remove from category").on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.move_project(&path, None, cx))));
-  }
-  menu
 }
 
 /// What a failed push, pull or fetch says about the account's token, if it says anything: the host turned the token down, or
@@ -2779,13 +3014,14 @@ fn rail_button(
   icon: Icon,
   tooltip: &'static str,
   selected: bool,
+  large: bool,
   palette: &crate::theme::Colors,
   on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
   let hover = palette.rail_hover;
   div()
     .id(id)
-    .size_8()
+    .map(|button| if large { button.size_10() } else { button.size_8() })
     .flex()
     .flex_none()
     .items_center()
@@ -2835,6 +3071,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::new_terminal))
       .on_action(cx.listener(Self::toggle_terminal))
       .on_action(cx.listener(Self::split_right))
+      .on_action(cx.listener(Self::view_on_host))
       .on_action(cx.listener(Self::split_down))
       .on_action(cx.listener(Self::save_file))
       .on_action(cx.listener(Self::close_tab))
@@ -2847,6 +3084,7 @@ impl Render for Workspace {
           "title-add",
           Icon::new(IconName::Plus),
           "Add project",
+          false,
           false,
           &palette,
           |_, window, cx| window.dispatch_action(Box::new(AddProject), cx),

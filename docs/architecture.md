@@ -24,6 +24,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/workspace.rs` | `Workspace` (one per window): projects, the title bar (repository switcher, tabs), the sidebar, the status bar, the dock and the terminals of every project |
 | `crates/ui/src/editor.rs` | `EditorPanel`: tabs (`Tabs`) of file editors, shown with the Kit default `TabBar` that the panel draws itself (the dock title bar is off), or the empty state |
 | `crates/ui/src/terminal.rs` | `Terminal` (a view): draws a `Session`, handles keys, mouse, selection, scrolling, paste and its right-click menu |
+| `crates/ui/src/menus.rs` | the menu bar (`menus`); the app sets it at startup and the window in front updates the Repository item with the service of the open project's remote (`Workspace::sync_menus`, `view_on_host`, `vekro_hosting::web_repository`) |
 | `crates/ui/src/terminal_layout.rs` | the tabs and split panes of a project's terminals as plain data (`Arrangement`, `Node`, `Direction`), tested without a window |
 | `crates/ui/src/commit_settings.rs` | the OpenCommit settings dialog (model, diff size, language, message style, instructions, push after commit) |
 | `crates/ui/src/change_view.rs` | `ChangeView`: the diff of the chosen file of the Changes view in the main area, in place of the editor (re-read every refresh, redrawn only when it differs) |
@@ -38,7 +39,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/{components,assets}.rs` | the blue "chosen" button style; Kit icons |
 | `crates/terminal/src/session.rs` | `Session`: PTY, `alacritty_terminal`, shell directory lookup |
 | `crates/terminal/src/{snapshot,palette,keys,mouse,search}.rs` | styled screen snapshot, colors, key and mouse encoding, scrollback search |
-| `crates/git/src/lib.rs` | `summary` (branch, changed files, and `Sync`: remote, ahead/behind, last fetch), `file_diff`, `diff_files`, `history`, `commit_detail`, `commit_file_diff`, `branches`, `create_branch`, `switch_branch`, `commit`, `push`, `fetch`, `pull`, `create_project`, `clone`, `repository_name`, `find_repositories` |
+| `crates/git/src/lib.rs` | `summary` (branch, changed files, and `Sync`: remote, ahead/behind, last fetch), `file_diff`, `diff_files`, `history`, `commit_detail`, `commit_file_diff`, `undo_commit`, `create_tag`, `quick_status`, `branches`, `create_branch`, `switch_branch`, `commit`, `push`, `fetch`, `pull`, `create_project`, `clone`, `repository_name`, `find_repositories` |
 | `crates/updater/src/`, `crates/version/src/` | release lookup, download, verification, installer script; version comparison |
 | `crates/ui/src/updates.rs` | the update state of the shared settings model (`UpdateState`, `AppUpdate`) with its actions, and `UpdatePanel`, the Updates page of Settings |
 | `crates/hosting/src/` | `accounts.rs` (`Account`, `Accounts`, `TokenStore`: the macOS Keychain through `security`, or memory), `api.rs` (verify, repositories, pull requests per service), `remote.rs` (`RepoRef`: which repository a remote URL names) |
@@ -48,7 +49,7 @@ apps/vekro ─► app ─► ui ─► terminal
 
 ## Window layout
 
-The `Workspace` renders the title band (right of the traffic lights: the **repository switcher**, a fixed first tab with a filterable, category-grouped menu of every project and an Add button; then the Add button), then a row of the **activity bar** (`render_activity_bar`: a 48 px strip with one button each for Explorer and
+The `Workspace` renders the title band (right of the traffic lights: the **repository switcher**, a fixed first tab with a filterable, category-grouped menu of every project and an Add button; then the Add button), then a row of the **activity bar** (`render_activity_bar`: a 56 px strip with one button each for Explorer and
 Git, which choose `sidebar_tab`, the terminal button under them, and Settings at the bottom with the account warning badge) and the **sidebar** (the selected view, in a Kit `h_resizable` pane, 200–960 px) and, right of it, a column with the Kit **`DockArea`** and the status bar below it, so the sidebar runs down to the bottom of the window. The sidebar is plain
 workspace content, not a dock panel, so it has no tab bar. The dock holds only the center: `EditorPanel`. The terminals are
 not dock panels: the activity bar's terminal button (`ToggleTerminal`, `⌘J`; `terminal_open`) makes them fill everything right of the activity bar in place of the sidebar, the dock and the status bar

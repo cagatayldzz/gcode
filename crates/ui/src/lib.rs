@@ -10,6 +10,7 @@ mod connect_account;
 mod connections;
 mod editor;
 mod explorer;
+mod menus;
 mod project_manager;
 mod project_settings;
 mod project_setup;
@@ -26,6 +27,7 @@ mod workspace;
 use gpui_kit::*;
 
 pub use assets::Assets;
+pub use menus::menus;
 pub use workspace::{Workspace, TOOLBAR_HEIGHT};
 
 actions!(
@@ -45,7 +47,9 @@ actions!(
     // In a terminal: copy the selection, paste, clear the history.
     CopySelection,
     PasteClipboard,
-    ClearBuffer
+    ClearBuffer,
+    // Repository menu: open the repository on the service that hosts it.
+    ViewOnHost
   ]
 );
 

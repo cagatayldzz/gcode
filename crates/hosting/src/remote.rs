@@ -82,3 +82,55 @@ fn split_remote(url: &str) -> Option<(String, Vec<String>)> {
 pub fn remote_host(url: &str) -> Option<String> {
   split_remote(url).map(|(host, _)| host)
 }
+
+/// A repository's page on the service that hosts it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebRepository {
+  /// What to call the service: "GitHub", "GitLab", "Azure DevOps", or the host for any other.
+  pub service: String,
+  /// The page of the repository in a browser.
+  pub url: String,
+}
+
+/// The page in a browser of the repository a remote URL names (`https://…`, `git@host:a/b.git`, `ssh://…`), and which service it is.
+/// A connected account says what its host is (a self-hosted GitLab, GitHub Enterprise); otherwise github.com, gitlab.com, `gitlab.*`
+/// and dev.azure.com are known by name. `None` for a local path or an address that names no repository.
+pub fn web_repository(url: &str, accounts: &[Account]) -> Option<WebRepository> {
+  let (host, segments) = split_remote(url)?;
+  let account = accounts.iter().find(|account| {
+    let account_host = account.hostname().split(':').next().unwrap_or_default();
+    host.eq_ignore_ascii_case(account_host) || (account.provider == Provider::AzureDevOps && host.eq_ignore_ascii_case("ssh.dev.azure.com"))
+  });
+  let provider = account.map(|account| account.provider).or_else(|| {
+    let host = host.to_lowercase();
+    if host == "github.com" {
+      Some(Provider::GitHub)
+    } else if host == "gitlab.com" || host.starts_with("gitlab.") {
+      Some(Provider::GitLab)
+    } else if host == "dev.azure.com" || host == "ssh.dev.azure.com" {
+      Some(Provider::AzureDevOps)
+    } else {
+      None
+    }
+  });
+  match provider {
+    Some(Provider::AzureDevOps) => {
+      let base = account.filter(|account| account.hostname() != "ssh.dev.azure.com").map_or("https://dev.azure.com".to_string(), Account::base_url);
+      let (org, project, repository) = match segments.as_slice() {
+        [v3, org, project, repository] if v3 == "v3" => (org, project, repository),
+        [org, project, git, repository] if git == "_git" => (org, project, repository),
+        [org, git, repository] if git == "_git" => (org, repository, repository),
+        _ => return None,
+      };
+      Some(WebRepository { service: "Azure DevOps".into(), url: format!("{base}/{org}/{project}/_git/{repository}") })
+    }
+    other => {
+      let base = account.map_or_else(|| format!("https://{host}"), Account::base_url);
+      let service = match other {
+        Some(provider) => provider.label().to_string(),
+        None => host.clone(),
+      };
+      (segments.len() >= 2).then(|| WebRepository { service, url: format!("{base}/{}", segments.join("/")) })
+    }
+  }
+}

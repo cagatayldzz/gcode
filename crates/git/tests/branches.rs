@@ -338,3 +338,27 @@ fn a_push_refused_for_workflow_files_says_which_permission_is_missing() {
   fs::remove_dir_all(dir).unwrap();
   fs::remove_dir_all(remote).unwrap();
 }
+
+#[test]
+fn the_quick_status_counts_changes_and_says_whether_a_push_is_waiting() {
+  assert_eq!(vekro_git::quick_status(&std::env::temp_dir().join("vekro-git-not-a-repository-folder")), None);
+  let (dir, remote) = remote_pair("quick");
+  assert_eq!(vekro_git::quick_status(&dir), Some((0, true)), "an unpublished branch is waiting to be pushed");
+  vekro_git::push(&dir, None, |_| {}).unwrap();
+  assert_eq!(vekro_git::quick_status(&dir), Some((0, false)));
+  fs::write(dir.join("b.txt"), "b").unwrap();
+  assert_eq!(vekro_git::quick_status(&dir), Some((1, false)), "a change is not a commit to push");
+  commit_all(&dir, "second");
+  assert_eq!(vekro_git::quick_status(&dir), Some((0, true)));
+  fs::remove_dir_all(dir).unwrap();
+  fs::remove_dir_all(remote).unwrap();
+}
+
+#[test]
+fn a_repository_without_a_remote_never_waits_for_a_push() {
+  let dir = repository("quick-local");
+  fs::write(dir.join("a.txt"), "a").unwrap();
+  commit_all(&dir, "first");
+  assert_eq!(vekro_git::quick_status(&dir), Some((0, false)));
+  fs::remove_dir_all(dir).unwrap();
+}

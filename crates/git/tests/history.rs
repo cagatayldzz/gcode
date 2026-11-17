@@ -112,3 +112,64 @@ fn the_diff_of_one_file_in_a_commit_shows_only_that_file() {
   assert!(!patch.contains("b.txt"));
   fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn undoing_the_last_commit_keeps_its_changes_and_returns_its_message() {
+  let dir = repository("undo");
+  fs::write(dir.join("a.txt"), "one\n").unwrap();
+  let first = commit_all(&dir, "first", 1_000);
+  fs::write(dir.join("a.txt"), "two\n").unwrap();
+  let second = commit_all(&dir, "second line\n\nThe body.", 2_000);
+
+  let message = vekro_git::undo_commit(&dir, &second.to_string()).unwrap();
+  assert_eq!(message, ("second line".to_string(), "The body.".to_string()));
+  assert_eq!(history(&dir, 10).unwrap().len(), 1, "the branch is back at the first commit");
+  assert_eq!(history(&dir, 10).unwrap()[0].id, first.to_string());
+  assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "two\n", "the files are untouched");
+  let summary = vekro_git::summary(&dir).unwrap();
+  assert_eq!(summary.changes.len(), 1, "the changes of the undone commit are changes again");
+  assert_eq!(summary.changes[0].path, PathBuf::from("a.txt"));
+  fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn only_a_last_unpushed_commit_that_has_a_parent_can_be_undone() {
+  let remote = std::env::temp_dir().join(format!("vekro-git-history-undo-remote-{}", std::process::id()));
+  let _ = fs::remove_dir_all(&remote);
+  git2::Repository::init_opts(&remote, git2::RepositoryInitOptions::new().bare(true).initial_head("main")).unwrap();
+  let dir = repository("undo-refused");
+  fs::write(dir.join("a.txt"), "one\n").unwrap();
+  let first = commit_all(&dir, "first", 1_000);
+  assert!(vekro_git::undo_commit(&dir, &first.to_string()).unwrap_err().contains("first commit"));
+
+  git2::Repository::open(&dir).unwrap().remote("origin", remote.to_str().unwrap()).unwrap();
+  fs::write(dir.join("a.txt"), "two\n").unwrap();
+  let second = commit_all(&dir, "second", 2_000);
+  vekro_git::push(&dir, None, |_| {}).unwrap();
+  assert!(vekro_git::undo_commit(&dir, &second.to_string()).unwrap_err().contains("already on the remote"));
+
+  fs::write(dir.join("a.txt"), "three\n").unwrap();
+  let third = commit_all(&dir, "third", 3_000);
+  assert!(vekro_git::undo_commit(&dir, &second.to_string()).unwrap_err().contains("last commit"), "only the tip");
+  vekro_git::undo_commit(&dir, &third.to_string()).unwrap();
+  assert_eq!(history(&dir, 10).unwrap()[0].id, second.to_string());
+  fs::remove_dir_all(dir).unwrap();
+  fs::remove_dir_all(remote).unwrap();
+}
+
+#[test]
+fn a_tag_is_created_on_a_commit_and_shows_in_the_history() {
+  let dir = repository("tag");
+  fs::write(dir.join("a.txt"), "one\n").unwrap();
+  let first = commit_all(&dir, "first", 1_000);
+  fs::write(dir.join("a.txt"), "two\n").unwrap();
+  commit_all(&dir, "second", 2_000);
+  vekro_git::create_tag(&dir, &first.to_string(), "  v0.1.0 ").unwrap();
+  let found = history(&dir, 10).unwrap();
+  assert_eq!(found[1].tags, vec!["v0.1.0".to_string()]);
+  assert!(vekro_git::create_tag(&dir, &first.to_string(), "v0.1.0").unwrap_err().contains("already exists"));
+  assert!(vekro_git::create_tag(&dir, &first.to_string(), "has space").unwrap_err().contains("not a valid"));
+  assert!(vekro_git::create_tag(&dir, &first.to_string(), "  ").is_err());
+  assert!(vekro_git::create_tag(&dir, "not an id", "v2").is_err());
+  fs::remove_dir_all(dir).unwrap();
+}

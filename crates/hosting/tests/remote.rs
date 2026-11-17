@@ -63,3 +63,50 @@ fn account_addresses_work_with_and_without_a_scheme() {
   let local = account(Provider::GitLab, "http://127.0.0.1:8080", None);
   assert_eq!((local.hostname(), local.base_url().as_str()), ("127.0.0.1:8080", "http://127.0.0.1:8080"));
 }
+
+mod web {
+  use vekro_hosting::{web_repository, Account, Provider};
+
+  fn url(remote: &str, accounts: &[Account]) -> Option<(String, String)> {
+    web_repository(remote, accounts).map(|found| (found.service, found.url))
+  }
+
+  fn pair(service: &str, url: &str) -> Option<(String, String)> {
+    Some((service.to_string(), url.to_string()))
+  }
+
+  #[test]
+  fn well_known_hosts_are_told_from_their_names_in_every_remote_form() {
+    for remote in
+      ["https://github.com/octo/app.git", "git@github.com:octo/app.git", "ssh://git@github.com/octo/app.git", "https://me@github.com/octo/app/"]
+    {
+      assert_eq!(url(remote, &[]), pair("GitHub", "https://github.com/octo/app"), "{remote}");
+    }
+    assert_eq!(url("git@gitlab.com:group/sub/app.git", &[]), pair("GitLab", "https://gitlab.com/group/sub/app"));
+    assert_eq!(url("https://gitlab.example.org/team/app.git", &[]), pair("GitLab", "https://gitlab.example.org/team/app"));
+  }
+
+  #[test]
+  fn azure_devops_remotes_become_git_pages() {
+    let page = "https://dev.azure.com/contoso/Shop/_git/shop";
+    assert_eq!(url("https://contoso@dev.azure.com/contoso/Shop/_git/shop", &[]), pair("Azure DevOps", page));
+    assert_eq!(url("git@ssh.dev.azure.com:v3/contoso/Shop/shop", &[]), pair("Azure DevOps", page));
+    assert_eq!(url("https://dev.azure.com/contoso/_git/shop", &[]), pair("Azure DevOps", "https://dev.azure.com/contoso/shop/_git/shop"));
+    assert_eq!(url("https://dev.azure.com/contoso", &[]), None, "no repository is named");
+  }
+
+  #[test]
+  fn a_connected_account_says_what_its_host_is() {
+    let enterprise = Account { provider: Provider::GitHub, host: "git.example.com".into(), organization: None, username: "me".into(), issue: None };
+    assert_eq!(url("git@git.example.com:team/app.git", &[enterprise]), pair("GitHub", "https://git.example.com/team/app"));
+    let own_gitlab = Account { provider: Provider::GitLab, host: "code.example.com".into(), organization: None, username: "me".into(), issue: None };
+    assert_eq!(url("https://code.example.com/a/b.git", &[own_gitlab]), pair("GitLab", "https://code.example.com/a/b"));
+  }
+
+  #[test]
+  fn an_unknown_host_is_named_by_itself_and_local_paths_have_no_page() {
+    assert_eq!(url("https://git.sr.ht/~me/app", &[]), pair("git.sr.ht", "https://git.sr.ht/~me/app"));
+    assert_eq!(url("/Users/me/project.git", &[]), None);
+    assert_eq!(url("https://github.com/lonely", &[]), None);
+  }
+}

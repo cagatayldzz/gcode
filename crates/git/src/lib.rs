@@ -134,6 +134,14 @@ pub fn summary(path: &Path) -> Option<Summary> {
   Some(Summary { branch, changes, sync })
 }
 
+/// What the project menu shows beside a project: how many files have changes, and whether commits are waiting to be pushed
+/// (the branch is ahead of its remote, or was never published while the repository has a remote). `None` outside a repository.
+pub fn quick_status(path: &Path) -> Option<(usize, bool)> {
+  let summary = summary(path)?;
+  let push = summary.sync.as_ref().is_some_and(|sync| sync.ahead > 0 || !sync.upstream);
+  Some((summary.changed(), push))
+}
+
 /// The folder name `git clone` would pick for `url`: `https://github.com/a/vekro.git` gives `vekro`.
 pub fn repository_name(url: &str) -> Option<String> {
   let trimmed = url.trim().trim_end_matches('/');
@@ -530,6 +538,59 @@ pub fn fetch(path: &Path, credentials: Option<&Credentials>, mut on_progress: im
 /// refuses (with git's message) when the branches have diverged or local changes are in the way.
 pub fn pull(path: &Path, credentials: Option<&Credentials>, mut on_progress: impl FnMut(&str)) -> Result<String, String> {
   with_login(credentials, |credentials| finish(run_git(path, &["pull", "--ff-only"], credentials, &mut on_progress)?, "git pull failed."))
+}
+
+/// Whether a remote branch already has the commit.
+fn on_remote(repository: &Repository, id: git2::Oid) -> bool {
+  let Ok(references) = repository.references_glob("refs/remotes/*") else { return false };
+  references
+    .filter_map(Result::ok)
+    .filter_map(|reference| reference.target())
+    .any(|tip| tip == id || repository.graph_descendant_of(tip, id).unwrap_or(false))
+}
+
+/// Takes the last commit back, like `git reset --soft HEAD~1`: the branch goes to the commit before it, and the files and the
+/// index stay as they are, so its changes are back in the list of changes. Returns the message it had, as (summary, description),
+/// to put back in the commit box. Only the commit HEAD is on can be undone, not a merge or the first commit, and not one a remote
+/// branch already has: that would rewrite published history.
+pub fn undo_commit(path: &Path, id: &str) -> Result<(String, String), String> {
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  let commit = repository.head().ok().and_then(|head| head.peel_to_commit().ok()).ok_or("There is no commit to undo.")?;
+  if commit.id().to_string() != id {
+    return Err("Only the last commit of the branch can be undone.".into());
+  }
+  if commit.parent_count() != 1 {
+    return Err(
+      if commit.parent_count() == 0 { "The first commit of a repository cannot be undone." } else { "A merge commit cannot be undone here." }.into(),
+    );
+  }
+  if on_remote(&repository, commit.id()) {
+    return Err("This commit is already on the remote; undoing it would rewrite published history.".into());
+  }
+  let parent = commit.parent(0).map_err(|error| error.message().to_string())?;
+  repository.reset(parent.as_object(), git2::ResetType::Soft, None).map_err(|error| error.message().to_string())?;
+  let message = commit.message().unwrap_or("");
+  let (summary, rest) = message.split_once('\n').unwrap_or((message, ""));
+  Ok((summary.trim().to_string(), rest.trim().to_string()))
+}
+
+/// Creates a lightweight tag with this name on a commit. The name must be valid and not taken.
+pub fn create_tag(path: &Path, id: &str, name: &str) -> Result<(), String> {
+  let name = name.trim();
+  if name.is_empty() {
+    return Err("Enter a tag name.".into());
+  }
+  if !git2::Reference::is_valid_name(&format!("refs/tags/{name}")) {
+    return Err(format!("\"{name}\" is not a valid tag name."));
+  }
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  if repository.find_reference(&format!("refs/tags/{name}")).is_ok() {
+    return Err(format!("A tag named {name} already exists."));
+  }
+  let object = repository
+    .find_object(git2::Oid::from_str(id).map_err(|error| error.message().to_string())?, None)
+    .map_err(|error| error.message().to_string())?;
+  repository.tag_lightweight(name, &object, false).map(|_| ()).map_err(|error| error.message().to_string())
 }
 
 /// The URL of the remote the current branch follows, else `origin`, else the first remote; `None` without remotes.

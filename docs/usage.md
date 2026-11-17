@@ -3,7 +3,7 @@
 A Vekro window has these parts:
 
 - the **title bar**: the current project (a menu of every project grouped by category, with a filter and Add) fixed at the left, the `+` button (Add project) right of it;
-- the **activity bar**, a narrow strip at the far left: the Explorer and Git buttons (they choose the view of the sidebar), the terminal button under them, and Settings at the bottom;
+- the **activity bar**, a narrow strip at the far left: the Explorer and Git buttons (they choose the view of the sidebar; the Git button shows the number of changed files in a small blue circle), the terminal button under them, and Settings at the bottom;
 - the **sidebar**, next to the activity bar: **Explorer** shows the folder tree of the open project, under a row with the project's name and four
   buttons: new file, new folder (created inside the selected folder, next to the selected file, or in the project folder; type the name and
   press Enter, `dir/name.rs` makes the subfolder too), refresh and collapse all folders. **Git** shows the branch
@@ -39,20 +39,25 @@ project's folder is deleted (in Finder, by a command, by another app), Vekro tak
 the next start, when the window comes back to the front and every few seconds, and says which it removed. A folder that
 cannot be read (no permission, an unmounted disk) is not counted as deleted.
 
+### What is waiting in a project
+
+In the project menu, each project can show two marks beside its name: a small **arrow** when commits are waiting to be pushed (the
+branch is ahead of its remote, or was never published while the repository has a remote), and a **blue dot** when files have
+uncommitted changes. They are read when the menu opens and kept up to date while it is open.
+
 ### Favorites
 
-Star the projects you use most: in the project menu of the title bar, press the star at the right of a project (it appears while the
-pointer is on the row; a favorite's star stays, filled), or right-click it and choose **Add to favorites**. Favorites are listed first,
-under **Favorites**, and are not repeated under their category; the star (or **Remove from favorites**) takes them out again.
+Star the projects you use most: in the project menu of the title bar, press the star at the left of a project (it appears while the
+pointer is on the row; a favorite's star stays, filled). Favorites are listed first, under **Favorites**, and are not repeated under
+their category; pressing the star again takes them out.
 Projects without a category are listed under **No category**. Favorites are kept in `projects.json`.
 
 ### Categories
 
 Categories group the projects in the project menu of the title bar: each category is a heading, and projects without one
-are under **Other**.
+are under **No category**. The sort button (arrows) beside **Add** in the menu opens Settings → **Project list**, where they are
+managed:
 
-- Right-click a project in the menu: **New category…** (asks for a name), **Move to** (the current category is checked) and
-  **Remove from category**.
 - Settings → **Project list** shows every project and category with buttons to rename, reorder, move and delete them (deleting a
   category keeps its projects, outside any category).
 
@@ -136,10 +141,9 @@ written by saving. Each project keeps its own tabs.
 
 ## Git
 
-The Git tab has two views, **Changes** and **History**. **History** lists the commits of the current branch, newest first (up to
-300): the subject, who made it and when, any tags, and an arrow while the remote does not have the commit yet. Choose one to see it
+The Git tab has two views, **Changes** and **History**. **History** lists the commits of the current branch, newest first, 50 at a time (scroll to the end of the list, or press **Load 50 more commits**, for the next 50; the list has a scroll bar): the subject, who made it and when, any tags, and an arrow while the remote does not have the commit yet. Choose one to see it
 in the main area, in place of the editor: its message, the files it changed (with `+`/`-` totals) and the diff of the chosen file;
-the first commit is shown when you open the view, and the editor tabs come back when you return to Changes or another sidebar tab.
+right-click a commit for **Undo Commit…** (only the last commit, and only while the remote does not have it: it goes back like `git reset --soft`, its changes return to Changes and its message to the commit box), **Create Tag…** (a lightweight tag on that commit, local until you push it) and **Copy SHA**; the first commit is shown when you open the view, and the editor tabs come back when you return to Changes or another sidebar tab.
 
 **Changes** shows every changed file with a mark: **A** new, **M** modified,
 **D** deleted, **R** renamed, **!** conflicted. Click a file to see its diff against the last commit
@@ -200,12 +204,20 @@ development builds, and only for Apple Silicon Macs.
 
 Settings are saved as soon as you change them.
 
+## Menu bar
+
+Only what is needed: **Vekro** (Settings…, Quit), **File** (New Window, Add Project…, Save, Close Tab), **View** (Toggle Terminal)
+and **Repository**, whose one item opens the open project's repository on the service that hosts it: **View on GitHub**, **View on
+GitLab** or **View on Azure DevOps** (the name of the host for any other; disabled while the project has no remote). The service
+is found from the remote's address, or from a connected account for a self-hosted GitHub or GitLab. Shortcuts show beside the items.
+
 ## Shortcuts
 
 | Shortcut | Action |
 | --- | --- |
 | `⌘N` | New window |
 | `⌘T` | New terminal tab (shows the terminals) |
+| `⇧⌘G` | Open the repository on its hosting service (Repository → View on …) |
 | `⌘J` | Show or hide the terminals (they fill the main area) |
 | `⌘S` | Save the open file |
 | `⌘W` | Close the open editor tab; pressed again, the remaining tabs from the last to the first (never the window). In a terminal it closes the pane |

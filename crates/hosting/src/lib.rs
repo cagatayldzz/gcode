@@ -11,4 +11,4 @@ pub use api::{
   check_access, create_pull_request, default_branch, is_permission_problem, pull_requests, repositories, verify, verify_permissions, NewPullRequest,
   PermissionReport, PullRequest, Repository, TokenAccess,
 };
-pub use remote::{remote_host, RepoRef};
+pub use remote::{remote_host, web_repository, RepoRef, WebRepository};

@@ -151,7 +151,7 @@ pub(crate) fn settings_view(
         .description("System follows the macOS appearance."),
       ),
     ]),
-    SettingPage::new("Editor").icon(IconName::File).resettable(false).group(
+    SettingPage::new("Editor").icon(IconName::File).default_open(first_page == "Editor").resettable(false).group(
       SettingGroup::new().title("Code").item(
         SettingItem::new(
           "Font size",
@@ -167,7 +167,7 @@ pub(crate) fn settings_view(
         .description("The size of code in the editor and in a file's changes, in pixels."),
       ),
     ),
-    SettingPage::new("Projects").icon(IconName::Folder).resettable(false).groups(vec![
+    SettingPage::new("Projects").icon(IconName::Folder).default_open(first_page == "Projects").resettable(false).groups(vec![
       SettingGroup::new()
         .title("Folder")
         .item(
@@ -215,7 +215,7 @@ pub(crate) fn settings_view(
           .description("Adds every Git repository directly inside the projects folder to the project menu."),
         ),
     ]),
-    SettingPage::new("Project list").icon(IconName::Menu).resettable(false).group(
+    SettingPage::new("Project list").icon(IconName::Menu).default_open(first_page == "Project list").resettable(false).group(
       SettingGroup::new()
         .title("Projects and categories")
         .description("Rename, recolor, reorder and group the projects of the menu in the title bar, or remove them. Right-click a project in that menu to move it to a category.")
