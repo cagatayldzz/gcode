@@ -1,7 +1,7 @@
 //! Vekro's light and dark colors and fonts, switched with the system appearance.
 //!
-//! The dark palette follows the project's design image (deep blue-black surfaces, one blue accent, the blue of
-//! the logo); the light one is a cool slate counterpart with the same accent.
+//! Both palettes follow Google Chrome: a gray (light) or near-black (dark) frame around the rail and title band,
+//! white or dark-gray pages, and one blue accent.
 
 use gpui_kit::{
   component::{ActiveTheme as _, Theme, ThemeMode},
@@ -39,15 +39,17 @@ pub(crate) struct Colors {
   /// The row that is chosen.
   pub selected: Hsla,
   pub hover: Hsla,
-  /// The project rail on the far left: the colors of github.com's header and page border, in both appearances.
+  /// The project rail on the far left and the title band: Chrome's window frame.
   pub rail: Hsla,
   pub rail_hover: Hsla,
   /// The hover color of an item on a `rail_hover` background, such as the inside of a category.
   pub rail_item_hover: Hsla,
   pub rail_text: Hsla,
-  /// The accent: the blue of the logo.
+  /// The accent: Chrome's blue.
   pub accent: Hsla,
   pub accent_hover: Hsla,
+  /// Text and icons drawn on the accent color.
+  pub on_accent: Hsla,
   pub link: Hsla,
   /// Marks for new, deleted, modified, renamed and conflicted files.
   pub new: Hsla,
@@ -80,55 +82,59 @@ pub(crate) fn project_color(value: &str) -> Option<Hsla> {
 }
 
 impl Colors {
+  /// Chrome's dark theme: a dark frame, lighter toolbar grays and the light blue of its buttons.
   fn dark() -> Self {
     Self {
-      background: hex(0x0f1319),
-      text: hex(0xe7eaf0),
-      text_secondary: hex(0x8d96a5),
-      surface: hex(0x131820),
-      surface_alt: hex(0x181e28),
-      border: hex(0x222a36),
-      control_border: hex(0x3d4757),
-      selected: hex(0x1f2836),
-      hover: hex(0x1a212c),
-      rail: hex(0x010409),
-      rail_hover: hex(0x161b22),
-      rail_item_hover: hex(0x242d3a),
-      rail_text: hex(0x848d97),
-      accent: hex(0x4d8dff),
-      accent_hover: hex(0x6aa0ff),
-      link: hex(0x6aa0ff),
-      new: hex(0x3fb980),
-      deleted: hex(0xf0646b),
-      modified: hex(0xe2b13c),
-      renamed: hex(0x4d8dff),
-      conflicted: hex(0xf59a4a),
+      background: hex(0x202124),
+      text: hex(0xe8eaed),
+      text_secondary: hex(0x9aa0a6),
+      surface: hex(0x292a2d),
+      surface_alt: hex(0x35363a),
+      border: hex(0x3c4043),
+      control_border: hex(0x5f6368),
+      selected: hex(0x394457),
+      hover: hex(0x35363a),
+      rail: hex(0x171717),
+      rail_hover: hex(0x2d2e31),
+      rail_item_hover: hex(0x3c4043),
+      rail_text: hex(0x9aa0a6),
+      accent: hex(0x8ab4f8),
+      accent_hover: hex(0xaecbfa),
+      on_accent: hex(0x062e6f),
+      link: hex(0x8ab4f8),
+      new: hex(0x81c995),
+      deleted: hex(0xf28b82),
+      modified: hex(0xfdd663),
+      renamed: hex(0x8ab4f8),
+      conflicted: hex(0xfcad70),
     }
   }
 
+  /// Chrome's light theme: a gray frame, white pages and toolbars, Google blue.
   fn light() -> Self {
     Self {
       background: hex(0xffffff),
-      text: hex(0x1b2230),
-      text_secondary: hex(0x667085),
-      surface: hex(0xf4f6f9),
-      surface_alt: hex(0xebeef3),
-      border: hex(0xe1e5ec),
-      control_border: hex(0xbcc5d1),
-      selected: hex(0xe3e9f4),
-      hover: hex(0xebeff6),
-      rail: hex(0xf6f8fa),
-      rail_hover: hex(0xeaeef2),
-      rail_item_hover: hex(0xdce2ea),
-      rail_text: hex(0x59636e),
-      accent: hex(0x2f6bff),
-      accent_hover: hex(0x4a7fff),
-      link: hex(0x2f6bff),
-      new: hex(0x1f9d63),
-      deleted: hex(0xd8424a),
-      modified: hex(0xb8860b),
-      renamed: hex(0x2f6bff),
-      conflicted: hex(0xd9702a),
+      text: hex(0x202124),
+      text_secondary: hex(0x5f6368),
+      surface: hex(0xf8f9fa),
+      surface_alt: hex(0xf1f3f4),
+      border: hex(0xdadce0),
+      control_border: hex(0x80868b),
+      selected: hex(0xe8f0fe),
+      hover: hex(0xf1f3f4),
+      rail: hex(0xdee1e6),
+      rail_hover: hex(0xd0d4da),
+      rail_item_hover: hex(0xc4c8ce),
+      rail_text: hex(0x3c4043),
+      accent: hex(0x1a73e8),
+      accent_hover: hex(0x1b66c9),
+      on_accent: hex(0xffffff),
+      link: hex(0x1a73e8),
+      new: hex(0x188038),
+      deleted: hex(0xd93025),
+      modified: hex(0xb06000),
+      renamed: hex(0x1a73e8),
+      conflicted: hex(0xe8710a),
     }
   }
 }
@@ -167,7 +173,7 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     colors.sidebar_accent = c.selected;
     colors.sidebar_accent_foreground = c.text;
     colors.sidebar_primary = c.accent;
-    colors.sidebar_primary_foreground = white();
+    colors.sidebar_primary_foreground = c.on_accent;
     colors.border = c.border;
     colors.input = c.control_border;
     colors.tab_bar_segmented = c.surface_alt;
@@ -183,7 +189,7 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     colors.primary = c.accent;
     colors.primary_hover = c.accent_hover;
     colors.primary_active = c.accent;
-    colors.primary_foreground = white();
+    colors.primary_foreground = c.on_accent;
     colors.ring = c.accent;
     colors.caret = c.text;
     colors.link = c.link;

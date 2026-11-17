@@ -14,7 +14,7 @@ use vekro_storage::Project;
 /// which is black on white in a dark theme.
 pub(crate) fn selected_style(cx: &App) -> ButtonCustomVariant {
   let primary = cx.theme().primary;
-  ButtonCustomVariant::new(cx).color(primary).foreground(white()).hover(primary).active(primary)
+  ButtonCustomVariant::new(cx).color(primary).foreground(colors(cx).on_accent).hover(primary).active(primary)
 }
 
 /// A path for display: the home folder is written as `~`.
@@ -45,7 +45,7 @@ pub(crate) fn avatar_look(project: &Project, selected: bool, cx: &App) -> Avatar
   let color = project.color.as_deref().and_then(project_color);
   let (fill, text, hover) = match (selected, color) {
     (true, Some(color)) => (Some(color), white(), color),
-    (true, None) => (Some(primary), white(), primary),
+    (true, None) => (Some(primary), palette.on_accent, primary),
     (false, Some(color)) => (Some(color.opacity(0.2)), color, color.opacity(0.32)),
     (false, None) => (None, palette.rail_text, palette.rail_hover),
   };
