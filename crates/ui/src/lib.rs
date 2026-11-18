@@ -41,6 +41,7 @@ actions!(
     NewWindow,
     AddProject,
     OpenSettings,
+    CheckForUpdates,
     SearchProject,
     OpenSearchResults,
     NewTerminal,

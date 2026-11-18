@@ -22,8 +22,8 @@ use crate::{
   terminal_layout::{Arrangement, Direction, Node},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
-  AddProject, CloseTab, NewTerminal, OpenSearchResults, OpenSettings, SaveFile, SearchProject, SplitDown, SplitRight, ToggleAllChanges,
-  ToggleTerminal, ViewOnHost,
+  AddProject, CheckForUpdates, CloseTab, NewTerminal, OpenSearchResults, OpenSettings, SaveFile, SearchProject, SplitDown, SplitRight,
+  ToggleAllChanges, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{base::Selectable as _, prelude::FluentBuilder as _};
 use gpui_kit::{
@@ -766,6 +766,12 @@ impl Workspace {
   /// Opens the Settings dialog.
   pub fn open_settings(&mut self, _: &OpenSettings, window: &mut Window, cx: &mut Context<Self>) {
     self.open_settings_page("General", window, cx);
+  }
+
+  /// Opens Settings on the Updates page and looks for a newer release.
+  pub fn check_for_updates(&mut self, _: &CheckForUpdates, window: &mut Window, cx: &mut Context<Self>) {
+    self.open_settings_page("Updates", window, cx);
+    self.settings.update(cx, |model, cx| model.check_update(cx));
   }
 
   /// Marks the account that serves `url` as having a permission problem, because the host refused its token: a warning shows by
@@ -4583,6 +4589,7 @@ impl Render for Workspace {
       })
       .on_action(cx.listener(Self::add_project))
       .on_action(cx.listener(Self::open_settings))
+      .on_action(cx.listener(Self::check_for_updates))
       .on_action(cx.listener(Self::search_project))
       .on_action(cx.listener(Self::open_search_results))
       .on_action(cx.listener(Self::new_terminal))
