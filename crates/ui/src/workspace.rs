@@ -53,7 +53,7 @@ use std::{
   ops::Range,
   path::{Path, PathBuf},
   sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU32, Ordering},
     Arc, Mutex,
   },
   time::Duration,
@@ -83,6 +83,8 @@ const PROJECT_MENU_WIDTH: Pixels = px(380.);
 const MENU_LIST_MAX_HEIGHT: Pixels = px(320.);
 
 /// How often the toolbar redraws while git reports its progress.
+/// How long the fill of a finished push, pull or fetch takes to reach the right edge.
+const REMOTE_FINISH: Duration = Duration::from_millis(300);
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
 
 /// How long the pointer must rest on a file in the Explorer before it is prepared for opening, so that moving past
@@ -165,7 +167,19 @@ struct ProjectView {
 struct RemoteWork {
   title: SharedString,
   progress: Arc<Mutex<String>>,
+  /// How far the work is, in thousandths, from the percentages git reports; it never goes back.
+  fraction: Arc<AtomicU32>,
+  started: std::time::Instant,
   fetching_after_push: Arc<AtomicBool>,
+}
+
+impl RemoteWork {
+  /// How much of the button the fill covers: what git reported, or the slow creep forward while git says nothing (it connects, or
+  /// there is nothing to transfer). The creep never passes 90% on its own.
+  fn shown(&self) -> f32 {
+    let creep = 0.9 * (1. - (-self.started.elapsed().as_secs_f32() / 3.).exp());
+    (self.fraction.load(Ordering::Relaxed) as f32 / 1000.).max(creep).clamp(0., 1.)
+  }
 }
 
 /// The open pull requests of the repository, as the toolbar's menu knows them.
@@ -318,6 +332,9 @@ pub struct Workspace {
   project_status: HashMap<PathBuf, ProjectStatus>,
   /// The push, pull or fetch that is running.
   remote_work: Option<RemoteWork>,
+  /// A finished push, pull or fetch whose fill is still running out to the right: where it stood, and which run it was.
+  remote_finish: Option<(f32, usize)>,
+  remote_runs: usize,
   /// The branch menu is open, with the local branches it lists and the field that filters them.
   branch_menu_open: bool,
   branches: Vec<String>,
@@ -433,6 +450,8 @@ impl Workspace {
       generating: false,
       project_status: HashMap::new(),
       remote_work: None,
+      remote_finish: None,
+      remote_runs: 0,
       branch_menu_open: false,
       branches: Vec::new(),
       branch_filter: branch_filter.clone(),
@@ -1913,24 +1932,37 @@ impl Workspace {
     };
     let progress = Arc::new(Mutex::new(String::from("Connecting…")));
     let fetching_after_push = Arc::new(AtomicBool::new(false));
-    self.remote_work = Some(RemoteWork { title: title.into(), progress: progress.clone(), fetching_after_push: fetching_after_push.clone() });
+    let fraction = Arc::new(AtomicU32::new(0));
+    self.remote_work = Some(RemoteWork {
+      title: title.into(),
+      progress: progress.clone(),
+      fraction: fraction.clone(),
+      started: std::time::Instant::now(),
+      fetching_after_push: fetching_after_push.clone(),
+    });
     cx.notify();
     let accounts = self.settings.read(cx).accounts.clone();
     let work = cx.background_executor().spawn({
       let root = root.clone();
-      let report = move |line: &str| *progress.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = line.to_string();
+      // `start` and `span` place the step in the whole run: a push is followed by a fetch.
+      let report = move |start: f32, span: f32, line: &str| {
+        *progress.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = line.to_string();
+        let done = start + span * progress_fraction(line).unwrap_or(0.);
+        fraction.fetch_max((done * 1000.) as u32, Ordering::Relaxed);
+      };
       async move {
         let credentials = credentials_for_repository(&accounts, &root);
         if sync.behind > 0 {
-          vekro_git::pull(&root, credentials.as_ref(), report)
+          vekro_git::pull(&root, credentials.as_ref(), |line| report(0., 1., line))
         } else if sync.ahead > 0 || !sync.upstream {
-          let pushed = vekro_git::push(&root, credentials.as_ref(), &report)?;
-          report("Connecting…");
+          let pushed = vekro_git::push(&root, credentials.as_ref(), |line| report(0., 0.85, line))?;
+          report(0.85, 0.15, "Connecting…");
           fetching_after_push.store(true, Ordering::Relaxed);
-          vekro_git::fetch(&root, credentials.as_ref(), report).map_err(|error| format!("Push succeeded, but fetching failed: {error}"))?;
+          vekro_git::fetch(&root, credentials.as_ref(), |line| report(0.85, 0.15, line))
+            .map_err(|error| format!("Push succeeded, but fetching failed: {error}"))?;
           Ok(pushed)
         } else {
-          vekro_git::fetch(&root, credentials.as_ref(), report)
+          vekro_git::fetch(&root, credentials.as_ref(), |line| report(0., 1., line))
         }
       }
     });
@@ -1953,7 +1985,22 @@ impl Workspace {
     cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
-        this.remote_work = None;
+        if let Some(work) = this.remote_work.take() {
+          // The fill runs on to the right edge and goes away.
+          this.remote_runs += 1;
+          let run = this.remote_runs;
+          this.remote_finish = Some((work.shown(), run));
+          cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(REMOTE_FINISH * 3 / 2).await;
+            let _ = this.update(cx, |this, cx| {
+              if this.remote_finish.is_some_and(|(_, current)| current == run) {
+                this.remote_finish = None;
+                cx.notify();
+              }
+            });
+          })
+          .detach();
+        }
         this.refresh_project();
         match result {
           Ok(_) => window.push_notification(Notification::info(format!("{done} {remote}.")), cx),
@@ -2928,6 +2975,7 @@ impl Workspace {
   fn render_git_toolbar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     let git = self.git.as_ref()?;
     let theme = cx.theme().clone();
+    let accent = theme.primary;
     let palette = colors(cx);
     let picker = self.render_branch_picker(&git.branch, cx);
     let pending_merge = git.merging.then(|| {
@@ -3032,7 +3080,23 @@ impl Workspace {
         .border_b_1()
         .border_color(palette.border)
         .child(div().h_12().border_r_1().border_color(palette.border).child(picker))
-        .children(sync.map(|button| div().h_12().border_r_1().border_color(palette.border).child(button)))
+        .children(sync.map(|button| {
+          // While a push, pull or fetch runs, a soft fill of the accent color grows across the button from left to right as
+          // far as git has got.
+          let fill = div().absolute().top_0().bottom_0().left_0().bg(accent.opacity(0.15));
+          let fill = if let Some(work) = &self.remote_work {
+            Some(fill.w(relative(work.shown())).into_any_element())
+          } else {
+            self.remote_finish.map(|(from, run)| {
+              fill
+                .with_animation(("remote-finish", run), Animation::new(REMOTE_FINISH), move |fill, delta| {
+                  fill.w(relative(from + (1. - from) * delta))
+                })
+                .into_any_element()
+            })
+          };
+          div().relative().h_12().overflow_hidden().border_r_1().border_color(palette.border).child(button).children(fill)
+        }))
         .children(pending_merge),
     )
   }
@@ -4529,4 +4593,24 @@ impl Render for Workspace {
           .into_any_element()
       }))
   }
+}
+
+/// How far one step of a push, pull or fetch has got, from the percentage in git's progress line: the steps weigh differently
+/// ("Receiving objects: 45% (20/46)" is the middle of a fetch, "Resolving deltas" its end).
+fn progress_fraction(line: &str) -> Option<f32> {
+  let line = line.rsplit(['\r', '\n']).find(|part| part.contains('%')).unwrap_or(line);
+  let percent: f32 = line.split('%').next()?.rsplit(|c: char| !c.is_ascii_digit()).next()?.parse().ok()?;
+  let line = line.to_lowercase();
+  let (start, span) = if line.contains("resolving") {
+    (0.8, 0.2)
+  } else if line.contains("writing") {
+    (0.4, 0.6)
+  } else if line.contains("receiving") {
+    (0.2, 0.6)
+  } else if line.contains("compressing") {
+    (0.2, 0.2)
+  } else {
+    (0., 0.2)
+  };
+  Some(start + span * (percent / 100.).clamp(0., 1.))
 }
