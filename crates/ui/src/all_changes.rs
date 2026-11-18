@@ -7,7 +7,7 @@ use gpui_kit::{
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     clipboard::Clipboard,
-    diff::{DiffFile, DiffGutterMarker, DiffLinePosition, DiffSide, DiffState},
+    diff::{DiffAnnotation, DiffFile, DiffGutterMarker, DiffLinePosition, DiffSide, DiffState},
     h_flex,
     label::Label,
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -20,7 +20,8 @@ use gpui_kit::{
 };
 use std::{cell::RefCell, collections::HashSet, path::PathBuf, rc::Rc, sync::Arc};
 
-const HEADER_ALIGNMENT_TOLERANCE: Pixels = px(1.);
+const CARD_BORDER_WIDTH: Pixels = px(1.);
+const CARD_GAP: Rems = rems(0.75);
 
 #[derive(Action, Clone, PartialEq)]
 #[action(namespace = vekro, no_json)]
@@ -32,6 +33,7 @@ pub(crate) struct AllChanges {
   patch: Option<Arc<str>>,
   viewed: HashSet<SharedString>,
   line_markers: Vec<DiffGutterMarker>,
+  last_line: Option<DiffLinePosition>,
   compact_scroll: UniformListScrollHandle,
   compact: bool,
   diff_subscription: Option<Subscription>,
@@ -56,8 +58,8 @@ impl AllChanges {
         return Ok(None);
       }
       let files = DiffFile::parse(&patch).map_err(|error| error.to_string())?;
-      let markers = line_markers(&patch, &files);
-      Ok::<_, String>(Some((patch, files, markers)))
+      let (markers, last_line) = line_markers(&patch, &files);
+      Ok::<_, String>(Some((patch, files, markers, last_line)))
     });
     self.task = Some(cx.spawn(async move |this, cx| {
       let result = work.await;
@@ -65,10 +67,11 @@ impl AllChanges {
         this.task = None;
         match result {
           Ok(None) => return,
-          Ok(Some((patch, files, markers))) => {
+          Ok(Some((patch, files, markers, last_line))) => {
             let paths: HashSet<_> = files.iter().map(DiffFile::path).collect();
             this.viewed.retain(|path| paths.contains(path));
             this.line_markers = markers;
+            this.last_line = last_line;
             if let Some(diff) = &mut this.diff {
               diff.set_files(files, &patch, cx);
             } else {
@@ -117,6 +120,7 @@ impl Render for AllChanges {
     let compact = self.compact;
     let compact_scroll = self.compact_scroll.clone();
     let menu_paths = paths.clone();
+    let menu_state = state.clone();
     let toolbar = h_flex()
       .justify_between()
       .gap_2()
@@ -130,7 +134,7 @@ impl Render for AllChanges {
           .dropdown_menu(move |menu, _, _| {
             menu_paths.iter().enumerate().fold(menu.scrollable(true), |menu, (index, path)| {
               let path = path.clone();
-              let state = state.clone();
+              let state = menu_state.clone();
               let compact_scroll = compact_scroll.clone();
               menu.item(PopupMenuItem::new(path.clone()).on_click(move |_, _, cx| {
                 if compact {
@@ -153,27 +157,53 @@ impl Render for AllChanges {
       return v_flex().size_full().min_h_0().p_3().gap_2().child(toolbar).child(self.compact_list(count, cx)).into_any_element();
     }
     let rows = Rc::new(RefCell::new(Vec::new()));
-    let header_positions = rows.clone();
+    let annotations = files
+      .iter()
+      .map(|file| DiffAnnotation::file(file.path().clone(), file.path().clone()))
+      .chain(self.last_line.clone().map(|position| DiffAnnotation::line("review-end", position)));
+    let headers: Rc<_> = files
+      .iter()
+      .map(|file| (file.path().clone(), (file.clone(), state.read(cx).is_file_collapsed(file.path()))))
+      .collect::<std::collections::HashMap<_, _>>()
+      .into();
     let first_path = paths.first().cloned();
+    let last_path = paths.last().cloned();
+    let last_notice = self.last_line.is_none().then(|| files.last().cloned()).flatten();
+    let header_positions = rows.clone();
     let line_positions = rows.clone();
     let header_view = cx.entity().downgrade();
     let review = cx.entity().downgrade();
+    let (background, border) = (cx.theme().background, cx.theme().border);
     let diff = diff
       .view(cx)
       .soft_wrap(true)
       .text_size(code_font_size(cx))
       .border_0()
       .size_full()
+      .header_visible(false)
+      .annotations(annotations)
       .gutter_markers(self.line_markers.iter().cloned())
-      .render_gutter_marker(move |marker, _, _| row_probe(marker.position().path().clone(), false, line_positions.clone()).size_full())
-      .render_header(move |file, _, cx| {
-        let content = header_view.upgrade().map(|view| view.read(cx).file_header(file, header_view.clone(), false, cx));
-        div()
-          .relative()
-          .w_full()
-          .when(first_path.as_ref() != Some(file.path()), |header| header.pt_2())
-          .children(content)
-          .child(row_probe(file.path().clone(), true, header_positions.clone()).absolute().inset_0())
+      .render_gutter_marker(move |marker, _, _| row_probe(marker.position().path().clone(), RowKind::Code, line_positions.clone()).size_full())
+      .render_annotation(move |annotation, window, cx| {
+        // Kit annotations normally have their own padded surface. The file card supplies that surface here.
+        let padding = window.rem_size() * 0.75;
+        let margin = -(padding + CARD_BORDER_WIDTH);
+        let path = annotation.path().clone();
+        let wrapper = v_flex().mx(-padding).mt(margin).mb(margin);
+        if annotation.position().is_some() {
+          return wrapper.child(row_probe(path, RowKind::End, header_positions.clone()).h_0()).into_any_element();
+        }
+        let Some((file, collapsed)) = headers.get(&path) else { return wrapper.into_any_element() };
+        let Some(owner) = header_view.upgrade() else { return wrapper.into_any_element() };
+        wrapper
+          .when(first_path.as_ref() != Some(&path), |this| this.child(div().h(CARD_GAP).bg(background)))
+          .child(
+            div()
+              .relative()
+              .child(owner.read(cx).header_card(file, &state, *collapsed, header_view.clone(), false, cx))
+              .child(row_probe(path, RowKind::Header { collapsed: *collapsed }, header_positions.clone()).absolute().inset_0()),
+          )
+          .into_any_element()
       });
     v_flex()
       .size_full()
@@ -186,16 +216,34 @@ impl Render for AllChanges {
           canvas(
             move |viewport, window, cx| {
               let positions = std::mem::take(&mut *rows.borrow_mut());
-              let path = sticky_path(&positions, viewport.top(), window.rem_size())?;
-              let owner = review.upgrade()?;
-              let mut header = owner.read(cx).sticky_header(path, review.clone(), cx)?;
-              header.prepaint_as_root(viewport.origin, size(viewport.size.width.into(), AvailableSpace::MinContent), window, cx);
-              Some(header)
+              let pinned = sticky_path(&positions, viewport.top());
+              let frames = card_frames(&positions, viewport, pinned.as_ref(), last_path.as_ref(), last_notice.as_ref(), window, cx);
+              let header = pinned.and_then(|path| {
+                let owner = review.upgrade()?;
+                let mut header = owner.read(cx).sticky_header(path, review.clone(), cx)?;
+                header.prepaint_as_root(viewport.origin, size(viewport.size.width.into(), AvailableSpace::MinContent), window, cx);
+                Some(header)
+              });
+              let tail = positions
+                .iter()
+                .find(|row| matches!(row.kind, RowKind::End))
+                .map(|row| row.bounds.top())
+                .filter(|end| viewport.top() < *end && *end < viewport.bottom());
+              (frames, header, tail, cx.theme().radius)
             },
-            |_, header, window, cx| {
-              if let Some(mut header) = header {
-                header.paint(window, cx);
-              }
+            move |viewport, (frames, header, tail, radius), window, cx| {
+              window.with_content_mask(Some(ContentMask { bounds: viewport }), |window| {
+                // The measuring annotation retains the Kit's surface padding after the last source row.
+                if let Some(top) = tail {
+                  window.paint_quad(fill(Bounds::from_corners(point(viewport.left(), top), point(viewport.right(), viewport.bottom())), background));
+                }
+                if let Some(mut header) = header {
+                  header.paint(window, cx);
+                }
+                for bounds in frames {
+                  window.paint_quad(quad(bounds, radius, transparent_black(), CARD_BORDER_WIDTH, border, BorderStyle::Solid));
+                }
+              });
             },
           )
           .absolute()
@@ -225,7 +273,7 @@ impl AllChanges {
               .get(range)
               .unwrap_or_default()
               .iter()
-              .map(|file| div().pb_2().child(this.header_card(file, state, cx.entity().downgrade(), false, cx)).into_any_element())
+              .map(|file| div().pb_2().child(this.header_card(file, state, true, cx.entity().downgrade(), true, cx)).into_any_element())
               .collect()
           }),
         )
@@ -239,18 +287,29 @@ impl AllChanges {
   fn sticky_header(&self, path: SharedString, view: WeakEntity<Self>, cx: &App) -> Option<AnyElement> {
     let state = self.diff.as_ref()?.state();
     let file = state.read(cx).files().iter().find(|file| file.path() == &path)?;
-    Some(self.header_card(file, state, view, true, cx).into_any_element())
+    let collapsed = state.read(cx).is_file_collapsed(&path);
+    Some(self.header_card(file, state, collapsed, view, true, cx).into_any_element())
   }
 
-  fn header_card(&self, file: &DiffFile, state: &Entity<DiffState>, view: WeakEntity<Self>, sticky: bool, cx: &App) -> impl IntoElement + use<> {
+  fn header_card(
+    &self,
+    file: &DiffFile,
+    state: &Entity<DiffState>,
+    collapsed: bool,
+    view: WeakEntity<Self>,
+    standalone: bool,
+    cx: &App,
+  ) -> impl IntoElement + use<> {
     let path = file.path().clone();
-    let collapsed = state.read(cx).is_file_collapsed(&path);
     let state = state.clone();
-    let header = self.file_header(file, view, true, cx);
+    let header = self.file_header(file, view.clone(), standalone, cx);
     h_flex()
       .id(SharedString::from(format!("review-file-{path}")))
-      .when(sticky, |row| row.block_mouse_except_scroll().border_b_1().bg(cx.theme().background))
-      .when(!sticky, |row| row.rounded_md().border_1().bg(colors(cx).surface_alt))
+      .bg(colors(cx).surface_alt)
+      .when(standalone, |row| row.block_mouse_except_scroll())
+      .when(collapsed, |row| row.rounded_md())
+      .when(collapsed && standalone, |row| row.border_1())
+      .when(!collapsed, |row| row.rounded_t_md().border_b_1())
       .w_full()
       .pl_1()
       .pr_3()
@@ -266,8 +325,11 @@ impl AllChanges {
           .on_click(move |_, _, cx| {
             state.update(cx, |state, cx| {
               state.set_file_collapsed(&path, !collapsed, cx);
-              state.scroll_to_file(&path, cx);
+              if standalone {
+                state.scroll_to_file(&path, cx);
+              }
             });
+            let _ = view.update(cx, |_, cx| cx.notify());
           }),
       )
       .child(header)
@@ -357,52 +419,136 @@ impl AllChanges {
   }
 }
 
-// The Kit virtualizes the diff, so the header can be unmounted far above its code rows.
+#[derive(Clone, Copy)]
+enum RowKind {
+  Header { collapsed: bool },
+  Code,
+  End,
+}
+
+// The Kit virtualizes the diff, so a file header can be unmounted while its code is visible.
 struct DiffRowPosition {
   path: SharedString,
-  y: Pixels,
-  header: bool,
+  bounds: Bounds<Pixels>,
+  kind: RowKind,
 }
 
-fn row_probe(path: SharedString, header: bool, positions: Rc<RefCell<Vec<DiffRowPosition>>>) -> Canvas<()> {
-  canvas(move |bounds, _, _| positions.borrow_mut().push(DiffRowPosition { path: path.clone(), y: bounds.top(), header }), |_, _, _, _| {})
+fn row_probe(path: SharedString, kind: RowKind, positions: Rc<RefCell<Vec<DiffRowPosition>>>) -> Canvas<()> {
+  canvas(move |bounds, _, _| positions.borrow_mut().push(DiffRowPosition { path: path.clone(), bounds, kind }), |_, _, _, _| {})
 }
 
-fn sticky_path(rows: &[DiffRowPosition], top: Pixels, rem: Pixels) -> Option<SharedString> {
-  let row_top = |row: &DiffRowPosition| if row.header { row.y - rem / 4. } else { row.y };
-  let next = rows.iter().filter(|row| row_top(row) >= top).min_by_key(|row| row_top(row));
-  if next.is_some_and(|row| row.header && row_top(row) - top <= HEADER_ALIGNMENT_TOLERANCE) {
+fn sticky_path(rows: &[DiffRowPosition], top: Pixels) -> Option<SharedString> {
+  let next = rows.iter().filter(|row| row.bounds.top() >= top).min_by_key(|row| row.bounds.top());
+  if next.is_some_and(|row| matches!(row.kind, RowKind::Header { .. }) && row.bounds.top() - top <= CARD_BORDER_WIDTH) {
     return None;
   }
   rows
     .iter()
-    .filter(|row| row_top(row) < top)
-    .max_by_key(|row| row_top(row))
+    .filter(|row| row.bounds.top() < top)
+    .max_by_key(|row| row.bounds.top())
     .or(next)
-    .filter(|row| row_top(row) < top || !row.header)
+    .filter(|row| !matches!(row.kind, RowKind::End | RowKind::Header { collapsed: true }))
+    .filter(|row| row.bounds.top() < top || matches!(row.kind, RowKind::Code))
     .map(|row| row.path.clone())
 }
 
+fn card_frames(
+  rows: &[DiffRowPosition],
+  viewport: Bounds<Pixels>,
+  pinned: Option<&SharedString>,
+  last: Option<&SharedString>,
+  last_notice: Option<&DiffFile>,
+  window: &mut Window,
+  cx: &mut App,
+) -> Vec<Bounds<Pixels>> {
+  let mut headers: Vec<_> = rows.iter().filter(|row| matches!(row.kind, RowKind::Header { .. })).collect();
+  headers.sort_by_key(|row| row.bounds.top());
+  let rem = window.rem_size();
+  let gap = rem * CARD_GAP.0;
+  let end = rows.iter().find(|row| matches!(row.kind, RowKind::End)).map(|row| row.bounds.top());
+  let below = viewport.bottom() + rem;
+  let frame = |top, bottom| Bounds::from_corners(point(viewport.left(), top), point(viewport.right(), bottom));
+  let mut frames = Vec::with_capacity(headers.len() + 1);
+  if pinned.is_some_and(|path| !headers.iter().any(|header| &header.path == path)) {
+    let bottom = headers.first().map(|header| header.bounds.top() - gap).or(end).unwrap_or(below);
+    frames.push(frame(viewport.top() - rem, bottom));
+  }
+  for (index, header) in headers.iter().enumerate() {
+    let bottom = if matches!(header.kind, RowKind::Header { collapsed: true }) {
+      header.bounds.bottom()
+    } else if let Some(next) = headers.get(index + 1) {
+      next.bounds.top() - gap
+    } else if Some(&header.path) == last {
+      if let Some(file) = last_notice {
+        header.bounds.bottom() + notice_height(file, viewport.size.width, window, cx)
+      } else {
+        end.unwrap_or(below)
+      }
+    } else {
+      below
+    };
+    if bottom > header.bounds.top() {
+      frames.push(frame(header.bounds.top(), bottom));
+    }
+  }
+  frames
+}
+
+// Metadata-only files end with the Kit's notice rather than a source row.
+fn notice_height(file: &DiffFile, width: Pixels, window: &mut Window, cx: &mut App) -> Pixels {
+  v_flex()
+    .w_full()
+    .px_3()
+    .py_2()
+    .gap_1()
+    .text_xs()
+    .children(file.extended_headers().iter().cloned().map(|line| div().child(line)))
+    .child(div().text_sm().child("No text changes"))
+    .into_any_element()
+    .layout_as_root(size(width.into(), AvailableSpace::MinContent), window, cx)
+    .height
+}
+
 // Use the patch's numbered hunk ranges for scroll probes in the Kit's gutter lane.
-fn line_markers(patch: &str, files: &[DiffFile]) -> Vec<DiffGutterMarker> {
+fn line_markers(patch: &str, files: &[DiffFile]) -> (Vec<DiffGutterMarker>, Option<DiffLinePosition>) {
   let mut markers = Vec::new();
   let mut paths = files.iter();
   let mut path = None;
+  let mut last_line = None;
+  let mut numbers = None;
   for line in patch.lines() {
     if line.starts_with("diff --git ") {
       path = paths.next().map(DiffFile::path);
+      last_line = None;
+      numbers = None;
     } else if let Some(header) = line.strip_prefix("@@ ") {
       let Some(path) = path else { continue };
-      for (side, range) in [DiffSide::Original, DiffSide::Modified].into_iter().zip(header.split_whitespace().take(2)) {
+      let mut starts = [0; 2];
+      for (index, (side, range)) in [DiffSide::Original, DiffSide::Modified].into_iter().zip(header.split_whitespace().take(2)).enumerate() {
         let range = range.trim_start_matches(['-', '+']);
         let (start, count) = range.split_once(',').unwrap_or((range, "1"));
         let (Ok(start), Ok(count)) = (start.parse::<usize>(), count.parse::<usize>()) else { continue };
+        starts[index] = start;
         markers.extend(
           (start..start.saturating_add(count))
             .map(|line| DiffGutterMarker::new(("diff-scroll-probe", line), DiffLinePosition::new(path.clone(), side, line))),
         );
       }
+      numbers = Some(starts);
+    } else if let (Some(path), Some([old, new])) = (path, numbers.as_mut()) {
+      match line.as_bytes().first() {
+        Some(b' ' | b'+') => {
+          last_line = Some(DiffLinePosition::new(path.clone(), DiffSide::Modified, *new));
+          *new += 1;
+          *old += usize::from(line.starts_with(' '));
+        }
+        Some(b'-') => {
+          last_line = Some(DiffLinePosition::new(path.clone(), DiffSide::Original, *old));
+          *old += 1;
+        }
+        _ => {}
+      }
     }
   }
-  markers
+  (markers, last_line)
 }
