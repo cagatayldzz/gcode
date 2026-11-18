@@ -224,8 +224,8 @@ impl Render for ProjectSettings {
         this.tab = *index;
         cx.notify();
       }))
-      .child(Tab::new().label("Appearance"))
-      .child(Tab::new().label("Git"));
+      .child(Tab::new().cursor_pointer().label("Appearance"))
+      .child(Tab::new().cursor_pointer().label("Git"));
     let body = if self.tab == 0 {
       self.appearance(cx).into_any_element()
     } else {

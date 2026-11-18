@@ -211,13 +211,13 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     // A switch that is off is a gray track.
     colors.switch = c.rail_item_hover;
     colors.tab_active = c.selected;
-    colors.popover = c.surface_alt;
+    colors.popover = c.surface;
     colors.popover_foreground = c.text;
     colors.muted = c.surface_alt;
     colors.muted_foreground = c.text_secondary;
     colors.secondary = c.surface_alt;
     colors.secondary_foreground = c.text;
-    colors.accent = c.hover;
+    colors.accent = c.rail_hover;
     colors.accent_foreground = c.text;
     colors.primary = c.accent;
     colors.primary_hover = c.accent_hover;

@@ -677,11 +677,10 @@ impl Render for EditorPanel {
             None => self.files.get(path).map_or_else(
               || div().into_any_element(),
               |file| {
-                Editor::new(&file.state)
-                  .readonly(self.replacement_files.contains(path))
-                  .appearance(false)
-                  .bordered(false)
+                div()
                   .size_full()
+                  .cursor_text()
+                  .child(Editor::new(&file.state).readonly(self.replacement_files.contains(path)).appearance(false).bordered(false).size_full())
                   .into_any_element()
               },
             ),

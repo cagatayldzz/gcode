@@ -29,7 +29,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/menus.rs` | the menu bar (`menus`); the app sets it at startup and the window in front updates the Repository item with the service of the open project's remote (`Workspace::sync_menus`, `view_on_host`, `vekro_hosting::web_repository`) |
 | `crates/ui/src/terminal_layout.rs` | the tabs and split panes of a project's terminals as plain data (`Arrangement`, `Node`, `Direction`), tested without a window |
 | `crates/ui/src/commit_settings.rs` | the OpenCommit settings dialog (model, diff size, language, message style, instructions, push after commit) |
-| `crates/ui/src/all_changes.rs` | `AllChanges`: a single virtualized Kit diff of the working tree, with per-file review controls in the main area |
+| `crates/ui/src/all_changes.rs` | `AllChanges`: a single virtualized Kit diff of the working tree; the review controls sit in each file header |
 | `crates/ui/src/change_view.rs` | `ChangeView`: the diff of the chosen file of the Changes view in the main area, in place of the editor (re-read every refresh, redrawn only when it differs) |
 | `crates/git/src/compare.rs` | comparing the current branch with another (`compare_choices`, `compare`); the History view's "Select Branch to Compare…" uses it |
 | `crates/git/src/merge.rs` | predicting merge conflicts and operating on the pending Git merge; the resolver is owned by the workspace |

@@ -2533,7 +2533,10 @@ impl Workspace {
     let palette = colors(cx);
     let current = SharedString::from(current.to_string());
     let trigger = Button::new("branch-trigger")
-      .custom(ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.hover).active(palette.selected))
+      .custom(
+        ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.rail_item_hover).active(palette.rail_item_hover),
+      )
+      .cursor_pointer()
       .border_0()
       .h_12()
       .w_48()
@@ -2596,7 +2599,7 @@ impl Workspace {
               let tab = if *index == 1 { BranchTab::PullRequests } else { BranchTab::Branches };
               workspace.update(cx, |this, cx| this.set_branch_tab(tab, window, cx));
             })
-            .children([Tab::new().label("Branches"), Tab::new().label(format!("Pull Requests{count}"))])
+            .children([Tab::new().cursor_pointer().label("Branches"), Tab::new().cursor_pointer().label(format!("Pull Requests{count}"))])
         });
 
         let body = match tab {
@@ -2764,6 +2767,7 @@ impl Workspace {
     let palette = colors(cx);
     let trigger = Button::new("repository-trigger")
       .custom(ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.rail_item_hover).active(palette.selected))
+      .cursor_pointer()
       .border_0()
       .h_8()
       .max_w_56()
@@ -2861,6 +2865,7 @@ impl Workspace {
   fn render_favorite_projects(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
     let palette = colors(cx);
     let workspace = cx.entity();
+    let primary = cx.theme().primary;
     self
       .projects
       .favorites()
@@ -2872,11 +2877,14 @@ impl Workspace {
         Button::new(SharedString::from(format!("favorite-project-{}", path.display())))
           .custom(
             ButtonCustomVariant::new(cx)
-              .color(if selected { palette.selected } else { palette.rail })
-              .foreground(palette.text)
-              .hover(palette.rail_item_hover)
-              .active(palette.selected),
+              .color(if selected { primary } else { palette.rail })
+              .foreground(if selected { palette.on_accent } else { palette.text })
+              .hover(if selected { primary } else { palette.rail_item_hover })
+              .active(if selected { primary } else { palette.rail_item_hover }),
           )
+          // The kit paints a custom color at 20% at rest and in full only on hover: the open project is filled in full.
+          .when(selected, |button| button.bg(primary))
+          .cursor_pointer()
           .border_0()
           .h_8()
           .max_w_56()
@@ -2885,21 +2893,29 @@ impl Workspace {
             h_flex()
               .gap_2()
               .items_center()
+              .when_some(look.icon.clone(), |row, icon| {
+                row.child(
+                  div()
+                    .size_6()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .rounded_md()
+                    .text_color(if selected { palette.on_accent } else { look.text })
+                    .when_some(look.fill.filter(|_| !selected), |avatar, fill| avatar.bg(fill))
+                    .child(Icon::empty().path(icon).size_4()),
+                )
+              })
               .child(
-                div()
-                  .size_6()
-                  .flex()
-                  .flex_none()
-                  .items_center()
-                  .justify_center()
-                  .rounded_md()
-                  .text_sm()
-                  .text_color(look.text)
-                  .when_some(look.fill, |avatar, fill| avatar.bg(fill))
-                  .when_some(look.icon.clone(), |avatar, icon| avatar.child(Icon::empty().path(icon).size_4()))
-                  .when(look.icon.is_none(), |avatar| avatar.child(look.letter.clone())),
-              )
-              .child(Label::new(project.name()).min_w_0().font_weight(FontWeight::SEMIBOLD).overflow_hidden().whitespace_nowrap().text_ellipsis()),
+                Label::new(project.name())
+                  .when(selected, |label| label.text_color(palette.on_accent))
+                  .min_w_0()
+                  .font_weight(FontWeight::SEMIBOLD)
+                  .overflow_hidden()
+                  .whitespace_nowrap()
+                  .text_ellipsis(),
+              ),
           )
           .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.select_project(path.clone(), window, cx)))
           .into_any_element()
@@ -2943,7 +2959,10 @@ impl Workspace {
         }
       };
       Button::new("sync-remote")
-        .custom(ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.hover).active(palette.selected))
+        .custom(
+          ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.rail_item_hover).active(palette.rail_item_hover),
+        )
+        .cursor_pointer()
         .border_0()
         .h_12()
         .w_56()
@@ -3167,7 +3186,7 @@ impl Workspace {
       .underline()
       .selected_index(usize::from(self.git_view == GitView::History))
       .on_click(cx.listener(|this, index: &usize, _, cx| this.set_git_view(if *index == 1 { GitView::History } else { GitView::Changes }, cx)))
-      .children([Tab::new().label("Changes"), Tab::new().label("History")]);
+      .children([Tab::new().cursor_pointer().label("Changes"), Tab::new().cursor_pointer().label("History")]);
     let body = match self.git_view {
       GitView::Changes => v_flex()
         .flex_1()
@@ -3495,7 +3514,7 @@ impl Workspace {
       .on_click(
         cx.listener(|this, index: &usize, _, cx| this.set_compare_side(if *index == 1 { CompareSide::Ahead } else { CompareSide::Behind }, cx)),
       )
-      .children([Tab::new().label(format!("Behind ({behind})")), Tab::new().label(format!("Ahead ({ahead})"))]);
+      .children([Tab::new().cursor_pointer().label(format!("Behind ({behind})")), Tab::new().cursor_pointer().label(format!("Ahead ({ahead})"))]);
     let list = match &view.found {
       None => h_flex()
         .gap_2()
@@ -3571,6 +3590,7 @@ impl Workspace {
     let palette = colors(cx);
     let path = row.path.clone();
     let selected = self.selected_entry.as_ref() == Some(&row.path);
+    let icon_color = if selected { palette.on_accent } else { theme.muted_foreground };
     let open = self.expanded.contains(&row.path);
     h_flex()
       .id(SharedString::from(format!("entry-{}", row.path.display())))
@@ -3582,14 +3602,22 @@ impl Workspace {
       .rounded_md()
       .items_center()
       .cursor_pointer()
-      .when(selected, |entry| entry.bg(palette.selected))
-      .hover(|entry| entry.bg(palette.hover))
+      .when(selected, |entry| entry.bg(theme.primary))
+      .when(!selected, |entry| entry.hover(|entry| entry.bg(palette.hover)))
       .child(div().size_4().flex_none().when(row.is_dir, |chevron| {
-        chevron.child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size_4().text_color(theme.muted_foreground))
+        chevron.child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size_4().text_color(icon_color))
       }))
       // Only folders get an icon; a file's name starts where a folder's icon does.
-      .when(row.is_dir, |entry| entry.child(Icon::new(IconName::FolderClosed).size_4().text_color(theme.muted_foreground)))
-      .child(Label::new(row.name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+      .when(row.is_dir, |entry| entry.child(Icon::new(IconName::FolderClosed).size_4().text_color(icon_color)))
+      .child(
+        Label::new(row.name.clone())
+          .when(selected, |label| label.text_color(palette.on_accent))
+          .flex_1()
+          .min_w_0()
+          .overflow_hidden()
+          .whitespace_nowrap()
+          .text_ellipsis(),
+      )
       .when(!row.is_dir, |entry| {
         let hovered_path = path.clone();
         entry.on_hover(cx.listener(move |this, hovered: &bool, window, cx| {
@@ -4490,8 +4518,10 @@ impl Render for Workspace {
             resizable_panel().child(
               v_flex()
                 .size_full()
+                .min_w_0()
+                .overflow_hidden()
                 .when(self.sidebar_tab == SidebarTab::Git, |column| column.children(self.render_git_toolbar(cx)))
-                .child(div().flex_1().min_h_0().child(main_area))
+                .child(div().flex_1().min_h_0().min_w_0().w_full().overflow_hidden().child(main_area))
                 // The Git view has the branch in its own bar: no status bar there.
                 .when(self.sidebar_tab != SidebarTab::Git, |column| column.child(self.render_status_bar(cx))),
             ),

@@ -192,7 +192,7 @@ impl Render for ProjectSetup {
           this.set_mode(*mode, window, cx);
         }
       }))
-      .children(MODES.map(|mode| Tab::new().child(h_flex().gap_2().items_center().child(mode.icon().size_4()).child(mode.label()))));
+      .children(MODES.map(|mode| Tab::new().cursor_pointer().child(h_flex().gap_2().items_center().child(mode.icon().size_4()).child(mode.label()))));
     let location = h_flex()
       .gap_2()
       .items_center()

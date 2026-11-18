@@ -224,7 +224,9 @@ impl Render for CommitView {
     let diff = match &self.diff {
       Load::Loading => spinner(),
       Load::Failed(error) => message(error.clone(), false),
-      Load::Ready(state) => state.view(cx).soft_wrap(true).border_0().text_size(code_font_size(cx)).size_full().into_any_element(),
+      Load::Ready(state) => {
+        div().size_full().cursor_text().child(state.view(cx).soft_wrap(true).border_0().text_size(code_font_size(cx)).size_full()).into_any_element()
+      }
     };
     v_flex()
       .size_full()
