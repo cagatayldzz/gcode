@@ -59,6 +59,9 @@ pub(crate) struct Colors {
   pub modified: Hsla,
   pub renamed: Hsla,
   pub conflicted: Hsla,
+  /// The whole-line backgrounds of added and removed lines in a diff.
+  pub diff_added: Hsla,
+  pub diff_removed: Hsla,
 }
 
 fn hex(value: u32) -> Hsla {
@@ -112,6 +115,8 @@ impl Colors {
       modified: hex(0xd29922),
       renamed: hex(0x4493f8),
       conflicted: hex(0xdb6d28),
+      diff_added: hex(0x103c1d),
+      diff_removed: hex(0x4a1214),
     }
   }
 
@@ -143,6 +148,8 @@ impl Colors {
       modified: hex(0x9a6700),
       renamed: hex(0x0969da),
       conflicted: hex(0xbc4c00),
+      diff_added: hex(0xdafbe1),
+      diff_removed: hex(0xffebe9),
     }
   }
 }

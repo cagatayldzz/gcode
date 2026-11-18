@@ -199,10 +199,22 @@ pub fn clone(url: &str, parent: &Path, credentials: Option<&Credentials>) -> Res
 /// The unified diff of one file against the last commit (staged and unstaged changes together, untracked
 /// files as new). `file` is relative to the repository.
 pub fn file_diff(path: &Path, file: &Path) -> Result<String, String> {
+  working_tree_patch(path, Some(file))
+}
+
+/// Every staged and unstaged change against HEAD, including untracked files.
+pub fn all_changes_diff(path: &Path) -> Result<String, String> {
+  working_tree_patch(path, None)
+}
+
+fn working_tree_patch(path: &Path, file: Option<&Path>) -> Result<String, String> {
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
   let head = repository.head().ok().and_then(|head| head.peel_to_tree().ok());
   let mut options = DiffOptions::new();
-  options.pathspec(file).include_untracked(true).show_untracked_content(true).recurse_untracked_dirs(true);
+  options.include_untracked(true).show_untracked_content(true).recurse_untracked_dirs(true);
+  if let Some(file) = file {
+    options.pathspec(file);
+  }
   let diff = repository.diff_tree_to_workdir_with_index(head.as_ref(), Some(&mut options)).map_err(|error| error.message().to_string())?;
   patch_text(&diff)
 }
@@ -225,6 +237,49 @@ fn patch_text(diff: &git2::Diff) -> Result<String, String> {
 /// The absolute path of a file given relative to the repository containing `path`.
 pub fn workdir_file(path: &Path, file: &Path) -> Option<PathBuf> {
   Repository::discover(path).ok()?.workdir().map(|workdir| workdir.join(file))
+}
+
+/// File contents in HEAD and the working tree, bounded per version for previews.
+pub struct FileVersions {
+  pub original: Option<Vec<u8>>,
+  pub current: Option<Vec<u8>>,
+}
+
+/// Reads regular files relative to the repository root. Missing versions are returned as `None`.
+pub fn file_versions(path: &Path, file: &Path, limit: usize) -> Result<FileVersions, String> {
+  use std::{fs, io::Read};
+
+  let repository = Repository::discover(path).map_err(|error| error.to_string())?;
+  let workdir = repository.workdir().ok_or("The repository has no working folder.")?;
+  let head = repository.head().ok().and_then(|head| head.peel_to_tree().ok());
+  let original = head.as_ref().and_then(|tree| tree.get_path(file).ok()).filter(|entry| matches!(entry.filemode(), 0o100644 | 0o100755));
+  let original = original
+    .map(|entry| -> Result<_, String> {
+      let odb = repository.odb().map_err(|error| error.to_string())?;
+      let (size, _) = odb.read_header(entry.id()).map_err(|error| error.to_string())?;
+      if size > limit {
+        return Err("The original file is too large to preview.".into());
+      }
+      let blob = repository.find_blob(entry.id()).map_err(|error| error.to_string())?;
+      Ok(blob.content().to_vec())
+    })
+    .transpose()?;
+
+  let current_path = workdir.join(file);
+  let current = match fs::symlink_metadata(&current_path) {
+    Ok(metadata) if metadata.is_file() => {
+      let mut bytes = Vec::new();
+      fs::File::open(current_path).and_then(|file| file.take(limit as u64 + 1).read_to_end(&mut bytes)).map_err(|error| error.to_string())?;
+      if bytes.len() > limit {
+        return Err("The current file is too large to preview.".into());
+      }
+      Some(bytes)
+    }
+    Ok(_) => None,
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+    Err(error) => return Err(error.to_string()),
+  };
+  Ok(FileVersions { original, current })
 }
 
 /// Throws away every change to one file (staged and unstaged) and cannot be undone. A file that is in the last commit

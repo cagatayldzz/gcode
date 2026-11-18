@@ -1,19 +1,15 @@
 //! A commit of the History tab shown in the main area: its message, the files it changed and the diff of the chosen file.
 
 use crate::{
+  diff_view::ShownDiff,
   settings::code_font_size,
   theme::{colors, FONT_SIZE_SM},
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
-    clipboard::Clipboard,
-    diff::{Diff, DiffFile, DiffMode, DiffState},
-    h_flex,
-    label::Label,
-    scroll::ScrollableElement as _,
-    spinner::Spinner,
-    v_flex, ActiveTheme as _, Icon, Sizable as _,
+    clipboard::Clipboard, diff::DiffFile, h_flex, label::Label, scroll::ScrollableElement as _, spinner::Spinner, v_flex, ActiveTheme as _, Icon,
+    Sizable as _,
   },
   *,
 };
@@ -34,7 +30,7 @@ pub(crate) struct CommitView {
   id: String,
   detail: Load<CommitDetail>,
   selected: Option<PathBuf>,
-  diff: Load<Entity<DiffState>>,
+  diff: Load<ShownDiff>,
   /// Which commit and file the answers being awaited belong to, so a late one for another is ignored.
   epoch: u64,
 }
@@ -94,9 +90,9 @@ impl CommitView {
         if this.epoch != epoch {
           return;
         }
-        this.diff = match result.and_then(|patch| DiffFile::parse(&patch).map_err(|error| error.to_string())) {
-          Ok(files) if files.is_empty() => Load::Failed("This file has no text changes to show.".into()),
-          Ok(files) => Load::Ready(cx.new(|cx| DiffState::new(files, cx).with_mode(DiffMode::Unified))),
+        this.diff = match result.and_then(|patch| DiffFile::parse(&patch).map(|files| (files, patch)).map_err(|error| error.to_string())) {
+          Ok((files, _)) if files.is_empty() => Load::Failed("This file has no text changes to show.".into()),
+          Ok((files, patch)) => Load::Ready(ShownDiff::new(files, &patch, cx)),
           Err(message) => Load::Failed(message.into()),
         };
         cx.notify();
@@ -228,7 +224,7 @@ impl Render for CommitView {
     let diff = match &self.diff {
       Load::Loading => spinner(),
       Load::Failed(error) => message(error.clone(), false),
-      Load::Ready(state) => Diff::new(state).soft_wrap(true).border_0().text_size(code_font_size(cx)).size_full().into_any_element(),
+      Load::Ready(state) => state.view(cx).soft_wrap(true).border_0().text_size(code_font_size(cx)).size_full().into_any_element(),
     };
     v_flex()
       .size_full()

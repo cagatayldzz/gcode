@@ -362,3 +362,52 @@ fn a_repository_without_a_remote_never_waits_for_a_push() {
   assert_eq!(vekro_git::quick_status(&dir), Some((0, false)));
   fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn preview_versions_read_added_modified_and_deleted_files() {
+  let dir = repository("preview-versions");
+  let file = std::path::Path::new("preview.png");
+  fs::write(dir.join(file), b"original").unwrap();
+
+  let added = vekro_git::file_versions(&dir, file, 16).unwrap();
+  assert_eq!(added.original, None);
+  assert_eq!(added.current.as_deref(), Some(b"original".as_slice()));
+
+  commit_all(&dir, "Add preview");
+  fs::write(dir.join(file), b"updated").unwrap();
+  let modified = vekro_git::file_versions(&dir, file, 16).unwrap();
+  assert_eq!(modified.original.as_deref(), Some(b"original".as_slice()));
+  assert_eq!(modified.current.as_deref(), Some(b"updated".as_slice()));
+  assert!(vekro_git::file_versions(&dir, file, 7).is_err());
+
+  fs::remove_file(dir.join(file)).unwrap();
+  let deleted = vekro_git::file_versions(&dir, file, 16).unwrap();
+  assert_eq!(deleted.original.as_deref(), Some(b"original".as_slice()));
+  assert_eq!(deleted.current, None);
+  fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn the_working_tree_patch_includes_staged_unstaged_and_untracked_files() {
+  let dir = repository("working-tree-patch");
+  fs::write(dir.join("staged.txt"), "original\n").unwrap();
+  fs::write(dir.join("unstaged.txt"), "original\n").unwrap();
+  commit_all(&dir, "Add tracked files");
+
+  fs::write(dir.join("staged.txt"), "staged change\n").unwrap();
+  let repository = git2::Repository::open(&dir).unwrap();
+  let mut index = repository.index().unwrap();
+  index.add_path(std::path::Path::new("staged.txt")).unwrap();
+  index.write().unwrap();
+  fs::remove_file(dir.join("unstaged.txt")).unwrap();
+  fs::write(dir.join("untracked.txt"), "untracked change\n").unwrap();
+
+  let patch = vekro_git::all_changes_diff(&dir).unwrap();
+  assert!(patch.contains("diff --git a/staged.txt b/staged.txt"));
+  assert!(patch.contains("+staged change"));
+  assert!(patch.contains("diff --git a/unstaged.txt b/unstaged.txt"));
+  assert!(patch.contains("+++ /dev/null"));
+  assert!(patch.contains("diff --git a/untracked.txt b/untracked.txt"));
+  assert!(patch.contains("+untracked change"));
+  fs::remove_dir_all(dir).unwrap();
+}

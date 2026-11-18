@@ -243,14 +243,14 @@ impl Render for ProjectSettings {
         div()
           .border_b_1()
           .border_color(palette.border)
-          .child(Label::new(self.title.clone()).text_size(FONT_SIZE).font_weight(FontWeight::SEMIBOLD).px_5().py_4()),
+          .child(Label::new(self.title.clone()).text_base().font_weight(FontWeight::SEMIBOLD).px_6().py_4()),
       )
       .child(div().h(px(400.)).child(pages))
       .child(
         h_flex()
           .gap_2()
           .justify_end()
-          .px_5()
+          .px_6()
           .py_3()
           .border_t_1()
           .border_color(palette.border)

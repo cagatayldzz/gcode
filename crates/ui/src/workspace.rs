@@ -1,4 +1,5 @@
 use crate::{
+  all_changes::AllChanges,
   change_view::ChangeView,
   commit_settings::{CommitSettings, CommitSettingsSaved},
   commit_view::CommitView,
@@ -20,9 +21,9 @@ use crate::{
   terminal_layout::{Arrangement, Direction, Node},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
-  AddProject, CloseTab, NewTerminal, OpenSettings, SaveFile, SearchProject, SplitDown, SplitRight, ToggleTerminal, ViewOnHost,
+  AddProject, CloseTab, NewTerminal, OpenSettings, SaveFile, SearchProject, SplitDown, SplitRight, ToggleAllChanges, ToggleTerminal, ViewOnHost,
 };
-use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::{base::Selectable as _, prelude::FluentBuilder as _};
 use gpui_kit::{
   component::{
     button::{Button, ButtonCustomVariant, ButtonVariant, ButtonVariants as _},
@@ -272,6 +273,8 @@ pub struct Workspace {
   commit_view: Entity<CommitView>,
   /// The changes of the chosen file of the Changes view, shown in the main area.
   change_view: Entity<ChangeView>,
+  all_changes: Entity<AllChanges>,
+  all_changes_open: bool,
   pull_requests: PullRequests,
   /// Which load the listed pull requests belong to, so a slow answer for another project is ignored.
   pr_epoch: u64,
@@ -380,6 +383,8 @@ impl Workspace {
       selected_commit: None,
       commit_view: cx.new(|_| CommitView::new()),
       change_view: cx.new(|_| ChangeView::new()),
+      all_changes: cx.new(|_| AllChanges::default()),
+      all_changes_open: false,
       pull_requests: PullRequests::Idle,
       pr_epoch: 0,
       history_epoch: 0,
@@ -820,10 +825,7 @@ impl Workspace {
           .rounded_b_lg()
           .overflow_hidden()
           .child(
-            div()
-              .border_b_1()
-              .border_color(palette.border)
-              .child(Label::new("Settings").text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).px_5().py_4()),
+            div().border_b_1().border_color(palette.border).child(Label::new("Settings").text_base().font_weight(FontWeight::SEMIBOLD).px_6().py_4()),
           )
           .child(div().h(px(486.)).child(settings_view(
             fallback.clone(),
@@ -898,7 +900,7 @@ impl Workspace {
       let path = event.0.clone();
       this.switch_project(window, cx, move |projects| projects.add(path));
     }));
-    window.open_dialog(cx, move |dialog, _, _| dialog.title("Add project").width(px(520.)).p_5().child(setup.clone()));
+    window.open_dialog(cx, move |dialog, _, _| dialog.p_0().width(px(520.)).child(setup.clone()));
   }
 
   /// Writes the project list; a failure is logged, the window keeps working.
@@ -1075,6 +1077,8 @@ impl Workspace {
     if let Err(error) = self.projects.save(&ProjectList::default_path()) {
       eprintln!("Could not save the project list: {error}");
     }
+    self.all_changes_open = false;
+    self.all_changes.update(cx, |view, cx| view.reset(cx));
     self.excluded.clear();
     self.history.clear();
     self.compare = None;
@@ -1163,6 +1167,13 @@ impl Workspace {
         // While the project menu is open, what each project holds is kept up to date.
         if this.projects_menu_open {
           this.load_project_status(cx);
+        }
+        if this.all_changes_open
+          && this.sidebar_tab == SidebarTab::Git
+          && this.git_view == GitView::Changes
+          && this.projects.active.as_ref() == Some(&root)
+        {
+          this.all_changes.update(cx, |view, cx| view.reload(root.clone(), cx));
         }
         // The file shown in the Changes view was edited, saved or committed elsewhere: show what it is now.
         if let Some(file) = this.selected_change.clone() {
@@ -1337,9 +1348,20 @@ impl Workspace {
     cx.notify();
   }
 
+  fn toggle_all_changes(&mut self, _: &ToggleAllChanges, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    self.all_changes_open = !self.all_changes_open;
+    if self.all_changes_open {
+      self.hide_terminal(window, cx);
+      self.all_changes.update(cx, |view, cx| view.reload(root, cx));
+    }
+    cx.notify();
+  }
+
   /// Shows the changes of a changed file in the main area, in place of the editor. Choosing another file replaces them.
   fn open_change(&mut self, file: PathBuf, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
+    self.all_changes_open = false;
     self.change_view.update(cx, |view, cx| view.show(root, file.clone(), cx));
     self.selected_change = Some(file);
     self.selected_entry = None;
@@ -2728,7 +2750,7 @@ impl Workspace {
     let changes_list =
       v_flex().id("git-changes").flex_1().min_h_0().overflow_y_scrollbar().children(git.changes.iter().map(|change| {
         let file = change.path.clone();
-        let selected = self.selected_change.as_ref() == Some(&change.path);
+        let selected = !self.all_changes_open && self.selected_change.as_ref() == Some(&change.path);
         let included = !self.excluded.contains(&change.path);
         let name = change.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
         let folder = change.path.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
@@ -2868,10 +2890,11 @@ impl Workspace {
         .flex_1()
         .min_h_0()
         .child(
-          div()
+          h_flex()
             .id("changes-header")
+            .justify_between()
             .px_3()
-            .py_2()
+            .py_1()
             .bg(palette.surface_alt)
             .border_b_1()
             .border_color(palette.border)
@@ -2894,6 +2917,17 @@ impl Workspace {
                   }
                 })),
             )
+            .child(
+              Button::new("toggle-all-changes")
+                .ghost()
+                .xsmall()
+                .selected(self.all_changes_open)
+                .disabled(git.changes.is_empty() && !self.all_changes_open)
+                .icon(Icon::empty().path("icons/layout-list.svg").size_4())
+                .accessibility_label(if self.all_changes_open { "Close all changes" } else { "Show all changes" })
+                .tooltip(if self.all_changes_open { "Close all changes" } else { "Show all changes" })
+                .on_click(|_, window, cx| window.dispatch_action(Box::new(ToggleAllChanges), cx)),
+            )
             .context_menu({
               let disabled = git.changes.is_empty() || self.committing || self.discarding;
               move |menu, _, _| {
@@ -2914,7 +2948,7 @@ impl Workspace {
         .child(div().flex_1().min_h_0().when(git.changed() > 0, |list| list.child(changes_list)))
         .child(commit_box)
         .into_any_element(),
-      GitView::History => v_flex().flex_1().min_h_0().px_3().pt_2().child(self.render_history(cx)).into_any_element(),
+      GitView::History => v_flex().flex_1().min_h_0().pt_2().child(self.render_history(cx)).into_any_element(),
     };
     Some(v_flex().size_full().child(div().px_3().bg(palette.rail).child(tabs)).child(body))
   }
@@ -2929,7 +2963,8 @@ impl Workspace {
     } else {
       self.commit_list(&self.history, true, cx)
     };
-    v_flex().flex_1().min_h_0().gap_2().child(self.render_compare_field(cx)).child(body)
+    // The padding on the right is inside each list row, so that the scrollbar sits at the edge of the sidebar.
+    v_flex().flex_1().min_h_0().gap_2().child(div().px_3().child(self.render_compare_field(cx))).child(v_flex().flex_1().min_h_0().pl_3().child(body))
   }
 
   /// A list of commits: the subject, who made it and when, the tags on it, and an arrow while the remote does not have it yet.
@@ -3941,6 +3976,8 @@ impl Render for Workspace {
     let change_shown = self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::Changes && self.selected_change.is_some();
     let editor_area: AnyElement = if commit_shown {
       self.commit_view.clone().into_any_element()
+    } else if self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::Changes && self.all_changes_open {
+      self.all_changes.clone().into_any_element()
     } else if change_shown {
       self.change_view.clone().into_any_element()
     } else if self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::Changes {
@@ -3973,6 +4010,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::search_project))
       .on_action(cx.listener(Self::new_terminal))
       .on_action(cx.listener(Self::toggle_terminal))
+      .on_action(cx.listener(Self::toggle_all_changes))
       .on_action(cx.listener(Self::split_right))
       .on_action(cx.listener(Self::view_on_host))
       .on_action(cx.listener(Self::split_down))

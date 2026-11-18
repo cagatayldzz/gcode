@@ -1,5 +1,6 @@
 //! The Vekro interface: projects, editor, terminal and Git in one window, built with GPUI Kit.
 
+mod all_changes;
 mod assets;
 mod change_view;
 mod close_order;
@@ -8,6 +9,7 @@ mod commit_view;
 mod components;
 mod connect_account;
 mod connections;
+mod diff_view;
 mod editor;
 mod explorer;
 mod menus;
@@ -43,6 +45,7 @@ actions!(
     SaveFile,
     CloseTab,
     ToggleTerminal,
+    ToggleAllChanges,
     // Terminal panes: split side by side, split one above the other.
     SplitRight,
     SplitDown,
@@ -58,8 +61,15 @@ actions!(
 /// Loads the bundled fonts.
 pub fn init(cx: &mut App) {
   if let Err(error) = cx.text_system().add_fonts(vec![
-    std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist.ttf")),
-    std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/GeistMono.ttf")),
+    // Static weights: the text system picks a weight by font file, so a variable font would draw every weight as regular.
+    std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist-Regular.ttf")),
+    std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist-Medium.ttf")),
+    std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist-SemiBold.ttf")),
+    std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist-Bold.ttf")),
+    std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/GeistMono-Regular.ttf")),
+    std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/GeistMono-Medium.ttf")),
+    std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/GeistMono-SemiBold.ttf")),
+    std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/GeistMono-Bold.ttf")),
   ]) {
     eprintln!("Could not load fonts: {error}");
   }

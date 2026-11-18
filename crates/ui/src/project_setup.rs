@@ -192,7 +192,7 @@ impl Render for ProjectSetup {
           this.set_mode(*mode, window, cx);
         }
       }))
-      .children(MODES.map(|mode| Tab::new().prefix(mode.icon().size_4()).label(mode.label())));
+      .children(MODES.map(|mode| Tab::new().child(h_flex().gap_2().items_center().child(mode.icon().size_4()).child(mode.label()))));
     let location = h_flex()
       .gap_2()
       .items_center()
@@ -219,49 +219,55 @@ impl Render for ProjectSetup {
       .child(Label::new("Choose a folder…").font_weight(FontWeight::SEMIBOLD))
       .child(Label::new("It opens as a project at once.").text_color(theme.muted_foreground).text_size(crate::theme::FONT_SIZE_SM))
       .on_click(cx.listener(|this, _, _, cx| this.choose_folder(cx)));
-    v_flex()
-      .text_size(crate::theme::FONT_SIZE)
-      .gap_4()
-      .child(tabs)
-      .child(Label::new(self.mode.hint()).text_color(theme.muted_foreground))
-      .when(!importing, |form| {
-        form.child(field(caption, theme.muted_foreground, Input::new(&self.input))).child(field("Location", theme.muted_foreground, location))
-      })
-      .when(self.mode == Mode::Clone && !self.accounts.items.is_empty(), |form| {
-        let browsing = self.picker.is_some();
-        form
-          .child(
-            h_flex().child(
-              Button::new("browse-repositories")
-                .label(if browsing { "Hide repositories" } else { "Browse my repositories…" })
-                .icon(Icon::empty().path("icons/git-fork.svg"))
-                .small()
-                .outline()
-                .on_click(cx.listener(|this, _, window, cx| this.toggle_picker(window, cx))),
-            ),
+    // The title is drawn here (the dialog has no padding) so that it has the design's size and spacing.
+    v_flex().child(Label::new("Add project").text_base().font_weight(FontWeight::SEMIBOLD).px_5().pt_4().pb_2()).child(
+      v_flex()
+        .text_size(crate::theme::FONT_SIZE)
+        .gap_3p5()
+        .px_5()
+        .pb_5()
+        .pt_2()
+        .child(tabs)
+        .child(Label::new(self.mode.hint()).text_color(theme.muted_foreground))
+        .when(!importing, |form| {
+          form.child(field(caption, theme.muted_foreground, Input::new(&self.input))).child(field("Location", theme.muted_foreground, location))
+        })
+        .when(self.mode == Mode::Clone && !self.accounts.items.is_empty(), |form| {
+          let browsing = self.picker.is_some();
+          form
+            .child(
+              h_flex().child(
+                Button::new("browse-repositories")
+                  .label(if browsing { "Hide repositories" } else { "Browse my repositories…" })
+                  .icon(Icon::empty().path("icons/git-fork.svg"))
+                  .small()
+                  .outline()
+                  .on_click(cx.listener(|this, _, window, cx| this.toggle_picker(window, cx))),
+              ),
+            )
+            .children(self.picker.as_ref().map(|(picker, _)| picker.clone()))
+        })
+        .when(self.mode == Mode::Clone && self.accounts.items.is_empty(), |form| {
+          form.child(
+            Label::new("Connect GitHub, GitLab or Azure DevOps in Settings → Accounts to browse your repositories and clone private ones.")
+              .text_size(crate::theme::FONT_SIZE_SM)
+              .text_color(theme.muted_foreground),
           )
-          .children(self.picker.as_ref().map(|(picker, _)| picker.clone()))
-      })
-      .when(self.mode == Mode::Clone && self.accounts.items.is_empty(), |form| {
-        form.child(
-          Label::new("Connect GitHub, GitLab or Azure DevOps in Settings → Accounts to browse your repositories and clone private ones.")
-            .text_size(crate::theme::FONT_SIZE_SM)
-            .text_color(theme.muted_foreground),
-        )
-      })
-      .when(importing, |form| form.child(choose))
-      .when_some(self.error.clone(), |form, error| form.child(Label::new(error).text_color(theme.danger)))
-      .child(h_flex().gap_2().justify_end().child(Button::new("cancel").label("Cancel").on_click(|_, window, cx| window.close_dialog(cx))).when(
-        !importing,
-        |footer| {
-          footer.child(
-            Button::new("submit")
-              .label(if self.busy { "Working…" } else { action })
-              .primary()
-              .disabled(self.busy)
-              .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
-          )
-        },
-      ))
+        })
+        .when(importing, |form| form.child(choose))
+        .when_some(self.error.clone(), |form, error| form.child(Label::new(error).text_color(theme.danger)))
+        .child(h_flex().gap_2().justify_end().child(Button::new("cancel").label("Cancel").on_click(|_, window, cx| window.close_dialog(cx))).when(
+          !importing,
+          |footer| {
+            footer.child(
+              Button::new("submit")
+                .label(if self.busy { "Working…" } else { action })
+                .primary()
+                .disabled(self.busy)
+                .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
+            )
+          },
+        )),
+    )
   }
 }

@@ -157,7 +157,11 @@ files. The cross in the field goes back to the plain History list.
 **D** deleted, **R** renamed, **!** conflicted. Click a file to see its diff against the last commit
 in the main area, in place of the editor, with the path on top (staged and unstaged changes together; a new file is shown as all
 added). Choosing another file replaces it, no tab is added; it updates as you save, and the editor tabs come back when you leave the
-Changes view.
+Changes view. PNG, JPEG, WebP, BMP, and TIFF files show an image preview. Modified images show the original and current versions side by side.
+
+Use **Show all changes** in the Changes header to review the file diffs in one scrollable panel. Each file header can collapse its diff,
+copy its relative path, and mark it as **Viewed**. The header also shows added and removed line counts. Viewed marks are kept while the
+current project is open and are independent of the checkboxes used to select files for a commit.
 
 A bar above the editor holds the **current branch** and a button that keeps the branch in step with its remote (**Publish branch**,
 **Push origin**, **Pull origin** or **Fetch origin**, with the number of commits and the last fetch; while it works it shows git's
