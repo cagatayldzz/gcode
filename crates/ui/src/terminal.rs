@@ -34,6 +34,8 @@ const FONT_FAMILY: &str = "Geist Mono";
 const FONT_SIZE: Pixels = px(12.);
 const LINE_HEIGHT: Pixels = px(18.);
 const PADDING: Pixels = px(10.);
+const LINK_UNDERLINE_OFFSET: Pixels = px(14.);
+const LINK_UNDERLINE_THICKNESS: Pixels = px(1.);
 
 /// Sent when the shell of a terminal exits.
 pub(crate) struct TerminalExited;
@@ -65,6 +67,7 @@ pub(crate) struct Terminal {
   mouse_button: Option<TermButton>,
   /// The cell of the last mouse event sent to the program, so motion is reported once per cell.
   mouse_cell: Option<(usize, usize)>,
+  hovered: bool,
   _events_task: Task<()>,
 }
 
@@ -113,6 +116,7 @@ impl Terminal {
       scroll_remainder: 0.,
       mouse_button: None,
       mouse_cell: None,
+      hovered: false,
       _events_task: events_task,
     }
   }
@@ -317,6 +321,10 @@ fn cell_at(bounds: Bounds<Pixels>, position: Point<Pixels>, cell_width: f32) -> 
   (bounds.contains(&position) && x >= 0. && y >= 0.).then(|| ((y / f32::from(LINE_HEIGHT)).floor() as usize, (x / cell_width).floor() as usize))
 }
 
+fn is_web_link(target: &str) -> bool {
+  target.starts_with("http://") || target.starts_with("https://")
+}
+
 /// The cell under the mouse, held inside the screen, for programs that follow the mouse.
 fn clamped_cell(bounds: Bounds<Pixels>, position: Point<Pixels>, cell_width: f32, columns: usize, lines: usize) -> (usize, usize) {
   let x = f32::from(position.x - bounds.origin.x - PADDING);
@@ -347,7 +355,7 @@ impl Render for Terminal {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = palette(cx);
     self.session.set_palette(palette.clone());
-    let snapshot = self.session.snapshot(&palette);
+    let snapshot = Rc::new(self.session.snapshot(&palette));
     let font = font(FONT_FAMILY);
     let text_system = window.text_system();
     let font_id = text_system.resolve_font(&font);
@@ -368,6 +376,14 @@ impl Render for Terminal {
       scrolled: snapshot.scrolled,
     };
     let has_scrollbar = snapshot.history_size > 0;
+    let link_cell = (self.hovered && window.is_window_active() && window.modifiers().platform)
+      .then(|| content_bounds.get().and_then(|bounds| cell_at(bounds, window.mouse_position(), cell_width)))
+      .flatten();
+    let hovered_link = link_cell.and_then(|(line, column)| {
+      let (target, start, end) = snapshot.link_range_at(line, column)?;
+      is_web_link(&target).then_some((line, start, end))
+    });
+    let clicked_snapshot = snapshot.clone();
 
     div()
       .id("terminal")
@@ -390,6 +406,11 @@ impl Render for Terminal {
       .size_full()
       .overflow_hidden()
       .bg(color(palette.background))
+      .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
+      .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+        this.hovered = *hovered;
+        cx.notify();
+      }))
       .on_mouse_down(
         MouseButton::Left,
         cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -407,6 +428,12 @@ impl Render for Terminal {
             return;
           }
           let Some((line, column)) = cell_at(bounds, event.position, cell_width) else { return };
+          if event.modifiers.platform {
+            if let Some(target) = clicked_snapshot.link_at(line, column).filter(|target| is_web_link(target)) {
+              cx.open_url(&target);
+              return;
+            }
+          }
           let position = (line.min(line_count.saturating_sub(1)), column.min(columns));
           let text = this.session.snapshot(&palette_for(cx)).line_text(position.0);
           let extend = event.modifiers.shift && event.click_count < 2;
@@ -426,6 +453,10 @@ impl Render for Terminal {
       )
       .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
         let Some(bounds) = this.content_bounds.get() else { return };
+        let cell = if event.modifiers.platform { cell_at(bounds, event.position, cell_width) } else { None };
+        if cell != link_cell {
+          cx.notify();
+        }
         if event.pressed_button == Some(MouseButton::Left) && !cx.has_active_drag() {
           if let Some((anchor, _)) = this.selection.filter(|_| this.selection_dragging) {
             let x = f32::from(event.position.x - bounds.origin.x - PADDING);
@@ -438,7 +469,7 @@ impl Render for Terminal {
         } else {
           this.selection_dragging = false;
         }
-        if reporting && !event.modifiers.shift {
+        if reporting && !event.modifiers.shift && (!event.modifiers.platform || this.mouse_button.is_some()) {
           let modes = this.session.modes();
           let wanted = if this.mouse_button.is_some() { modes.mouse_drag || modes.mouse_motion } else { modes.mouse_motion };
           let cell = clamped_cell(bounds, event.position, cell_width, columns, line_count);
@@ -516,7 +547,7 @@ impl Render for Terminal {
         .absolute()
         .size_full(),
       )
-      .when(!reporting, |this| this.cursor_text())
+      .when(!reporting && hovered_link.is_none(), |this| this.cursor_text())
       .child(
         // Out of the flow, so the panel's size comes only from the space layout gives it.
         div()
@@ -545,6 +576,17 @@ impl Render for Terminal {
               .bg(selection_color.opacity(0.4))
           })
         }))
+      })
+      .when_some(hovered_link, |this, (line, start, end)| {
+        this.cursor_pointer().child(
+          div()
+            .absolute()
+            .left(PADDING + cell_width_px * start as f32)
+            .top(PADDING + LINE_HEIGHT * line as f32 + LINK_UNDERLINE_OFFSET)
+            .w(cell_width_px * (end - start) as f32)
+            .h(LINK_UNDERLINE_THICKNESS)
+            .bg(color(palette.foreground)),
+        )
       })
       .when_some(snapshot.cursor.filter(|cursor| focused && cursor.shape != CursorShape::Block), |this, cursor| {
         let (width, height, offset) = match cursor.shape {

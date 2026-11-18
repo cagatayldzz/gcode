@@ -3969,7 +3969,7 @@ fn kind_color(kind: vekro_git::ChangeKind, palette: &crate::theme::Colors) -> Hs
 }
 
 impl Render for Workspace {
-  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     let commit_shown = self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::History && self.selected_commit.is_some();
@@ -4005,6 +4005,14 @@ impl Render for Workspace {
       .id("workspace")
       .key_context("Workspace")
       .track_focus(&self.focus_handle)
+      .when(self.terminal_open, |this| {
+        let command_held = window.modifiers().platform;
+        this.on_modifiers_changed(move |event, window, _| {
+          if event.modifiers.platform != command_held {
+            window.refresh();
+          }
+        })
+      })
       .on_action(cx.listener(Self::add_project))
       .on_action(cx.listener(Self::open_settings))
       .on_action(cx.listener(Self::search_project))
