@@ -33,7 +33,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/git/src/compare.rs` | comparing the current branch with another (`compare_choices`, `compare`) and merging it in (`merge_branch`); the History view's "Select Branch to Compare…" uses it |
 | `crates/ui/src/commit_view.rs` | `CommitView`: a commit of the History view in the main area (message, changed files, the diff of the chosen one) |
 | `crates/ui/src/project_setup.rs` | the Add project dialog (New, Clone, Import) |
-| `crates/ui/src/project_settings.rs` | the dialog for a project's name, icon, color and Git remote address (`vekro_git::set_remote_url`) |
+| `crates/ui/src/project_settings.rs` | the dialog for a project's name, icon, color and Git remote address (`vekro_git::set_remote_url`), with a page list on the left like Settings (Kit `Settings`, Save / Cancel footer) |
 | `crates/ui/src/project_manager.rs` | the Project bar page of Settings: every project and category with its actions |
 | `crates/ui/src/settings.rs` | the Settings pages (the Kit `Settings` component) and `SettingsModel`, the settings every window shares |
 | `crates/ui/src/explorer.rs` | the folder tree rows |

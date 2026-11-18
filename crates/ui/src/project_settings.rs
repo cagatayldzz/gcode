@@ -1,8 +1,9 @@
 //! The dialog that sets how a project looks in the project menu (its name, icon and color) and where its Git remote points.
+//! Like Settings, it has a page list on the left (Kit `Settings`) and a Save / Cancel footer.
 
 use crate::{
   components::selected_style,
-  theme::{project_color, FONT_SIZE, FONT_SIZE_SM, PROJECT_COLORS},
+  theme::{colors, project_color, FONT_SIZE, FONT_SIZE_SM, PROJECT_COLORS},
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -11,6 +12,7 @@ use gpui_kit::{
     h_flex,
     input::{Input, InputEvent, InputState},
     label::Label,
+    setting::{SettingField, SettingGroup, SettingItem, SettingPage, Settings},
     v_flex, ActiveTheme, Icon, Sizable as _, WindowExt as _,
   },
   *,
@@ -57,13 +59,27 @@ pub(crate) struct AppearanceChosen {
   pub remote: Option<String>,
 }
 
+/// One control of the dialog, shown inside a page of the Kit `Settings`.
+#[derive(Clone, Copy)]
+enum Part {
+  Name,
+  Color,
+  Icon,
+  Remote,
+}
+
 pub(crate) struct ProjectSettings {
   path: PathBuf,
+  title: SharedString,
   input: Entity<InputState>,
   remote_input: Entity<InputState>,
   remote: String,
   icon: Option<String>,
   color: Option<String>,
+  name_part: Entity<SettingsPart>,
+  color_part: Entity<SettingsPart>,
+  icon_part: Entity<SettingsPart>,
+  remote_part: Entity<SettingsPart>,
   _subscription: Subscription,
 }
 
@@ -81,13 +97,23 @@ impl ProjectSettings {
         this.save(cx);
       }
     });
+    let this = cx.entity();
+    let part = |part: Part, cx: &mut Context<Self>| {
+      let settings = this.clone();
+      cx.new(|_| SettingsPart { settings, part })
+    };
     Self {
       path: project.path.clone(),
+      title: SharedString::from(format!("{} settings", project.name())),
       input,
       remote_input,
       remote,
       icon: project.icon.clone(),
       color: project.color.clone(),
+      name_part: part(Part::Name, cx),
+      color_part: part(Part::Color, cx),
+      icon_part: part(Part::Icon, cx),
+      remote_part: part(Part::Remote, cx),
       _subscription: subscription,
     }
   }
@@ -98,11 +124,20 @@ impl ProjectSettings {
     let remote = (remote != self.remote && !remote.is_empty()).then_some(remote);
     cx.emit(AppearanceChosen { path: self.path.clone(), name, icon: self.icon.clone(), color: self.color.clone(), remote });
   }
+}
 
+/// A control of [`ProjectSettings`] as its own view, so that a page of the Kit `Settings` can hold it.
+struct SettingsPart {
+  settings: Entity<ProjectSettings>,
+  part: Part,
+}
+
+impl SettingsPart {
   fn swatch(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement {
     let (name, value) = PROJECT_COLORS[index];
-    let chosen = self.color.as_deref() == Some(value);
+    let chosen = self.settings.read(cx).color.as_deref() == Some(value);
     let theme = cx.theme().clone();
+    let settings = self.settings.clone();
     div()
       .id(SharedString::from(format!("color-{name}")))
       .size_6()
@@ -112,68 +147,113 @@ impl ProjectSettings {
       .border_color(if chosen { theme.foreground } else { theme.transparent })
       .when_some(project_color(value), |swatch, color| swatch.bg(color))
       .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(name).build(window, cx))
-      .on_click(cx.listener(move |this, _, _, cx| {
-        this.color = Some(value.to_string());
-        cx.notify();
-      }))
+      .on_click(move |_, _, cx| choose_color(&settings, Some(value), cx))
   }
 
   fn icon_button(&self, name: Option<&'static str>, cx: &mut Context<Self>) -> impl IntoElement {
-    let chosen = self.icon.as_deref() == name;
+    let chosen = self.settings.read(cx).icon.as_deref() == name;
     let id = SharedString::from(format!("icon-{}", name.unwrap_or("letter")));
+    let settings = self.settings.clone();
     Button::new(id)
       .small()
       .when(chosen, |button| button.custom(selected_style(cx)))
       .when(!chosen, |button| button.ghost())
       .when_some(name, |button, name| button.icon(Icon::empty().path(format!("icons/{name}.svg"))))
       .when(name.is_none(), |button| button.label("Aa"))
-      .on_click(cx.listener(move |this, _, _, cx| {
-        this.icon = name.map(str::to_owned);
-        cx.notify();
-      }))
+      .on_click(move |_, _, cx| {
+        settings.update(cx, |this, cx| {
+          this.icon = name.map(str::to_owned);
+          cx.notify();
+        })
+      })
+  }
+}
+
+fn choose_color(settings: &Entity<ProjectSettings>, color: Option<&'static str>, cx: &mut App) {
+  settings.update(cx, |this, cx| {
+    this.color = color.map(str::to_owned);
+    cx.notify();
+  });
+}
+
+impl Render for SettingsPart {
+  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    let muted = cx.theme().muted_foreground;
+    let state = self.settings.read(cx);
+    match self.part {
+      Part::Name => div().w_full().text_size(FONT_SIZE).child(Input::new(&state.input)).into_any_element(),
+      Part::Remote => v_flex()
+        .w_full()
+        .gap_1p5()
+        .text_size(FONT_SIZE)
+        .child(Input::new(&state.remote_input))
+        .child(Label::new("Change it when the repository was renamed or moved.").text_color(muted).text_size(FONT_SIZE_SM))
+        .into_any_element(),
+      Part::Color => {
+        let settings = self.settings.clone();
+        let default_color = Button::new("color-none")
+          .small()
+          .label("Default")
+          .when(state.color.is_none(), |button| button.custom(selected_style(cx)))
+          .when(state.color.is_some(), |button| button.ghost())
+          .on_click(move |_, _, cx| choose_color(&settings, None, cx));
+        h_flex()
+          .gap_2()
+          .items_center()
+          .flex_wrap()
+          .text_size(FONT_SIZE)
+          .child(default_color)
+          .children((0..PROJECT_COLORS.len()).map(|index| self.swatch(index, cx)))
+          .into_any_element()
+      }
+      Part::Icon => h_flex()
+        .gap_1()
+        .flex_wrap()
+        .child(self.icon_button(None, cx))
+        .children(PROJECT_ICONS.iter().map(|name| self.icon_button(Some(name), cx)))
+        .into_any_element(),
+    }
   }
 }
 
 impl Render for ProjectSettings {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let theme = cx.theme().clone();
-    let muted = theme.muted_foreground;
-    let default_color = Button::new("color-none")
-      .small()
-      .label("Default")
-      .when(self.color.is_none(), |button| button.custom(selected_style(cx)))
-      .when(self.color.is_some(), |button| button.ghost());
-    v_flex()
-      .text_size(FONT_SIZE)
-      .gap_4()
-      .child(v_flex().gap_1p5().child(Label::new("Name").text_color(muted).text_size(FONT_SIZE_SM)).child(Input::new(&self.input)))
-      .child(
-        v_flex().gap_1p5().child(Label::new("Color").text_color(muted).text_size(FONT_SIZE_SM)).child(
-          h_flex()
-            .gap_2()
-            .items_center()
-            .flex_wrap()
-            .child(default_color.on_click(cx.listener(|this, _, _, cx| {
-              this.color = None;
-              cx.notify();
-            })))
-            .children((0..PROJECT_COLORS.len()).map(|index| self.swatch(index, cx))),
+    let palette = colors(cx);
+    let (name, color, icon, remote) = (self.name_part.clone(), self.color_part.clone(), self.icon_part.clone(), self.remote_part.clone());
+    let pages =
+      Settings::new("vekro-project-settings").sidebar_width(px(180.)).sidebar_style(&StyleRefinement::default().bg(palette.background)).pages(vec![
+        SettingPage::new("Appearance").default_open(true).resettable(false).group(
+          SettingGroup::new()
+            .title("Look in the project menu")
+            .item(SettingItem::new("Name", SettingField::render(move |_, _, _| name.clone())).layout(Axis::Vertical))
+            .item(SettingItem::new("Color", SettingField::render(move |_, _, _| color.clone())).layout(Axis::Vertical))
+            .item(SettingItem::new("Icon", SettingField::render(move |_, _, _| icon.clone())).layout(Axis::Vertical)),
         ),
-      )
-      .child(v_flex().gap_1p5().child(Label::new("Icon").text_color(muted).text_size(FONT_SIZE_SM)).child(
-        h_flex().gap_1().flex_wrap().child(self.icon_button(None, cx)).children(PROJECT_ICONS.iter().map(|name| self.icon_button(Some(name), cx))),
-      ))
+        SettingPage::new("Git").resettable(false).group(
+          SettingGroup::new()
+            .title("Remote")
+            .item(SettingItem::new("Git remote", SettingField::render(move |_, _, _| remote.clone())).layout(Axis::Vertical)),
+        ),
+      ]);
+    // The dialog's own padding is removed so that the page list reaches the edges of the window.
+    v_flex()
+      .rounded_b_lg()
+      .overflow_hidden()
       .child(
-        v_flex()
-          .gap_1p5()
-          .child(Label::new("Git remote").text_color(muted).text_size(FONT_SIZE_SM))
-          .child(Input::new(&self.remote_input))
-          .child(Label::new("Change it when the repository was renamed or moved.").text_color(muted).text_size(FONT_SIZE_SM)),
+        div()
+          .border_b_1()
+          .border_color(palette.border)
+          .child(Label::new(self.title.clone()).text_size(FONT_SIZE).font_weight(FontWeight::SEMIBOLD).px_5().py_4()),
       )
+      .child(div().h(px(400.)).child(pages))
       .child(
         h_flex()
           .gap_2()
           .justify_end()
+          .px_5()
+          .py_3()
+          .border_t_1()
+          .border_color(palette.border)
           .child(Button::new("settings-cancel").label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
           .child(Button::new("settings-save").label("Save").primary().on_click(cx.listener(|this, _, _, cx| this.save(cx)))),
       )

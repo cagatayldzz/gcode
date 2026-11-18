@@ -811,8 +811,9 @@ impl Workspace {
     let projects = cx.new(|cx| ProjectManager::new(workspace, cx));
     let accounts = cx.new(AccountsList::new);
     let updates = cx.new(UpdatePanel::new);
-    let palette = colors(cx);
-    window.open_dialog(cx, move |dialog, _, _| {
+    window.open_dialog(cx, move |dialog, _, cx| {
+      // Read on every draw, so that a theme change while the dialog is open recolors it.
+      let palette = colors(cx);
       // The dialog's own padding is removed so that the page list reaches the edges of the window.
       dialog.p_0().width(px(820.)).child(
         v_flex()
@@ -1047,8 +1048,7 @@ impl Workspace {
       window.close_dialog(cx);
       cx.notify();
     }));
-    let title = SharedString::from(format!("{} settings", project.name()));
-    window.open_dialog(cx, move |dialog, _, _| dialog.title(title.clone()).width(px(480.)).p_5().child(settings.clone()));
+    window.open_dialog(cx, move |dialog, _, _| dialog.p_0().width(px(720.)).child(settings.clone()));
   }
 
   fn select_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
