@@ -34,6 +34,10 @@ impl ShownDiff {
     self.state.update(cx, |state, cx| state.set_files(files, cx));
   }
 
+  pub fn state(&self) -> &Entity<DiffState> {
+    &self.state
+  }
+
   /// The Kit diff, to be given the sizes and options of the place that shows it.
   pub fn view(&self, cx: &App) -> Diff {
     let palette = colors(cx);

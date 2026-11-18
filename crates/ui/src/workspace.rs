@@ -1,5 +1,5 @@
 use crate::{
-  all_changes::AllChanges,
+  all_changes::{AllChanges, OpenChangedFile},
   change_view::ChangeView,
   commit_settings::{CommitSettings, CommitSettingsSaved},
   commit_view::CommitView,
@@ -10,7 +10,7 @@ use crate::{
   explorer,
   project_manager::ProjectManager,
   project_search,
-  project_settings::{AppearanceChosen, ProjectSettings},
+  project_settings::{ProjectSettings, ProjectSettingsEvent},
   project_setup::{ProjectReady, ProjectSetup},
   pull_request::{PullRequestEvent, PullRequestForm, PullRequestTarget},
   settings::{
@@ -994,6 +994,10 @@ impl Workspace {
 
   /// Asks before taking a project out of Vekro: its shells stop, its folder stays on disk.
   pub(crate) fn confirm_remove_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    self.confirm_project_removal(path, false, window, cx);
+  }
+
+  fn confirm_project_removal(&mut self, path: PathBuf, from_settings: bool, window: &mut Window, cx: &mut Context<Self>) {
     let Some(project) = self.projects.projects.iter().find(|project| project.path == path) else { return };
     let (title, workspace) = (SharedString::from(format!("Remove {}?", project.name())), cx.entity());
     window.open_alert_dialog(cx, move |alert, _, _| {
@@ -1006,8 +1010,12 @@ impl Workspace {
         .ok_text("Remove")
         .ok_variant(ButtonVariant::Danger)
         .on_ok(move |_, window, cx| {
+          if from_settings {
+            window.close_dialog(cx);
+            window.close_dialog(cx);
+          }
           workspace.update(cx, |this, cx| this.remove_project(&path, window, cx));
-          true
+          !from_settings
         })
     });
   }
@@ -1030,7 +1038,14 @@ impl Workspace {
   pub(crate) fn open_project_settings(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
     let Some(project) = self.projects.projects.iter().find(|project| project.path == path).cloned() else { return };
     let settings = cx.new(|cx| ProjectSettings::new(&project, window, cx));
-    self._dialog_subscription = Some(cx.subscribe_in(&settings, window, |this, _, chosen: &AppearanceChosen, window, cx| {
+    self._dialog_subscription = Some(cx.subscribe_in(&settings, window, |this, _, event: &ProjectSettingsEvent, window, cx| {
+      let chosen = match event {
+        ProjectSettingsEvent::RemoveRequested(path) => {
+          this.confirm_project_removal(path.clone(), true, window, cx);
+          return;
+        }
+        ProjectSettingsEvent::Save(chosen) => chosen,
+      };
       this.projects.set_appearance(&chosen.path, &chosen.name, chosen.icon.as_deref(), chosen.color.as_deref());
       this.persist_projects();
       if let Some(url) = &chosen.remote {
@@ -1050,7 +1065,7 @@ impl Workspace {
       window.close_dialog(cx);
       cx.notify();
     }));
-    window.open_dialog(cx, move |dialog, _, _| dialog.p_0().width(px(720.)).child(settings.clone()));
+    window.open_dialog(cx, move |dialog, window, _| dialog.p_0().width(window.rem_size() * 38.).child(settings.clone()));
   }
 
   fn select_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -1284,6 +1299,31 @@ impl Workspace {
       Err(message) => window.push_notification(Notification::error(message), cx),
     }
     cx.notify();
+  }
+
+  fn open_changed_file(&mut self, action: &OpenChangedFile, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    let Some(path) = vekro_git::workdir_file(&root, Path::new(action.0.as_str())) else {
+      window.push_notification(Notification::error("Could not locate the file in the working tree."), cx);
+      return;
+    };
+    // Git may resolve the project directory through a symlink. Keep Explorer's path spelling.
+    let path = if path.starts_with(&root) {
+      path
+    } else {
+      root.canonicalize().ok().and_then(|canonical| path.strip_prefix(canonical).ok()).map(|relative| root.join(relative)).unwrap_or(path)
+    };
+    self.sidebar_tab = SidebarTab::Explorer;
+    self.close_project_search(cx);
+    let expanded = self.expanded.len();
+    self.expanded.extend(path.ancestors().skip(1).take_while(|parent| *parent != root && parent.starts_with(&root)).map(Path::to_path_buf));
+    if self.expanded.len() != expanded {
+      self.rows = explorer::rows(&root, &self.expanded);
+    }
+    if let Some(index) = self.rows.iter().position(|row| row.path == path) {
+      self.explorer_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+    }
+    self.open_file(path, window, cx);
   }
 
   pub fn search_project(&mut self, _: &SearchProject, window: &mut Window, cx: &mut Context<Self>) {
@@ -4019,6 +4059,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::new_terminal))
       .on_action(cx.listener(Self::toggle_terminal))
       .on_action(cx.listener(Self::toggle_all_changes))
+      .on_action(cx.listener(Self::open_changed_file))
       .on_action(cx.listener(Self::split_right))
       .on_action(cx.listener(Self::view_on_host))
       .on_action(cx.listener(Self::split_down))
