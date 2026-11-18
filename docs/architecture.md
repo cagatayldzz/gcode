@@ -31,7 +31,8 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/commit_settings.rs` | the OpenCommit settings dialog (model, diff size, language, message style, instructions, push after commit) |
 | `crates/ui/src/all_changes.rs` | `AllChanges`: a single virtualized Kit diff of the working tree, with per-file review controls in the main area |
 | `crates/ui/src/change_view.rs` | `ChangeView`: the diff of the chosen file of the Changes view in the main area, in place of the editor (re-read every refresh, redrawn only when it differs) |
-| `crates/git/src/compare.rs` | comparing the current branch with another (`compare_choices`, `compare`) and merging it in (`merge_branch`); the History view's "Select Branch to Compare…" uses it |
+| `crates/git/src/compare.rs` | comparing the current branch with another (`compare_choices`, `compare`); the History view's "Select Branch to Compare…" uses it |
+| `crates/git/src/merge.rs` | predicting merge conflicts and operating on the pending Git merge; the resolver is owned by the workspace |
 | `crates/ui/src/commit_view.rs` | `CommitView`: a commit of the History view in the main area (message, changed files, the diff of the chosen one) |
 | `crates/ui/src/project_setup.rs` | the Add project dialog (New, Clone, Import) |
 | `crates/ui/src/project_settings.rs` | the dialog for a project's name, icon, color and Git remote address (`vekro_git::set_remote_url`), with a page list on the left like Settings (Kit `Settings`, Save / Cancel footer) |

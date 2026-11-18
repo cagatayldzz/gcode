@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 
 mod compare;
 
+mod merge;
+pub use merge::{read_merge, start_merge, MergeOutcome, MergeSide, MergeState};
+
 pub use compare::{compare, compare_choices, merge_branch, BranchChoices, BranchRef, Comparison, COMPARE_LIMIT};
 
 /// How a file differs from the last commit.
@@ -46,6 +49,7 @@ pub struct Summary {
   pub changes: Vec<Change>,
   /// Where the branch stands against its remote; `None` when the repository has no remote.
   pub sync: Option<Sync>,
+  pub merging: bool,
 }
 
 /// How the checked-out branch relates to its remote.
@@ -135,7 +139,7 @@ pub fn summary(path: &Path) -> Option<Summary> {
     .unwrap_or_default();
   changes.sort_by(|a, b| a.path.cmp(&b.path));
   let sync = sync_status(&repository);
-  Some(Summary { branch, changes, sync })
+  Some(Summary { branch, changes, sync, merging: repository.state() == git2::RepositoryState::Merge })
 }
 
 /// What the project menu shows beside a project: how many files have changes, and whether commits are waiting to be pushed
@@ -287,6 +291,9 @@ pub fn file_versions(path: &Path, file: &Path, limit: usize) -> Result<FileVersi
 /// and from the disk. `file` is relative to the repository.
 pub fn discard_changes(path: &Path, file: &Path) -> Result<(), String> {
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  if repository.state() == git2::RepositoryState::Merge {
+    return Err("Finish or abort the current merge first.".into());
+  }
   let workdir = repository.workdir().ok_or("The repository has no working folder.")?.to_path_buf();
   let committed = repository.head().ok().and_then(|head| head.peel_to_tree().ok()).is_some_and(|tree| tree.get_path(file).is_ok());
   if committed {
@@ -319,6 +326,9 @@ pub fn commit(path: &Path, files: &[PathBuf], summary: &str, description: &str) 
     return Err("Choose at least one file to commit.".into());
   }
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  if repository.state() == git2::RepositoryState::Merge {
+    return Err("Finish or abort the current merge first.".into());
+  }
   let workdir = repository.workdir().ok_or("The repository has no working folder.")?.to_path_buf();
   let signature = repository.signature().map_err(|_| "Set user.name and user.email in your Git configuration first.".to_string())?;
   let parent = repository.head().ok().and_then(|head| head.peel_to_commit().ok());
@@ -379,6 +389,9 @@ pub fn create_branch(path: &Path, name: &str) -> Result<(), String> {
     return Err(format!("\"{name}\" is not a valid branch name."));
   }
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  if repository.state() == git2::RepositoryState::Merge {
+    return Err("Finish or abort the current merge first.".into());
+  }
   if repository.find_branch(name, git2::BranchType::Local).is_ok() {
     return Err(format!("A branch named {name} already exists."));
   }
@@ -395,6 +408,9 @@ pub fn create_branch(path: &Path, name: &str) -> Result<(), String> {
 /// forced, nothing is lost.
 pub fn switch_branch(path: &Path, name: &str) -> Result<(), String> {
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  if repository.state() == git2::RepositoryState::Merge {
+    return Err("Finish or abort the current merge first.".into());
+  }
   let branch = repository.find_branch(name, git2::BranchType::Local).map_err(|_| format!("There is no branch named {name}."))?;
   let commit = branch.get().peel_to_commit().map_err(|error| error.message().to_string())?;
   let mut checkout = CheckoutBuilder::new();

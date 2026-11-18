@@ -13,6 +13,7 @@ mod diff_view;
 mod editor;
 mod explorer;
 mod menus;
+mod merge_dialog;
 mod project_manager;
 mod project_search;
 mod project_settings;

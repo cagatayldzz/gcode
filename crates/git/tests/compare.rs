@@ -110,3 +110,52 @@ fn a_name_that_looks_like_an_option_is_refused() {
   assert!(merge_branch(&dir, "--abort").is_err());
   fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn a_pending_add_add_merge_supports_choosing_either_side_and_undo() {
+  use vekro_git::{start_merge, MergeOutcome, MergeSide};
+
+  let dir = repository("add-add");
+  commit_file(&dir, "base.txt", "base\n", "base", 1_000);
+  vekro_git::create_branch(&dir, "other").unwrap();
+  commit_file(&dir, "conflict.txt", "theirs\n", "other", 2_000);
+  checkout(&dir, "main");
+  commit_file(&dir, "conflict.txt", "ours\n", "main", 3_000);
+
+  assert_eq!(compare(&dir, "other").unwrap().conflict_count, Some(1));
+  assert!(!dir.join(".git/MERGE_HEAD").exists());
+  let MergeOutcome::Conflicted(state) = start_merge(&dir, "other", "main").unwrap() else { panic!("expected a conflict") };
+  assert_eq!(state.files[0].path, "conflict.txt");
+  assert!(state.finish(&dir, false).is_err());
+
+  let resolved = state.resolve(&dir, "conflict.txt", MergeSide::Incoming).unwrap();
+  assert!(resolved.files.is_empty());
+  assert_eq!(fs::read_to_string(dir.join("conflict.txt")).unwrap(), "theirs\n");
+  let reopened = resolved.undo(&dir, "conflict.txt").unwrap();
+  assert_eq!(reopened.files.len(), 1);
+  let resolved = reopened.resolve(&dir, "conflict.txt", MergeSide::Current).unwrap();
+  resolved.finish(&dir, false).unwrap();
+
+  let repository = git2::Repository::open(&dir).unwrap();
+  assert_eq!(repository.head().unwrap().peel_to_commit().unwrap().parent_count(), 2);
+  assert_eq!(fs::read_to_string(dir.join("conflict.txt")).unwrap(), "ours\n");
+  assert!(!dir.join(".git/MERGE_HEAD").exists());
+  fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn aborting_a_pending_merge_restores_the_current_branch() {
+  use vekro_git::{start_merge, MergeOutcome};
+
+  let dir = repository("abort-pending");
+  commit_file(&dir, "a.txt", "base\n", "base", 1_000);
+  vekro_git::create_branch(&dir, "other").unwrap();
+  commit_file(&dir, "a.txt", "other\n", "other", 2_000);
+  checkout(&dir, "main");
+  commit_file(&dir, "a.txt", "main\n", "main", 3_000);
+  let MergeOutcome::Conflicted(merge) = start_merge(&dir, "other", "main").unwrap() else { panic!("expected a conflict") };
+  merge.finish(&dir, true).unwrap();
+  assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "main\n");
+  assert!(!dir.join(".git/MERGE_HEAD").exists());
+  fs::remove_dir_all(dir).unwrap();
+}

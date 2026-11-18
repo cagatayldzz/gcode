@@ -8,6 +8,7 @@ use crate::{
   connections::{accounts_path, credentials_for_repository, describe, AccountsList},
   editor::{ActiveTab, EditorPanel},
   explorer,
+  merge_dialog::{MergeDialog, MergeEvent},
   project_manager::ProjectManager,
   project_search,
   project_settings::{ProjectSettings, ProjectSettingsEvent},
@@ -155,6 +156,7 @@ struct ProjectView {
 struct RemoteWork {
   title: SharedString,
   progress: Arc<Mutex<String>>,
+  fetching_after_push: Arc<AtomicBool>,
 }
 
 /// The open pull requests of the repository, as the toolbar's menu knows them.
@@ -268,7 +270,8 @@ pub struct Workspace {
   compare_filter: Entity<InputState>,
   compare_epoch: u64,
   /// A branch is being merged into the current one.
-  merging: bool,
+  merge_task: Option<Task<()>>,
+  merge_dialog: Option<(PathBuf, Entity<MergeDialog>, Subscription)>,
   selected_commit: Option<String>,
   commit_view: Entity<CommitView>,
   /// The changes of the chosen file of the Changes view, shown in the main area.
@@ -379,7 +382,8 @@ impl Workspace {
       compare_open: false,
       compare_filter: compare_filter.clone(),
       compare_epoch: 0,
-      merging: false,
+      merge_task: None,
+      merge_dialog: None,
       selected_commit: None,
       commit_view: cx.new(|_| CommitView::new()),
       change_view: cx.new(|_| ChangeView::new()),
@@ -1536,7 +1540,7 @@ impl Workspace {
   /// Commits the changed files that are ticked, with the summary and description typed below the list.
   fn commit_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
-    if self.committing || self.discarding {
+    if self.committing || self.discarding || git.merging || self.merge_task.is_some() {
       return;
     }
     let files: Vec<PathBuf> = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).map(|change| change.path.clone()).collect();
@@ -1733,7 +1737,7 @@ impl Workspace {
   /// The button shows what git reports while it works.
   fn sync_remote(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let (Some(root), Some(sync)) = (self.projects.active.clone(), self.git.as_ref().and_then(|git| git.sync.clone())) else { return };
-    if self.remote_work.is_some() {
+    if self.remote_work.is_some() || self.merge_task.is_some() || self.git.as_ref().is_some_and(|git| git.merging) {
       return;
     }
     let remote = sync.remote.clone();
@@ -1748,7 +1752,8 @@ impl Workspace {
       (format!("Fetching {remote}"), "Fetched")
     };
     let progress = Arc::new(Mutex::new(String::from("Connecting…")));
-    self.remote_work = Some(RemoteWork { title: title.into(), progress: progress.clone() });
+    let fetching_after_push = Arc::new(AtomicBool::new(false));
+    self.remote_work = Some(RemoteWork { title: title.into(), progress: progress.clone(), fetching_after_push: fetching_after_push.clone() });
     cx.notify();
     let accounts = self.settings.read(cx).accounts.clone();
     let work = cx.background_executor().spawn({
@@ -1759,7 +1764,11 @@ impl Workspace {
         if sync.behind > 0 {
           vekro_git::pull(&root, credentials.as_ref(), report)
         } else if sync.ahead > 0 || !sync.upstream {
-          vekro_git::push(&root, credentials.as_ref(), report)
+          let pushed = vekro_git::push(&root, credentials.as_ref(), &report)?;
+          report("Connecting…");
+          fetching_after_push.store(true, Ordering::Relaxed);
+          vekro_git::fetch(&root, credentials.as_ref(), report).map_err(|error| format!("Push succeeded, but fetching failed: {error}"))?;
+          Ok(pushed)
         } else {
           vekro_git::fetch(&root, credentials.as_ref(), report)
         }
@@ -2040,36 +2049,92 @@ impl Workspace {
     cx.notify();
   }
 
-  /// Merges the compared branch into the current one, like `git merge`, once the user asks for it. Conflicts stop it and leave
-  /// everything as it was.
+  /// Starts the explicitly requested merge or reopens its conflict resolver.
   fn merge_compare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    let (Some(root), Some(branch)) = (self.projects.active.clone(), self.compare.as_ref().map(|view| view.branch.clone())) else { return };
-    if self.merging {
+    let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
+    if self.merge_task.is_some() || self.remote_work.is_some() || self.committing || self.discarding {
       return;
     }
-    self.merging = true;
-    cx.notify();
+    let pending = git.merging;
+    let branch = self.compare.as_ref().map(|view| view.branch.clone());
+    if !pending && branch.is_none() {
+      return;
+    }
     let work = cx.background_executor().spawn({
+      let root = root.clone();
       let branch = branch.clone();
-      async move { vekro_git::merge_branch(&root, &branch) }
+      let current = git.branch.clone();
+      async move {
+        if pending {
+          vekro_git::read_merge(&root).map(vekro_git::MergeOutcome::Conflicted)
+        } else {
+          vekro_git::start_merge(&root, branch.as_deref().unwrap_or_default(), &current)
+        }
+      }
     });
-    cx.spawn_in(window, async move |this, cx| {
+    self.merge_task = Some(cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
-        this.merging = false;
+        this.merge_task = None;
+        if this.projects.active.as_ref() != Some(&root) {
+          cx.notify();
+          return;
+        }
         this.refresh_project();
         match result {
-          Ok(()) => {
-            this.compare = None;
-            this.load_history(cx);
-            window.push_notification(Notification::info(format!("Merged {branch}.")), cx);
+          Ok(vekro_git::MergeOutcome::Finished) => this.merge_completed(branch.as_deref(), window, cx),
+          Ok(vekro_git::MergeOutcome::Conflicted(state)) => {
+            if let Some((_, dialog, _)) = this.merge_dialog.as_ref().filter(|(path, dialog, _)| path == &root && dialog.read(cx).same_merge(&state)) {
+              dialog.update(cx, |dialog, cx| dialog.set_state(state, cx));
+              Self::show_merge_dialog(dialog.clone(), window, cx);
+              cx.notify();
+              return;
+            }
+            let source = if pending { "incoming changes".into() } else { branch.unwrap_or_default().into() };
+            let dialog = cx.new(|_| MergeDialog::new(root.clone(), source, state));
+            let subscription = cx.subscribe_in(&dialog, window, |this, dialog, event, window, cx| {
+              let source = dialog.read(cx).source().clone();
+              window.close_dialog(cx);
+              this.merge_dialog = None;
+              this.refresh_project();
+              match event {
+                MergeEvent::Completed => this.merge_completed(Some(source.as_str()), window, cx),
+                MergeEvent::Aborted => window.push_notification(Notification::info("Merge aborted."), cx),
+              }
+              cx.notify();
+            });
+            this.merge_dialog = Some((root, dialog.clone(), subscription));
+            Self::show_merge_dialog(dialog, window, cx);
           }
           Err(message) => window.push_notification(Notification::error(message), cx),
         }
         cx.notify();
       });
-    })
-    .detach();
+    }));
+    cx.notify();
+  }
+
+  fn show_merge_dialog(dialog: Entity<MergeDialog>, window: &mut Window, cx: &mut App) {
+    window.open_dialog(cx, move |surface, window, _| {
+      surface
+        .title("Resolve merge conflicts")
+        .width(window.rem_size() * 42.)
+        .close_button(false)
+        .overlay_closable(false)
+        .keyboard(false)
+        .child(dialog.clone())
+    });
+  }
+
+  fn merge_completed(&mut self, source: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
+    let target = self.git.as_ref().map_or("the current branch", |git| git.branch.as_str());
+    let source = source.unwrap_or("incoming changes");
+    window.push_notification(Notification::info(format!("Merged {source} into {target}.")), cx);
+    self.clear_compare(cx);
+    self.selected_change = None;
+    self.all_changes_open = false;
+    self.set_git_view(GitView::Changes, cx);
+    self.load_history(cx);
   }
 
   /// Shows a commit of the History view in the main area.
@@ -2689,6 +2754,14 @@ impl Workspace {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     let picker = self.render_branch_picker(&git.branch, cx);
+    let pending_merge = git.merging.then(|| {
+      Button::new("reopen-merge")
+        .small()
+        .label("Resolve merge")
+        .icon(Icon::empty().path("icons/triangle-alert.svg"))
+        .disabled(self.merge_task.is_some())
+        .on_click(cx.listener(|this, _, window, cx| this.merge_compare(window, cx)))
+    });
     let sync = git.sync.as_ref().map(|sync| {
       let (icon, title, count) = if !sync.upstream {
         ("icons/upload.svg", "Publish branch".to_string(), 0)
@@ -2715,7 +2788,7 @@ impl Workspace {
         .h_12()
         .w_56()
         .rounded_none()
-        .disabled(self.remote_work.is_some())
+        .disabled(self.remote_work.is_some() || git.merging || self.merge_task.is_some())
         .child(
           h_flex()
             .w_full()
@@ -2730,7 +2803,16 @@ impl Workspace {
                 .flex_1()
                 .min_w_0()
                 .items_start()
-                .child(Label::new(self.remote_work.as_ref().map_or(title.into(), |work| work.title.clone())).font_weight(FontWeight::SEMIBOLD))
+                .child(
+                  Label::new(self.remote_work.as_ref().map_or(title.into(), |work| {
+                    if work.fetching_after_push.load(Ordering::Relaxed) {
+                      format!("Fetching {}", sync.remote).into()
+                    } else {
+                      work.title.clone()
+                    }
+                  }))
+                  .font_weight(FontWeight::SEMIBOLD),
+                )
                 .child(
                   Label::new(detail)
                     .text_size(FONT_SIZE_SM)
@@ -2771,7 +2853,8 @@ impl Workspace {
         .border_b_1()
         .border_color(palette.border)
         .child(div().h_12().border_r_1().border_color(palette.border).child(picker))
-        .children(sync.map(|button| div().h_12().border_r_1().border_color(palette.border).child(button))),
+        .children(sync.map(|button| div().h_12().border_r_1().border_color(palette.border).child(button)))
+        .children(pending_merge),
     )
   }
 
@@ -2917,7 +3000,7 @@ impl Workspace {
           .small()
           .w_full()
           .label(label)
-          .disabled(chosen == 0 || !summary_filled || self.committing || self.discarding)
+          .disabled(chosen == 0 || !summary_filled || self.committing || self.discarding || git.merging || self.merge_task.is_some())
           .on_click(cx.listener(|this, _, window, cx| this.commit_changes(window, cx))),
       );
     let tabs = TabBar::new("git-view-tabs")
@@ -3274,8 +3357,14 @@ impl Workspace {
     let note = |parts: Vec<AnyElement>| {
       h_flex().flex_wrap().justify_center().gap_1().text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).children(parts)
     };
-    let footer = view.found.as_ref().map(|_| {
-      let message = if behind > 0 {
+    let footer = view.found.as_ref().map(|found| {
+      let conflicts = found.conflict_count.unwrap_or_default();
+      let message = if conflicts > 0 {
+        note(vec![
+          bold(format!("{conflicts} conflicted file{}", if conflicts == 1 { "" } else { "s" })).into_any_element(),
+          Label::new(format!("when merging {} into {current}", view.branch)).into_any_element(),
+        ])
+      } else if behind > 0 {
         note(vec![
           Label::new("This will merge").into_any_element(),
           bold(format!("{behind} commit{}", if behind == 1 { "" } else { "s" })).into_any_element(),
@@ -3287,22 +3376,31 @@ impl Workspace {
       } else {
         note(vec![Label::new("This branch is up to date with").into_any_element(), bold(view.branch.clone()).into_any_element()])
       };
-      v_flex().gap_2().pr_3().pb_3().pt_2().items_center().child(Icon::new(IconName::Check).size_4().text_color(palette.new)).child(message).when(
-        behind > 0,
-        |footer| {
+      v_flex()
+        .gap_2()
+        .pr_3()
+        .pb_3()
+        .pt_2()
+        .items_center()
+        .child(if conflicts > 0 {
+          Icon::empty().path("icons/triangle-alert.svg").size_4().text_color(palette.conflicted)
+        } else {
+          Icon::new(IconName::Check).size_4().text_color(palette.new)
+        })
+        .child(message)
+        .when(behind > 0, |footer| {
           footer.child(
             div().w_full().child(
               Button::new("compare-merge")
                 .primary()
                 .w_full()
-                .label("Create a merge commit")
-                .loading(self.merging)
-                .disabled(self.merging)
+                .label(if self.git.as_ref().is_some_and(|git| git.merging) { "Resolve merge conflicts" } else { "Create a merge commit" })
+                .loading(self.merge_task.is_some())
+                .disabled(self.merge_task.is_some() || self.remote_work.is_some())
                 .on_click(cx.listener(|this, _, window, cx| this.merge_compare(window, cx))),
             ),
           )
-        },
-      )
+        })
     });
     v_flex().flex_1().min_h_0().gap_2().child(div().pr_3().child(tabs)).child(list).children(footer).into_any_element()
   }
@@ -4022,10 +4120,16 @@ impl Render for Workspace {
       self.change_view.clone().into_any_element()
     } else if self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::Changes {
       let changed = self.git.as_ref().map_or(0, Summary::changed);
-      let (title, description) = if changed == 0 {
-        ("No changes to preview", "Changed files will appear here when you select them.")
+      let (title, description): (_, SharedString) = if changed == 0 {
+        let description = match self.git.as_ref().and_then(|git| git.sync.as_ref()).filter(|sync| sync.ahead > 0) {
+          Some(sync) => {
+            format!("{} local commit{} ready to push to {}.", sync.ahead, if sync.ahead == 1 { " is" } else { "s are" }, sync.remote).into()
+          }
+          None => "The working tree has no uncommitted changes.".into(),
+        };
+        ("No local changes", description)
       } else {
-        ("Select a changed file", "Choose a file in Changes to preview its diff.")
+        ("Select a changed file", "Choose a file in Changes to preview its diff.".into())
       };
       Empty::new()
         .size_full()

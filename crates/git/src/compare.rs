@@ -45,6 +45,8 @@ pub struct Comparison {
   /// The real numbers, which can be larger than the lists.
   pub behind_count: usize,
   pub ahead_count: usize,
+  /// Number of files predicted to conflict before the working tree is changed.
+  pub conflict_count: Option<usize>,
 }
 
 fn message(error: git2::Error) -> String {
@@ -136,7 +138,13 @@ pub fn compare(path: &Path, branch: &str) -> Result<Comparison, String> {
         .collect(),
     )
   };
-  Ok(Comparison { behind: side(other_id, head_id)?, ahead: side(head_id, other_id)?, behind_count, ahead_count })
+  Ok(Comparison {
+    behind: side(other_id, head_id)?,
+    ahead: side(head_id, other_id)?,
+    behind_count,
+    ahead_count,
+    conflict_count: super::merge::preview(&repository, head_id, other_id).ok(),
+  })
 }
 
 /// Merges `branch` into the current branch, like `git merge --no-edit`. With conflicts or changes in the way nothing is
