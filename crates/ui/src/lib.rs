@@ -42,6 +42,7 @@ actions!(
     AddProject,
     OpenSettings,
     SearchProject,
+    OpenSearchResults,
     NewTerminal,
     SaveFile,
     CloseTab,

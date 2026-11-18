@@ -175,3 +175,5 @@ Not stored yet: window size and position, dock layout, open files, running termi
 
 - Language, formatting, tests, GPUI Kit conventions and checks: `AGENTS.md`.
 - A change to crate boundaries, the window layout or the state files must update this file.
+
+The activity bar opens Search below Explorer and keeps project settings at its bottom. Search owns a separate sidebar view, and its results can open as a read-only editor tab.

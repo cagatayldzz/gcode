@@ -190,6 +190,9 @@ pub(crate) struct EditorPanel {
   preview: Option<Entity<EditorState>>,
   preview_epoch: u64,
   focus_handle: FocusHandle,
+  search_report: Option<(SharedString, Entity<EditorState>)>,
+  report_active: bool,
+  replacement_files: std::collections::HashSet<PathBuf>,
 }
 
 impl EditorPanel {
@@ -223,12 +226,17 @@ impl EditorPanel {
       preview: None,
       preview_epoch: 0,
       focus_handle: cx.focus_handle(),
+      search_report: None,
+      report_active: false,
+      replacement_files: Default::default(),
     }
   }
 
   /// Switches to another project's editor area: the tabs of the project being left are put away and come back with
   /// it; a project not seen before starts with none.
   pub fn switch_project(&mut self, from: Option<PathBuf>, to: Option<PathBuf>, cx: &mut Context<Self>) {
+    self.search_report = None;
+    self.report_active = false;
     let current = std::mem::take(&mut self.tabs);
     if let Some(from) = from {
       self.saved.insert(from, current);
@@ -241,7 +249,7 @@ impl EditorPanel {
 
   /// Tells the others what is shown and redraws.
   fn announce(&mut self, cx: &mut Context<Self>) {
-    let shown = match self.tabs.current() {
+    let shown = match self.tabs.current().filter(|_| !self.report_active) {
       Some(path) => ActiveTab::File(path.clone()),
       None => ActiveTab::Nothing,
     };
@@ -252,6 +260,7 @@ impl EditorPanel {
   /// Shows another tab.
   fn activate(&mut self, index: usize, cx: &mut Context<Self>) {
     if index < self.tabs.items.len() {
+      self.report_active = false;
       self.tabs.active = index;
       self.tabs.close_order.reset();
       if let Some(path) = self.tabs.current().cloned() {
@@ -263,6 +272,10 @@ impl EditorPanel {
 
   /// The close shortcut: the shown tab first, then the others from the last to the first. Returns false when no tab is open.
   pub fn close_by_shortcut(&mut self, cx: &mut Context<Self>) -> bool {
+    if self.report_active {
+      self.close_report(cx);
+      return true;
+    }
     let Some(index) = self.tabs.close_order.next(self.tabs.items.len(), self.tabs.active) else { return false };
     self.close_tab(index, cx);
     true
@@ -291,6 +304,7 @@ impl EditorPanel {
       }
       self.touch(&path);
     }
+    self.report_active = false;
     self.tabs.show(path.clone(), |open| *open == path);
     self.announce(cx);
     Ok(())
@@ -374,6 +388,11 @@ impl EditorPanel {
       return Err(format!("{} is too large to open here.", display_name(path)));
     }
     let text = fs::read_to_string(path).map_err(|_| format!("{} is not a text file.", display_name(path)))?;
+    self.install_text(path, text, window, cx);
+    Ok(())
+  }
+
+  fn install_text(&mut self, path: &Path, text: String, window: &mut Window, cx: &mut Context<Self>) {
     let language = language_for(path);
     let crlf = text.contains("\r\n");
     let state = cx.new(|cx| EditorState::new(window, cx).language(language).line_number(true).default_value(text));
@@ -390,7 +409,35 @@ impl EditorPanel {
     self.files.insert(path.to_path_buf(), ReadyFile { state, dirty: false, painted: false, crlf, _changes: changes, _cursor: cursor });
     self.touch(path);
     self.evict();
-    Ok(())
+  }
+
+  pub fn lock_replacement_files(&mut self, paths: impl IntoIterator<Item = PathBuf>, cx: &mut Context<Self>) {
+    self.replacement_files = paths.into_iter().collect();
+    cx.notify();
+  }
+
+  pub fn update_replaced_text(&mut self, path: &Path, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+    if self.files.contains_key(path) && !self.is_dirty(path) {
+      self.install_text(path, text.to_owned(), window, cx);
+      cx.notify();
+    }
+    if let Some(format) = PreviewFormat::for_path(path).filter(|_| self.images.contains_key(path)) {
+      self.load_image(path.to_path_buf(), format, cx);
+    }
+  }
+
+  pub fn show_search_report(&mut self, query: &str, text: String, window: &mut Window, cx: &mut Context<Self>) {
+    let title: SharedString = format!("Search: {query}").into();
+    let editor = cx.new(|cx| EditorState::new(window, cx).default_value(text));
+    self.search_report = Some((title, editor));
+    self.report_active = true;
+    self.announce(cx);
+  }
+
+  fn close_report(&mut self, cx: &mut Context<Self>) {
+    self.search_report = None;
+    self.report_active = false;
+    self.announce(cx);
   }
 
   /// Marks a file as the most recently used.
@@ -440,22 +487,25 @@ impl EditorPanel {
 
   /// Writes the open file to disk.
   pub fn save(&mut self, cx: &mut Context<Self>) -> io::Result<bool> {
-    let Some(path) = self.tabs.current() else { return Ok(false) };
+    let Some(path) = self.tabs.current().filter(|_| !self.report_active) else { return Ok(false) };
     let Some(file) = self.files.get_mut(path) else { return Ok(false) };
+    if self.replacement_files.contains(path) {
+      return Err(io::Error::other("Wait for the project replacement to finish."));
+    }
     fs::write(path, file.state.read(cx).value().to_string())?;
     file.dirty = false;
     cx.notify();
     Ok(true)
   }
 
-  fn is_dirty(&self, path: &Path) -> bool {
+  pub fn is_dirty(&self, path: &Path) -> bool {
     self.files.get(path).is_some_and(|file| file.dirty)
   }
 
   /// What the status bar says about the open file, left to right: the cursor, the indentation, the encoding, the line
   /// ending and the language.
   pub fn status(&self, cx: &App) -> Vec<String> {
-    match self.tabs.current() {
+    match self.tabs.current().filter(|_| !self.report_active) {
       None => Vec::new(),
       Some(path) => {
         if let Some(format) = PreviewFormat::for_path(path).filter(|_| !self.svg_source.contains(path)) {
@@ -559,10 +609,21 @@ impl EditorPanel {
           cx.stop_propagation();
           this.close_tab(index, cx);
         }));
-      strip_tab(SharedString::from(format!("editor-tab:{}", path.display())), label, index == self.tabs.active, close, cx)
+      strip_tab(SharedString::from(format!("editor-tab:{}", path.display())), label, !self.report_active && index == self.tabs.active, close, cx)
         .on_click(cx.listener(move |this, _, _, cx| this.activate(index, cx)))
     });
-    strip(cx).children(tabs)
+    strip(cx).children(tabs).children(self.search_report.as_ref().map(|(title, _)| {
+      let close = Button::new("close-search-report").ghost().xsmall().icon(IconName::Close).tooltip("Close search results").on_click(cx.listener(
+        |this, _, _, cx| {
+          cx.stop_propagation();
+          this.close_report(cx);
+        },
+      ));
+      strip_tab("search-report-tab".into(), title.clone(), self.report_active, close, cx).on_click(cx.listener(|this, _, _, cx| {
+        this.report_active = true;
+        this.announce(cx);
+      }))
+    }))
   }
 }
 
@@ -583,63 +644,74 @@ impl Panel for EditorPanel {
 
 impl Render for EditorPanel {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let content = match self.tabs.current() {
-      None => Empty::new()
-        .size_full()
-        .header(
-          EmptyHeader::new()
-            .media(EmptyMedia::new().with_variant(EmptyMediaVariant::Icon).child(Icon::new(IconName::File)))
-            .title(EmptyTitle::new().child("No file open"))
-            .description(EmptyDescription::new().child("Choose a file in the Explorer.")),
-        )
-        .into_any_element(),
-      Some(path) => {
-        let show_source = self.svg_source.contains(path);
-        let body = match self.images.get(path).filter(|_| !show_source) {
-          Some(ImagePreview::Ready(image)) => {
-            div().absolute().inset_4().child(img(image.clone()).size_full().min_w_0().min_h_0().object_fit(ObjectFit::Contain)).into_any_element()
+    let content = if let Some((_, editor)) = self.search_report.as_ref().filter(|_| self.report_active) {
+      Editor::new(editor).readonly(true).appearance(false).bordered(false).size_full().into_any_element()
+    } else {
+      match self.tabs.current() {
+        None => Empty::new()
+          .size_full()
+          .header(
+            EmptyHeader::new()
+              .media(EmptyMedia::new().with_variant(EmptyMediaVariant::Icon).child(Icon::new(IconName::File)))
+              .title(EmptyTitle::new().child("No file open"))
+              .description(EmptyDescription::new().child("Choose a file in the Explorer.")),
+          )
+          .into_any_element(),
+        Some(path) => {
+          let show_source = self.svg_source.contains(path);
+          let body = match self.images.get(path).filter(|_| !show_source) {
+            Some(ImagePreview::Ready(image)) => {
+              div().absolute().inset_4().child(img(image.clone()).size_full().min_w_0().min_h_0().object_fit(ObjectFit::Contain)).into_any_element()
+            }
+            Some(ImagePreview::Loading { .. }) => {
+              Empty::new().size_full().header(EmptyHeader::new().title(EmptyTitle::new().child("Loading image…"))).into_any_element()
+            }
+            Some(ImagePreview::Failed(error)) => Empty::new()
+              .size_full()
+              .header(
+                EmptyHeader::new()
+                  .title(EmptyTitle::new().child("Image preview unavailable"))
+                  .description(EmptyDescription::new().child(error.clone())),
+              )
+              .into_any_element(),
+            None => self.files.get(path).map_or_else(
+              || div().into_any_element(),
+              |file| {
+                Editor::new(&file.state)
+                  .readonly(self.replacement_files.contains(path))
+                  .appearance(false)
+                  .bordered(false)
+                  .size_full()
+                  .into_any_element()
+              },
+            ),
+          };
+          if PreviewFormat::for_path(path) == Some(PreviewFormat::Svg) {
+            let path = path.clone();
+            v_flex()
+              .size_full()
+              .child(div().flex().justify_end().px_2().py_1().border_b_1().border_color(cx.theme().border).child(
+                Button::new("toggle-svg-preview").ghost().small().label(if show_source { "Preview" } else { "Source" }).on_click(cx.listener(
+                  move |this, _, window, cx| {
+                    if this.svg_source.remove(&path) {
+                      this.load_image(path.clone(), PreviewFormat::Svg, cx);
+                      cx.notify();
+                    } else {
+                      this.show_svg_source(&path, window, cx);
+                    }
+                  },
+                )),
+              ))
+              .child(div().relative().flex_1().min_h_0().child(body))
+              .into_any_element()
+          } else {
+            body
           }
-          Some(ImagePreview::Loading { .. }) => {
-            Empty::new().size_full().header(EmptyHeader::new().title(EmptyTitle::new().child("Loading image…"))).into_any_element()
-          }
-          Some(ImagePreview::Failed(error)) => Empty::new()
-            .size_full()
-            .header(
-              EmptyHeader::new()
-                .title(EmptyTitle::new().child("Image preview unavailable"))
-                .description(EmptyDescription::new().child(error.clone())),
-            )
-            .into_any_element(),
-          None => self.files.get(path).map_or_else(
-            || div().into_any_element(),
-            |file| Editor::new(&file.state).appearance(false).bordered(false).size_full().into_any_element(),
-          ),
-        };
-        if PreviewFormat::for_path(path) == Some(PreviewFormat::Svg) {
-          let path = path.clone();
-          v_flex()
-            .size_full()
-            .child(div().flex().justify_end().px_2().py_1().border_b_1().border_color(cx.theme().border).child(
-              Button::new("toggle-svg-preview").ghost().small().label(if show_source { "Preview" } else { "Source" }).on_click(cx.listener(
-                move |this, _, window, cx| {
-                  if this.svg_source.remove(&path) {
-                    this.load_image(path.clone(), PreviewFormat::Svg, cx);
-                    cx.notify();
-                  } else {
-                    this.show_svg_source(&path, window, cx);
-                  }
-                },
-              )),
-            ))
-            .child(div().relative().flex_1().min_h_0().child(body))
-            .into_any_element()
-        } else {
-          body
         }
       }
     };
     let hidden = self.preview.clone().or_else(|| self.warmup.clone());
-    let tabs = (!self.tabs.items.is_empty()).then(|| self.render_tabs(cx));
+    let tabs = (!self.tabs.items.is_empty() || self.search_report.is_some()).then(|| self.render_tabs(cx));
     v_flex().relative().size_full().children(tabs).child(div().relative().flex_1().min_h_0().child(content)).when_some(hidden, |this, state| {
       this.child(div().absolute().top_0().left_0().w(px(1.)).h(px(1.)).overflow_hidden().opacity(0.).child(Editor::new(&state)))
     })
