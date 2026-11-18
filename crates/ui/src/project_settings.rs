@@ -9,6 +9,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
     button::{Button, ButtonVariants as _},
+    checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
     label::Label,
@@ -57,6 +58,8 @@ pub(crate) struct AppearanceChosen {
   pub color: Option<String>,
   /// The new remote address, only when the user changed it.
   pub remote: Option<String>,
+  /// Also rename the project's folder on disk to the display name.
+  pub rename_folder: bool,
 }
 
 pub(crate) enum ProjectSettingsEvent {
@@ -70,6 +73,7 @@ pub(crate) struct ProjectSettings {
   input: Entity<InputState>,
   remote_input: Entity<InputState>,
   remote: String,
+  rename_folder: bool,
   icon: Option<String>,
   color: Option<String>,
   tab: usize,
@@ -96,6 +100,7 @@ impl ProjectSettings {
       input,
       remote_input,
       remote,
+      rename_folder: false,
       icon: project.icon.clone(),
       color: project.color.clone(),
       tab: 0,
@@ -113,7 +118,14 @@ impl ProjectSettings {
       icon: self.icon.clone(),
       color: self.color.clone(),
       remote,
+      rename_folder: self.rename_folder && self.folder_differs(cx),
     }));
+  }
+
+  /// Whether the display name is not the folder's name, so renaming the folder would change something.
+  fn folder_differs(&self, cx: &Context<Self>) -> bool {
+    let name = self.input.read(cx).value().trim().to_string();
+    !name.is_empty() && name != self.project.folder_name()
   }
 
   fn swatch(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement {
@@ -192,7 +204,23 @@ impl ProjectSettings {
     v_flex()
       .gap_4()
       .child(preview)
-      .child(v_flex().gap_2().child(Label::new("Display name").font_semibold()).child(Input::new(&self.input)))
+      .child(v_flex().gap_2().child(Label::new("Display name").font_semibold()).child(Input::new(&self.input)).when(
+        self.folder_differs(cx),
+        |column| {
+          column
+            .child(Checkbox::new("rename-folder").label("Also rename the folder on disk").checked(self.rename_folder).on_click(cx.listener(
+              |this, checked: &bool, _, cx| {
+                this.rename_folder = *checked;
+                cx.notify();
+              },
+            )))
+            .child(
+              Label::new("Terminals of this project restart and its open files close. Unsaved files block the rename.")
+                .text_xs()
+                .text_color(palette.text_secondary),
+            )
+        },
+      ))
       .child(
         v_flex().gap_2().child(Label::new("Color").font_semibold()).child(
           h_flex()

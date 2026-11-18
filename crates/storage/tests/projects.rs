@@ -225,3 +225,20 @@ fn favorites_are_starred_listed_in_order_and_survive_a_save() {
   assert_eq!(ProjectList::load(&file).favorites().count(), 0, "files from before favorites have none");
   std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn relocating_a_project_keeps_its_look_and_place() {
+  let mut list = ProjectList::default();
+  list.add(PathBuf::from("/work/a"));
+  list.add(PathBuf::from("/work/b"));
+  list.set_appearance(&PathBuf::from("/work/a"), "Alpha", Some("rocket"), Some("#ff0000"));
+  list.set_favorite(&PathBuf::from("/work/a"), true);
+  list.active = Some(PathBuf::from("/work/a"));
+  assert!(list.relocate(&PathBuf::from("/work/a"), &PathBuf::from("/work/c")));
+  assert_eq!(list.projects[0].path, PathBuf::from("/work/c"));
+  assert_eq!(list.projects[0].name.as_deref(), Some("Alpha"));
+  assert!(list.projects[0].favorite);
+  assert_eq!(list.active, Some(PathBuf::from("/work/c")));
+  assert!(!list.relocate(&PathBuf::from("/work/c"), &PathBuf::from("/work/b")));
+  assert!(!list.relocate(&PathBuf::from("/work/missing"), &PathBuf::from("/work/d")));
+}

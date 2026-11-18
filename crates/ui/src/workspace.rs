@@ -1102,12 +1102,30 @@ impl Workspace {
         }
         ProjectSettingsEvent::Save(chosen) => chosen,
       };
-      this.projects.set_appearance(&chosen.path, &chosen.name, chosen.icon.as_deref(), chosen.color.as_deref());
+      let mut path = chosen.path.clone();
+      if chosen.rename_folder {
+        match this.rename_project_folder(&chosen.path, chosen.name.trim(), cx) {
+          Ok(moved) => path = moved,
+          Err(message) => {
+            window.push_notification(Notification::error(format!("Could not rename the folder: {message}")), cx);
+            return;
+          }
+        }
+      }
+      this.projects.set_appearance(&path, &chosen.name, chosen.icon.as_deref(), chosen.color.as_deref());
       this.persist_projects();
+      if chosen.rename_folder {
+        this.terminal_tabs.remove(&chosen.path);
+        this.views.remove(&chosen.path);
+        if this.projects.active.as_ref() == Some(&path) {
+          this.refresh_project();
+          this.ensure_terminal(window, cx);
+        }
+      }
       if let Some(url) = &chosen.remote {
-        match vekro_git::set_remote_url(&chosen.path, url) {
+        match vekro_git::set_remote_url(&path, url) {
           Ok(()) => {
-            if this.projects.active.as_ref() == Some(&chosen.path) {
+            if this.projects.active.as_ref() == Some(&path) {
               this.refresh_project();
             }
             window.push_notification(Notification::info("Git remote updated."), cx);
@@ -1122,6 +1140,29 @@ impl Workspace {
       cx.notify();
     }));
     window.open_dialog(cx, move |dialog, window, _| dialog.p_0().width(window.rem_size() * 38.).child(settings.clone()));
+  }
+
+  /// Renames a project's folder on disk and points the project at it. Returns the new path. Nothing changes when the
+  /// name is not a plain folder name, the target exists, a file has unsaved changes, or the move fails.
+  fn rename_project_folder(&mut self, path: &Path, name: &str, cx: &mut Context<Self>) -> Result<PathBuf, String> {
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
+      return Err("the name cannot be used as a folder name".into());
+    }
+    let target = path.with_file_name(name);
+    if target == path {
+      return Ok(target);
+    }
+    if target.exists() {
+      return Err(format!("{} already exists", display_path(&target)));
+    }
+    if self.editor_panel.read(cx).has_unsaved_under(path) {
+      return Err("save or discard the open files first".into());
+    }
+    std::fs::rename(path, &target).map_err(|error| error.to_string())?;
+    let active = self.projects.active.as_deref() == Some(path);
+    self.editor_panel.update(cx, |editor, cx| editor.close_project(path, active, cx));
+    self.projects.relocate(path, &target);
+    Ok(target)
   }
 
   fn select_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -3219,16 +3260,18 @@ impl Workspace {
             .gap_0p5()
             .child(
               Button::new("commit-settings")
-                .ghost()
-                .xsmall()
+                .custom(ButtonCustomVariant::new(cx).color(palette.surface).foreground(palette.text).hover(palette.hover).active(palette.hover))
+                .cursor_pointer()
+                .small()
                 .icon(Icon::empty().path("icons/settings-2.svg"))
                 .tooltip("OpenCommit settings")
                 .on_click(cx.listener(|this, _, window, cx| this.open_commit_settings(window, cx))),
             )
             .child(
               Button::new("generate-message")
-                .ghost()
-                .xsmall()
+                .custom(ButtonCustomVariant::new(cx).color(palette.surface).foreground(cx.theme().primary).hover(palette.hover).active(palette.hover))
+                .cursor_pointer()
+                .small()
                 .icon(Icon::empty().path("icons/sparkles.svg"))
                 .loading(self.generating)
                 .disabled(chosen == 0 || self.generating)
@@ -3261,7 +3304,7 @@ impl Workspace {
             .justify_between()
             .px_3()
             .py_1()
-            .bg(palette.surface_alt)
+            .bg(palette.rail)
             .border_b_1()
             .border_color(palette.border)
             .child(

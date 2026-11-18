@@ -247,6 +247,27 @@ impl EditorPanel {
     self.announce(cx);
   }
 
+  /// Whether a file inside `root` has unsaved changes.
+  pub fn has_unsaved_under(&self, root: &Path) -> bool {
+    self.files.iter().any(|(path, file)| file.dirty && path.starts_with(root))
+  }
+
+  /// Forgets every editor and tab of the project in `root`, which is moving: its paths are about to change.
+  pub fn close_project(&mut self, root: &Path, active: bool, cx: &mut Context<Self>) {
+    if active {
+      self.tabs = Tabs::default();
+      self.search_report = None;
+      self.report_active = false;
+    }
+    self.saved.remove(root);
+    self.files.retain(|path, _| !path.starts_with(root));
+    self.images.retain(|path, _| !path.starts_with(root));
+    self.svg_source.retain(|path| !path.starts_with(root));
+    self.replacement_files.retain(|path| !path.starts_with(root));
+    self.recent.retain(|path| !path.starts_with(root));
+    self.announce(cx);
+  }
+
   /// Tells the others what is shown and redraws.
   fn announce(&mut self, cx: &mut Context<Self>) {
     let shown = match self.tabs.current().filter(|_| !self.report_active) {

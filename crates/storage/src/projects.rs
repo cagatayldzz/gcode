@@ -169,6 +169,20 @@ impl ProjectList {
     }
   }
 
+  /// Points a project at its new folder after the folder was moved, keeping its look, category, favorite and place.
+  /// Returns false when `from` is not listed or `to` already is.
+  pub fn relocate(&mut self, from: &Path, to: &Path) -> bool {
+    if self.projects.iter().any(|project| project.path == to) {
+      return false;
+    }
+    let Some(project) = self.projects.iter_mut().find(|project| project.path == from) else { return false };
+    project.path = to.to_path_buf();
+    if self.active.as_deref() == Some(from) {
+      self.active = Some(to.to_path_buf());
+    }
+    true
+  }
+
   /// Stars or unstars a project.
   pub fn set_favorite(&mut self, path: &Path, favorite: bool) {
     if let Some(project) = self.projects.iter_mut().find(|project| project.path == path) {
