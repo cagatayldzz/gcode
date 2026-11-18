@@ -130,7 +130,7 @@ pub fn start_merge(path: &Path, branch: &str, current_branch: &str) -> Result<Me
     return Err("Select a branch to merge.".into());
   }
   let repository = Repository::discover(path).map_err(error)?;
-  if repository.state() != RepositoryState::Clean || repository.head().map_err(error)?.shorthand() != Some(current_branch) {
+  if repository.state() != RepositoryState::Clean || repository.head().map_err(error)?.shorthand().ok() != Some(current_branch) {
     return Err("The repository or current branch changed. Refresh before merging.".into());
   }
   let mut options = git2::StatusOptions::new();

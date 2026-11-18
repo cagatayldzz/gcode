@@ -72,24 +72,24 @@ pub struct Sync {
 fn sync_status(repository: &Repository) -> Option<Sync> {
   let remotes = repository.remotes().ok()?;
   let head = repository.head().ok().filter(|head| head.is_branch());
-  let name = head.as_ref().and_then(|head| head.shorthand()).map(str::to_string);
+  let name = head.as_ref().and_then(|head| head.shorthand().ok()).map(str::to_string);
   let upstream =
     name.as_deref().and_then(|name| repository.find_branch(name, git2::BranchType::Local).ok()).and_then(|branch| branch.upstream().ok());
   let followed = head
     .as_ref()
-    .and_then(|head| head.name())
+    .and_then(|head| head.name().ok())
     .and_then(|name| repository.branch_upstream_remote(name).ok())
-    .and_then(|remote| remote.as_str().map(str::to_string));
+    .and_then(|remote| remote.as_str().ok().map(str::to_string));
   let remote = match followed {
     Some(remote) => remote,
-    None => remotes.iter().flatten().find(|remote| *remote == "origin").or_else(|| remotes.iter().flatten().next())?.to_string(),
+    None => remotes.iter().flatten().flatten().find(|remote| *remote == "origin").or_else(|| remotes.iter().flatten().flatten().next())?.to_string(),
   };
   let (ahead, behind) = match (head.as_ref().and_then(|head| head.target()), upstream.as_ref().and_then(|upstream| upstream.get().target())) {
     (Some(local), Some(remote)) => repository.graph_ahead_behind(local, remote).unwrap_or((0, 0)),
     _ => (0, 0),
   };
   let last_fetched = std::fs::metadata(repository.path().join("FETCH_HEAD")).and_then(|meta| meta.modified()).ok();
-  let url = repository.find_remote(&remote).ok().and_then(|found| found.url().map(str::to_string)).unwrap_or_default();
+  let url = repository.find_remote(&remote).ok().and_then(|found| found.url().ok().map(str::to_string)).unwrap_or_default();
   Some(Sync { remote, url, upstream: upstream.is_some(), ahead, behind, last_fetched })
 }
 
@@ -106,9 +106,10 @@ pub fn summary(path: &Path) -> Option<Summary> {
     Ok(head) if head.is_branch() => head.shorthand().unwrap_or("HEAD").to_string(),
     Ok(head) => head.target().map(|id| id.to_string().chars().take(7).collect()).unwrap_or_else(|| "HEAD".into()),
     // A repository without commits still names its branch.
-    Err(_) => {
-      repository.find_reference("HEAD").ok().and_then(|head| head.symbolic_target().map(|name| name.trim_start_matches("refs/heads/").to_string()))?
-    }
+    Err(_) => repository
+      .find_reference("HEAD")
+      .ok()
+      .and_then(|head| head.symbolic_target().ok().flatten().map(|name| name.trim_start_matches("refs/heads/").to_string()))?,
   };
   let mut options = StatusOptions::new();
   options.include_untracked(true).recurse_untracked_dirs(true);
@@ -132,7 +133,7 @@ pub fn summary(path: &Path) -> Option<Summary> {
           } else {
             ChangeKind::Modified
           };
-          Some(Change { path: PathBuf::from(entry.path()?), kind })
+          Some(Change { path: PathBuf::from(entry.path().ok()?), kind })
         })
         .collect()
     })
@@ -674,12 +675,12 @@ fn main_remote_name(repository: &Repository) -> Option<String> {
   let followed = repository
     .head()
     .ok()
-    .and_then(|head| head.name().map(str::to_string))
+    .and_then(|head| head.name().ok().map(str::to_string))
     .and_then(|name| repository.branch_upstream_remote(&name).ok())
-    .and_then(|remote| remote.as_str().map(str::to_string));
+    .and_then(|remote| remote.as_str().ok().map(str::to_string));
   followed
-    .or_else(|| remotes.iter().flatten().find(|name| *name == "origin").map(str::to_string))
-    .or_else(|| remotes.iter().flatten().next().map(str::to_string))
+    .or_else(|| remotes.iter().flatten().flatten().find(|name| *name == "origin").map(str::to_string))
+    .or_else(|| remotes.iter().flatten().flatten().next().map(str::to_string))
 }
 
 /// The URL of the remote the current branch follows, else `origin`, else the first remote; `None` without remotes.
@@ -687,8 +688,7 @@ pub fn remote_url(path: &Path) -> Option<String> {
   let repository = Repository::discover(path).ok()?;
   let name = main_remote_name(&repository)?;
   let remote = repository.find_remote(&name).ok()?;
-  let url = remote.url().map(str::to_string);
-  url
+  remote.url().ok().map(str::to_string)
 }
 
 /// Points the remote that [`remote_url`] reports at `url` (a repository that was renamed or moved), or adds `origin` when there is
@@ -710,7 +710,7 @@ pub fn set_remote_url(path: &Path, url: &str) -> Result<(), String> {
 pub fn head_summary(path: &Path) -> Option<String> {
   let repository = Repository::discover(path).ok()?;
   let commit = repository.head().ok()?.peel_to_commit().ok()?;
-  commit.summary().map(str::to_string)
+  commit.summary().ok().flatten().map(str::to_string)
 }
 
 /// A commit in the history list.
@@ -752,7 +752,7 @@ fn commit_info(
   CommitInfo {
     short: id.chars().take(7).collect(),
     id,
-    summary: commit.summary().unwrap_or("").to_string(),
+    summary: commit.summary().ok().flatten().unwrap_or("").to_string(),
     author: commit.author().name().unwrap_or("").to_string(),
     time: commit.time().seconds(),
     unpushed: unpushed.contains(&commit.id()),
@@ -774,7 +774,7 @@ pub fn history(path: &Path, limit: usize) -> Result<Vec<CommitInfo>, String> {
     let upstream = repository
       .head()
       .ok()
-      .and_then(|head| head.shorthand().map(str::to_string))
+      .and_then(|head| head.shorthand().ok().map(str::to_string))
       .and_then(|name| repository.find_branch(&name, git2::BranchType::Local).ok())
       .and_then(|branch| branch.upstream().ok())
       .and_then(|upstream| upstream.get().target());

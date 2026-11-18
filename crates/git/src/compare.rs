@@ -58,7 +58,7 @@ pub fn compare_choices(path: &Path) -> Result<BranchChoices, String> {
   let repository = Repository::discover(path).map_err(message)?;
   let head = repository.head().map_err(message)?;
   let head_id = head.peel_to_commit().map_err(message)?.id();
-  let current = head.shorthand().map(str::to_string);
+  let current = head.shorthand().ok().map(str::to_string);
   let mut locals = HashSet::new();
   let mut found: Vec<(String, git2::Oid)> = Vec::new();
   for (branch, kind) in repository.branches(None).map_err(message)?.filter_map(Result::ok) {
@@ -91,14 +91,17 @@ pub fn compare_choices(path: &Path) -> Result<BranchChoices, String> {
   let default_name = repository
     .find_reference("refs/remotes/origin/HEAD")
     .ok()
-    .and_then(|reference| reference.symbolic_target().and_then(|target| target.strip_prefix("refs/remotes/origin/").map(str::to_string)))
+    .and_then(|reference| {
+      reference.symbolic_target().ok().flatten().and_then(|target| target.strip_prefix("refs/remotes/origin/").map(str::to_string))
+    })
     .map(|short| if locals.contains(&short) { short } else { format!("origin/{short}") })
     .or_else(|| ["main", "master"].iter().find(|name| locals.contains(**name)).map(|name| (*name).to_string()));
   let default = default_name.and_then(|name| take(&name));
   let mut recent = Vec::new();
   if let Ok(reflog) = repository.reflog("HEAD") {
     'entries: for entry in reflog.iter() {
-      let moved = entry.message().and_then(|text| text.strip_prefix("checkout: moving from ")).and_then(|rest| rest.split_once(" to "));
+      let moved =
+        entry.message().ok().flatten().and_then(|text| text.strip_prefix("checkout: moving from ")).and_then(|rest| rest.split_once(" to "));
       for name in moved.into_iter().flat_map(|(from, to)| [to, from]) {
         if locals.contains(name) {
           if let Some(branch) = take(name) {
