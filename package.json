@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "bash scripts/app.sh --dev",
     "build": "bash scripts/app.sh release --build",
+    "update": "cargo upgrade --incompatible && cargo update && bun update",
     "release": "bash scripts/release.sh",
     "check": "bash scripts/app.sh --check",
     "icon": "bash scripts/app.sh --icon",

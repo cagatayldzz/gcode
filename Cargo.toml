@@ -21,7 +21,7 @@ gpui-kit = { version = "0.10.0", features = ["gpui-fast", "syntect"] }
 gpui-kit-assets = "0.10.0"
 futures = "0.3"
 serde_json = "1"
-git2 = { version = "0.20", default-features = false }
+git2 = { version = "0.21", default-features = false }
 vekro-git = { path = "crates/git" }
 vekro-opencommit = { path = "crates/opencommit" }
 vekro-hosting = { path = "crates/hosting" }

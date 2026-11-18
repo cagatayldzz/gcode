@@ -17,6 +17,7 @@ runs it). After cloning run `bun install`.
 | `bun run build` | release build → `dist/Vekro.app` |
 | `bun run check` | script syntax and shell tests, `cargo fmt --check`, clippy with warnings as errors, tests (run before finishing a change) |
 | `bun run test` | shell tests, then `cargo test --locked --workspace` |
+| `bun run update` | `cargo upgrade --incompatible` (needs `cargo install cargo-edit`), `cargo update`, `bun update` |
 | `bun run release` | request a release: dispatches the Release workflow for the pushed default branch (needs `gh`) |
 | `bun run icon` | redraw `AppIcon.icns` and `DevIcon.icns` from `apps/vekro/macos/icon.svg` (needs Google Chrome) |
 | `bun run commit` | `git add -A && oco --yes` (needs [OpenCommit](https://github.com/di-sukharev/opencommit)) |
