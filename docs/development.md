@@ -40,7 +40,7 @@ from Conventional Commits since the latest `v*` tag: a breaking change (`!:` or 
 
 1. **Validate**: Apple secrets are present, shell tests, `cargo fmt`, clippy and tests of `vekro-terminal`, `vekro-git`, `vekro-storage`.
 2. **Prepare**: choose the version, stamp `Cargo.toml`, `Cargo.lock`, `package.json` and `Info.plist` in the CI checkout, write `RELEASE_NOTES.md` (commit titles grouped as New Features, Bug Fixes, Documentation, Chores, with a changelog link).
-3. **Build** (macOS, in parallel): workspace clippy and tests; release build, Developer ID signature, notarization, `Vekro-<tag>-macos-arm64.zip`.
+3. **Build** (one macOS job): release build, Developer ID signature, notarization, `Vekro-<tag>-macos-arm64.zip`, then workspace clippy and tests on the same runner.
 4. **Verify**: exactly the expected assets, none empty, `SHA256SUMS.txt`.
 5. **Publish**: checksums verified, draft GitHub release, then published as latest.
 

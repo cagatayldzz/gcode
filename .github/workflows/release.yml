@@ -82,30 +82,11 @@ jobs:
             apps/vekro/macos/Info.plist
             dist/RELEASE_NOTES.md
 
-  # Checks use the source commit and run alongside version preparation and the build.
-  macos_checks:
-    name: 3 · macOS checks
-    if: github.ref_name == github.event.repository.default_branch
-    runs-on: macos-26
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v6
-      - run: |
-          rustup toolchain install stable --profile minimal --component clippy
-          rustup default stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: release-macos-checks
-      - name: Lint and test the workspace
-        run: |
-          cargo clippy --locked --workspace --all-targets -- -D warnings
-          cargo test --locked --workspace
-
   macos_arm64:
-    name: 3 · macOS Apple Silicon
+    name: 3 · macOS build and checks
     needs: prepare
     runs-on: macos-26
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -118,11 +99,18 @@ jobs:
         with:
           arch: arm64
           release-tag: ${{ needs.prepare.outputs.tag }}
+      # The checks run on the runner that built the application and reuse its compiled dependencies. A separate macOS job
+      # waited for a second runner, and compiled everything again from an empty cache.
+      - name: Lint and test the workspace
+        run: |
+          rustup component add clippy
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo test --locked --workspace
 
   verify:
     name: 4 · Verify packages
     if: success()
-    needs: [validate, prepare, macos_checks, macos_arm64]
+    needs: [validate, prepare, macos_arm64]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
