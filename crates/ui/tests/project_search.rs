@@ -4,16 +4,18 @@ mod project_search;
 use std::{
   fs,
   path::PathBuf,
-  sync::atomic::AtomicBool,
-  time::{SystemTime, UNIX_EPOCH},
+  sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 struct Fixture(PathBuf);
 
+/// Numbers the fixtures of this process. A clock is not enough: the tests run in parallel, and a coarse clock (macOS) gives two
+/// of them the same name, so that one deletes the folder of the other when it ends.
+static FIXTURES: AtomicUsize = AtomicUsize::new(0);
+
 impl Fixture {
   fn new() -> Self {
-    let path =
-      std::env::temp_dir().join(format!("vekro-search-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+    let path = std::env::temp_dir().join(format!("vekro-search-{}-{}", std::process::id(), FIXTURES.fetch_add(1, Ordering::Relaxed)));
     fs::create_dir_all(&path).unwrap();
     Self(path)
   }
