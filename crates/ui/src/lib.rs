@@ -13,6 +13,7 @@ mod connections;
 mod diff_view;
 mod editor;
 mod explorer;
+mod mention_picker;
 mod menus;
 mod merge_dialog;
 mod project_manager;
@@ -48,6 +49,7 @@ actions!(
     NewTerminal,
     SaveFile,
     CloseTab,
+    MentionProjects,
     ToggleTerminal,
     ToggleAgents,
     // The AI view: a new Codex or Claude session in the open project.

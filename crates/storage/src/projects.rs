@@ -304,6 +304,21 @@ impl ProjectList {
     true
   }
 
+  /// Swaps the places of two projects in the list without touching their categories: the project bar's live reordering.
+  /// Returns false when either is not listed or they are the same project.
+  pub fn swap_projects(&mut self, first: &Path, second: &Path) -> bool {
+    let (Some(a), Some(b)) =
+      (self.projects.iter().position(|project| project.path == first), self.projects.iter().position(|project| project.path == second))
+    else {
+      return false;
+    };
+    if a == b {
+      return false;
+    }
+    self.projects.swap(a, b);
+    true
+  }
+
   /// Deletes the unnamed categories without projects: the ones that dragging made, and nobody asked for by name. A
   /// category the user named stays until it is deleted, empty or not.
   fn prune_empty_categories(&mut self) {

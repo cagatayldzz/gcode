@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use vekro_storage::{Preferences, ThemeChoice};
+use vekro_storage::{ActivityBarLayout, Preferences, ThemeChoice};
 
 #[test]
 fn preferences_survive_a_save_and_load() {
@@ -11,6 +11,7 @@ fn preferences_survive_a_save_and_load() {
     code_font_size: 15,
     commit_instructions: Some("Be brief.".into()),
     check_updates: false,
+    activity_bar: ActivityBarLayout { order: vec!["git".into(), "explorer".into()], hidden: vec!["agents".into()] },
   };
   saved.save(&file).unwrap();
   assert_eq!(Preferences::load(&file), saved);
@@ -69,4 +70,34 @@ fn update_checks_are_on_unless_turned_off() {
   std::fs::write(&file, r#"{"check_updates": false}"#).unwrap();
   assert!(!Preferences::load(&file).check_updates);
   std::fs::remove_dir_all(dir).unwrap();
+}
+
+const ITEMS: [&str; 4] = ["explorer", "search", "git", "terminal"];
+
+#[test]
+fn the_activity_bar_keeps_the_default_order_until_the_user_moves_something() {
+  let layout = ActivityBarLayout::default();
+  assert_eq!(layout.arranged(&ITEMS), ITEMS);
+  assert_eq!(layout.visible(&ITEMS), ITEMS);
+}
+
+#[test]
+fn moving_and_hiding_activity_buttons_changes_what_the_bar_shows() {
+  let mut layout = ActivityBarLayout::default();
+  layout.move_by(&ITEMS, "terminal", -3);
+  assert_eq!(layout.arranged(&ITEMS), ["terminal", "explorer", "search", "git"]);
+  layout.move_by(&ITEMS, "terminal", 1);
+  layout.move_by(&ITEMS, "git", 10);
+  assert_eq!(layout.arranged(&ITEMS), ["explorer", "terminal", "search", "git"]);
+  layout.set_hidden("terminal", true);
+  assert_eq!(layout.visible(&ITEMS), ["explorer", "search", "git"]);
+  assert_eq!(layout.arranged(&ITEMS).len(), 4);
+  layout.set_hidden("terminal", false);
+  assert!(!layout.is_hidden("terminal"));
+}
+
+#[test]
+fn unknown_activity_ids_are_ignored_and_new_buttons_come_last() {
+  let layout = ActivityBarLayout { order: vec!["git".into(), "gone".into(), "explorer".into()], hidden: vec!["gone".into()] };
+  assert_eq!(layout.arranged(&ITEMS), ["git", "explorer", "search", "terminal"]);
 }

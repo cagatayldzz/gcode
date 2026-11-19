@@ -9,6 +9,7 @@ use crate::{
   connections::{accounts_path, credentials_for_repository, describe, AccountsList},
   editor::{ActiveTab, EditorPanel},
   explorer,
+  mention_picker::{MentionChoice, MentionPicker, ProjectsChosen},
   merge_dialog::{MergeDialog, MergeEvent},
   project_manager::ProjectManager,
   project_search,
@@ -16,15 +17,15 @@ use crate::{
   project_setup::{ProjectReady, ProjectSetup},
   pull_request::{PullRequestEvent, PullRequestForm, PullRequestTarget},
   settings::{
-    init_settings, settings_view, AccountRecheckRequested, AccountRemoveRequested, AddAllProjectsRequested, CommitSettingsRequested,
+    activity_ids, init_settings, settings_view, AccountRecheckRequested, AccountRemoveRequested, AddAllProjectsRequested, CommitSettingsRequested,
     ConnectAccountRequested, SettingsGlobal, SettingsModel,
   },
   terminal::{Terminal, TerminalAttentionChanged, TerminalExited},
   terminal_layout::{Arrangement, Direction, Node},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
-  AddProject, CheckForUpdates, CloseTab, NewClaude, NewCodex, NewTerminal, OpenSearchResults, OpenSettings, SaveFile, SearchProject, SplitDown,
-  SplitRight, ToggleAgents, ToggleAllChanges, ToggleTerminal, ViewOnHost,
+  AddProject, CheckForUpdates, ClearBuffer, CloseTab, MentionProjects, NewClaude, NewCodex, NewTerminal, OpenSearchResults, OpenSettings, SaveFile,
+  SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{base::Selectable as _, prelude::FluentBuilder as _};
 use gpui_kit::{
@@ -35,6 +36,7 @@ use gpui_kit::{
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     h_flex,
     input::{Input, InputEvent, InputState, Textarea, TextareaState},
+    kbd::Kbd,
     label::Label,
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
     notification::Notification,
@@ -118,6 +120,15 @@ enum SidebarTab {
 }
 
 impl SidebarTab {
+  /// The id the activity bar layout in the preferences knows the button by.
+  fn id(self) -> &'static str {
+    match self {
+      SidebarTab::Explorer => "explorer",
+      SidebarTab::Search => "search",
+      SidebarTab::Git => "git",
+    }
+  }
+
   const ALL: [SidebarTab; 3] = [SidebarTab::Explorer, SidebarTab::Search, SidebarTab::Git];
 
   fn icon(self) -> Icon {
@@ -332,6 +343,8 @@ pub struct Workspace {
   terminal_open: bool,
   /// The AI view (Codex, Claude) fills the main area, like the terminals do; the two never show together.
   agent_open: bool,
+  /// The project tab that was last picked up; it counts as held while the pointer still drags something.
+  dragged_tab: Option<PathBuf>,
   /// The agent sessions of each project; the sessions keep running while another project or view is shown.
   agent_tabs: HashMap<PathBuf, AgentTabs<Entity<Terminal>>>,
   /// A commit message is being generated.
@@ -458,6 +471,7 @@ impl Workspace {
       menu_host: None,
       terminal_open: false,
       agent_open: false,
+      dragged_tab: None,
       agent_tabs: HashMap::new(),
       generating: false,
       project_status: HashMap::new(),
@@ -798,6 +812,47 @@ impl Workspace {
     cx.notify();
   }
 
+  /// `⇧⌘M` in the AI view or in the terminals: opens the list of the other projects for the shown session or the focused pane.
+  pub fn mention_projects(&mut self, _: &MentionProjects, window: &mut Window, cx: &mut Context<Self>) {
+    let target = if self.agent_open {
+      self.agents().and_then(AgentTabs::current).map(|tab| tab.session.clone())
+    } else if self.terminal_open {
+      self.focused_terminal(window, cx)
+    } else {
+      None
+    };
+    if let Some(terminal) = target {
+      self.pick_projects_to_mention(terminal, window, cx);
+    }
+  }
+
+  /// Opens the list of the other projects: the ones ticked are written into the prompt of the agent as paths.
+  fn pick_projects_to_mention(&mut self, terminal: Entity<Terminal>, window: &mut Window, cx: &mut Context<Self>) {
+    let open = self.projects.active.clone();
+    let choices: Vec<MentionChoice> = self
+      .projects
+      .projects
+      .iter()
+      .filter(|project| Some(&project.path) != open.as_ref())
+      .map(|project| MentionChoice { path: project.path.clone(), name: project.name().into(), folder: display_path(&project.path).into() })
+      .collect();
+    if choices.is_empty() {
+      window.push_notification(Notification::info("Add another project to mention it in an agent."), cx);
+      return;
+    }
+    let picker = cx.new(|cx| MentionPicker::new(choices, window, cx));
+    self._dialog_subscription = Some(cx.subscribe_in(&picker, window, move |this, _, chosen: &ProjectsChosen, window, cx| {
+      let text = vekro_terminal::dropped_paths(chosen.0.iter().map(PathBuf::as_path));
+      terminal.update(cx, |terminal, cx| terminal.insert_text(&text, cx));
+      window.close_dialog(cx);
+      this.focus_pane(&terminal, window, cx);
+    }));
+    let shown = picker.clone();
+    window.open_dialog(cx, move |dialog, _, _| dialog.title("Mention projects").width(px(440.)).p_5().child(shown.clone()));
+    let focus = picker.read(cx).focus_handle(cx);
+    window.defer(cx, move |window, cx| focus.focus(window, cx));
+  }
+
   fn select_agent_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
     if let Some(root) = self.projects.active.clone() {
       if let Some(tabs) = self.agent_tabs.get_mut(&root) {
@@ -1092,6 +1147,14 @@ impl Workspace {
   /// Puts a project in the place and the category of another one: dragging a row in the project list in Settings.
   pub(crate) fn move_project_before(&mut self, dragged: &Path, target: &Path, cx: &mut Context<Self>) {
     if self.projects.move_project_before(dragged, target) {
+      self.persist_projects();
+      cx.notify();
+    }
+  }
+
+  /// Swaps two projects in the project bar while one is dragged over the other.
+  pub(crate) fn swap_projects(&mut self, first: &Path, second: &Path, cx: &mut Context<Self>) {
+    if self.projects.swap_projects(first, second) {
       self.persist_projects();
       cx.notify();
     }
@@ -3102,7 +3165,12 @@ impl Workspace {
         let look = avatar_look(project, selected, cx);
         let status = self.status_of(&path);
         let workspace = workspace.clone();
-        Button::new(SharedString::from(format!("favorite-project-{}", path.display())))
+        let held = self.dragged_tab.as_ref() == Some(&path) && cx.has_active_drag();
+        let picked_up = workspace.clone();
+        let picked = path.clone();
+        let target = path.clone();
+        let swapper = workspace.clone();
+        let button = Button::new(SharedString::from(format!("favorite-project-{}", path.display())))
           .custom(
             ButtonCustomVariant::new(cx)
               .color(if selected { primary } else { palette.rail })
@@ -3146,7 +3214,40 @@ impl Workspace {
               )
               .children(project_status_marks("favorite", &path, status.as_ref(), selected, cx)),
           )
-          .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.select_project(path.clone(), window, cx)))
+          .on_click({
+            let path = path.clone();
+            move |_, window, cx| workspace.update(cx, |this, cx| this.select_project(path.clone(), window, cx))
+          });
+        // Dragging a tab past the middle of its neighbor swaps them at once, like the tabs of a browser.
+        div()
+          .id(SharedString::from(format!("favorite-drag-{}", path.display())))
+          // The tab itself slides along the bar, so nothing follows the pointer up or down.
+          .when(held, |tab| tab.opacity(0.85).shadow_md())
+          .on_drag(DraggedProjectTab(path.clone()), move |_, _, _, cx| {
+            picked_up.update(cx, |this, _| this.dragged_tab = Some(picked.clone()));
+            cx.new(|_| NoDragPreview)
+          })
+          .on_drag_move::<DraggedProjectTab>(move |event, _, cx| {
+            let center = event.bounds.center().x;
+            let dragged = event.drag(cx).0.clone();
+            if dragged == target || !event.bounds.contains(&event.event.position) {
+              return;
+            }
+            let pointer = event.event.position.x;
+            // Only swap once the pointer has crossed the middle of the target, toward the side the dragged tab came from.
+            let _ = center;
+            let (dragged, target) = (dragged, target.clone());
+            swapper.update(cx, |this, cx| {
+              let position = |path: &Path| this.projects.projects.iter().position(|project| project.path == path);
+              if let (Some(from), Some(to)) = (position(&dragged), position(&target)) {
+                let crossed = if from < to { pointer > center } else { pointer < center };
+                if crossed {
+                  this.swap_projects(&dragged, &target, cx);
+                }
+              }
+            });
+          })
+          .child(button)
           .into_any_element()
       })
       .collect()
@@ -4241,28 +4342,38 @@ impl Workspace {
     let palette = colors(cx);
     let workspace = cx.entity();
     let changed = self.git.as_ref().map_or(0, Summary::changed);
-    let buttons = SidebarTab::ALL.map(|tab| {
-      let workspace = workspace.clone();
-      let focus = self.focus_handle.clone();
-      let button =
-        rail_button(tab.label(), tab.icon(), tab.label(), tab == self.sidebar_tab && !self.full_area_open(), true, &palette, move |_, window, cx| {
-          if tab == SidebarTab::Search {
-            focus.dispatch_action(&SearchProject, window, cx);
-            return;
-          }
-          workspace.update(cx, |this, cx| {
-            this.sidebar_tab = tab;
-            // The view of the sidebar and the editor come back when the terminals or the AI view were taking the main area.
-            if this.full_area_open() {
-              this.hide_terminal(window, cx);
+    let mut buttons: HashMap<&'static str, AnyElement> = SidebarTab::ALL
+      .into_iter()
+      .map(|tab| {
+        let workspace = workspace.clone();
+        let focus = self.focus_handle.clone();
+        let button = rail_button(
+          tab.label(),
+          tab.icon(),
+          tab.label(),
+          tab == self.sidebar_tab && !self.full_area_open(),
+          true,
+          &palette,
+          move |_, window, cx| {
+            if tab == SidebarTab::Search {
+              focus.dispatch_action(&SearchProject, window, cx);
+              return;
             }
-            cx.notify();
-          })
-        });
-      // The Git button shows how many files have changes, in a small blue circle at its top right.
-      let badge = (tab == SidebarTab::Git && changed > 0).then(|| count_badge(changed, cx).absolute().top_0().right(-BADGE_OVERHANG));
-      div().relative().child(button).children(badge)
-    });
+            workspace.update(cx, |this, cx| {
+              this.sidebar_tab = tab;
+              // The view of the sidebar and the editor come back when the terminals or the AI view were taking the main area.
+              if this.full_area_open() {
+                this.hide_terminal(window, cx);
+              }
+              cx.notify();
+            })
+          },
+        );
+        // The Git button shows how many files have changes, in a small blue circle at its top right.
+        let badge = (tab == SidebarTab::Git && changed > 0).then(|| count_badge(changed, cx).absolute().top_0().right(-BADGE_OVERHANG));
+        (tab.id(), div().relative().child(button).children(badge).into_any_element())
+      })
+      .collect();
     let attention = self.settings.read(cx).accounts.items.iter().any(|account| account.issue.is_some());
     let terminal_attention = self.terminal_tabs.values().any(|tabs| tabs.panes().iter().any(|terminal| terminal.read(cx).needs_attention()));
     let terminal =
@@ -4310,6 +4421,30 @@ impl Workspace {
             .on_click(cx.listener(|this, _, window, cx| this.open_settings_page("Accounts", window, cx))),
         )
       });
+    buttons.insert(
+      "terminal",
+      div()
+        .relative()
+        .child(terminal)
+        .when(terminal_attention, |button| {
+          button.child(
+            div()
+              .absolute()
+              .bottom_0()
+              .right_0()
+              .size_4()
+              .flex()
+              .items_center()
+              .justify_center()
+              .rounded_full()
+              .bg(theme.warning)
+              .child(Icon::empty().path("icons/triangle-alert.svg").size_3().text_color(palette.on_accent)),
+          )
+        })
+        .into_any_element(),
+    );
+    buttons.insert("agents", agents.into_any_element());
+    let layout = self.settings.read(cx).preferences.activity_bar.clone();
     v_flex()
       .w(ACTIVITY_BAR_WIDTH)
       .h_full()
@@ -4320,30 +4455,14 @@ impl Workspace {
       .bg(palette.rail)
       .border_r_1()
       .border_color(palette.border)
-      .children(buttons)
-      .child(div().relative().child(terminal).when(terminal_attention, |button| {
-        button.child(
-          div()
-            .absolute()
-            .bottom_0()
-            .right_0()
-            .size_4()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded_full()
-            .bg(theme.warning)
-            .child(Icon::empty().path("icons/triangle-alert.svg").size_3().text_color(palette.on_accent)),
-        )
-      }))
-      .child(agents)
+      .children(layout.visible(&activity_ids()).into_iter().filter_map(|id| buttons.remove(id)))
       .child(div().flex_1())
       .child(settings)
   }
 
   /// The terminals, filling the main area like a terminal window: a tab strip when there are several tabs, and the panes of the
   /// shown tab, split side by side or one above the other, each with a small header when there is more than one.
-  fn render_terminal_area(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  fn render_terminal_area(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let (Some(root), Some(arrangement)) = (self.projects.active.clone(), self.arrangement()) else {
       return Label::new("No project is open.").text_color(theme.muted_foreground).p_3().into_any_element();
@@ -4384,12 +4503,24 @@ impl Workspace {
       .size_full()
       .children(strip)
       .child(div().flex_1().min_h_0().child(self.render_pane_node(&node, headers, &root.to_string_lossy(), cx)))
+      .child(shortcut_bar(
+        vec![
+          shortcut_hint("New tab", &NewTerminal, window),
+          shortcut_hint("Split right", &SplitRight, window),
+          shortcut_hint("Split down", &SplitDown, window),
+          shortcut_hint("Clear", &ClearBuffer, window),
+          shortcut_hint("Mention projects", &MentionProjects, window),
+          shortcut_hint("Close", &CloseTab, window),
+          shortcut_hint("Hide", &ToggleTerminal, window),
+        ],
+        cx,
+      ))
       .into_any_element()
   }
 
   /// The AI view, filling the main area. It is not a terminal window: a header names the project and holds one tab per
   /// session (agent icon and name) and a menu to start another agent, and with no session it shows the choice of agents.
-  fn render_agent_area(&self, cx: &mut Context<Self>) -> AnyElement {
+  fn render_agent_area(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     let Some(root) = self.projects.active.clone() else {
@@ -4434,7 +4565,19 @@ impl Workspace {
       .child(div().px_1().child(picker))
       .child(Label::new(project).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).pr_3());
     let shown = tabs.current().map(|tab| tab.session.clone());
-    v_flex().size_full().child(header).child(div().flex_1().min_h_0().bg(palette.background).children(shown)).into_any_element()
+    v_flex()
+      .size_full()
+      .child(header)
+      .child(div().flex_1().min_h_0().bg(palette.background).children(shown))
+      .child(shortcut_bar(
+        vec![
+          shortcut_hint("Mention projects", &MentionProjects, window),
+          shortcut_hint("Close session", &CloseTab, window),
+          shortcut_hint("Hide", &ToggleAgents, window),
+        ],
+        cx,
+      ))
+      .into_any_element()
   }
 
   /// The AI view with no session: the agents to start.
@@ -4817,9 +4960,9 @@ impl Render for Workspace {
     };
     // The terminals take the whole main area, like a terminal window; the sidebar stays beside it.
     let main_area = if self.terminal_open {
-      self.render_terminal_area(cx).into_any_element()
+      self.render_terminal_area(window, cx).into_any_element()
     } else if self.agent_open {
-      self.render_agent_area(cx)
+      self.render_agent_area(window, cx)
     } else {
       editor_area
     };
@@ -4852,6 +4995,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::split_down))
       .on_action(cx.listener(Self::save_file))
       .on_action(cx.listener(Self::close_tab))
+      .on_action(cx.listener(Self::mention_projects))
       .size_full()
       .bg(theme.background)
       .text_color(theme.foreground)
@@ -4893,6 +5037,33 @@ impl Render for Workspace {
           )
           .into_any_element()
       }))
+  }
+}
+
+/// One entry of a shortcut bar: what a command does, with the keys that run it as the keymap has them now. An unbound command
+/// shows no keys.
+fn shortcut_hint(label: &'static str, action: &dyn Action, window: &Window) -> AnyElement {
+  h_flex().gap_1p5().items_center().child(label).children(Kbd::binding_for_action(action, Some("Terminal"), window)).into_any_element()
+}
+
+/// The info bar under the terminals and the AI view: the shortcuts that work there.
+fn shortcut_bar(hints: Vec<AnyElement>, cx: &App) -> StatusBar {
+  let palette = colors(cx);
+  hints
+    .into_iter()
+    .fold(StatusBar::new().bg(palette.surface_alt).border_color(palette.border).text_color(palette.text_secondary), |bar, hint| bar.left(hint))
+}
+
+/// A tab of the project bar being dragged.
+#[derive(Clone)]
+struct DraggedProjectTab(PathBuf);
+
+/// The drag of a project tab shows nothing of its own.
+struct NoDragPreview;
+
+impl Render for NoDragPreview {
+  fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    div()
   }
 }
 

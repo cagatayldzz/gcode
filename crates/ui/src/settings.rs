@@ -13,7 +13,8 @@ use gpui_kit::{
     h_flex,
     label::Label,
     setting::{NumberFieldOptions, SettingField, SettingGroup, SettingItem, SettingPage, Settings},
-    ActiveTheme as _, Sizable as _,
+    switch::Switch,
+    v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
   },
   *,
 };
@@ -59,6 +60,55 @@ impl EventEmitter<AccountRemoveRequested> for SettingsModel {}
 pub(crate) struct CommitSettingsRequested;
 
 impl EventEmitter<CommitSettingsRequested> for SettingsModel {}
+
+/// The buttons of the activity bar, by id and name, in their default order.
+pub(crate) const ACTIVITY_ITEMS: [(&str, &str); 5] =
+  [("explorer", "Explorer"), ("search", "Search"), ("git", "Git"), ("terminal", "Terminal"), ("agents", "AI agents")];
+
+/// The ids of [`ACTIVITY_ITEMS`].
+pub(crate) fn activity_ids() -> Vec<&'static str> {
+  ACTIVITY_ITEMS.iter().map(|(id, _)| *id).collect()
+}
+
+/// The activity bar's buttons in the order the user chose, with whether each is shown.
+pub(crate) fn activity_layout(cx: &App) -> Vec<(&'static str, bool)> {
+  let layout = preferences(cx).activity_bar;
+  layout.arranged(&activity_ids()).into_iter().map(|id| (id, !layout.is_hidden(id))).collect()
+}
+
+/// One row of the activity bar page: the name, the arrows that move the button and the switch that shows or hides it.
+fn activity_row(index: usize, count: usize, id: &'static str, shown: bool, cx: &App) -> impl IntoElement {
+  let name = ACTIVITY_ITEMS.iter().find(|(known, _)| *known == id).map_or(id, |(_, name)| *name);
+  let muted = cx.theme().muted_foreground;
+  h_flex()
+    .gap_2()
+    .items_center()
+    .py_1()
+    .child(Label::new(name).flex_1().when(!shown, |label| label.text_color(muted)))
+    .child(
+      Button::new(SharedString::from(format!("activity-up-{id}")))
+        .ghost()
+        .xsmall()
+        .icon(Icon::new(IconName::ChevronUp))
+        .tooltip("Move up")
+        .disabled(index == 0)
+        .on_click(move |_, _, cx| update(cx, |preferences| preferences.activity_bar.move_by(&activity_ids(), id, -1))),
+    )
+    .child(
+      Button::new(SharedString::from(format!("activity-down-{id}")))
+        .ghost()
+        .xsmall()
+        .icon(Icon::new(IconName::ChevronDown))
+        .tooltip("Move down")
+        .disabled(index + 1 == count)
+        .on_click(move |_, _, cx| update(cx, |preferences| preferences.activity_bar.move_by(&activity_ids(), id, 1))),
+    )
+    .child(
+      Switch::new(SharedString::from(format!("activity-show-{id}")))
+        .checked(shown)
+        .on_click(move |checked, _, cx| update(cx, |preferences| preferences.activity_bar.set_hidden(id, !*checked))),
+    )
+}
 
 /// The shared model, so the Kit's setting fields (which only get an `App`) can reach it.
 pub(crate) struct SettingsGlobal(pub Entity<SettingsModel>);
@@ -167,6 +217,27 @@ pub(crate) fn settings_view(
         )
         .description("The size of code in the editor and in a file's changes, in pixels."),
       ),
+    ),
+    SettingPage::new("Activity bar").default_open(first_page == "Activity bar").resettable(false).group(
+      SettingGroup::new()
+        .title("Buttons")
+        .description("Order the buttons of the bar at the left edge and choose which ones show. A hidden button's shortcut still works.")
+        .item(SettingItem::render(|_, _, cx| {
+          let layout = activity_layout(cx);
+          let count = layout.len();
+          v_flex()
+            .w_full()
+            .children(layout.into_iter().enumerate().map(|(index, (id, shown))| activity_row(index, count, id, shown, cx)))
+            .child(
+              h_flex().pt_2().child(
+                Button::new("activity-reset")
+                  .label("Reset to default")
+                  .small()
+                  .outline()
+                  .on_click(|_, _, cx| update(cx, |preferences| preferences.activity_bar = Default::default())),
+              ),
+            )
+        })),
     ),
     SettingPage::new("Projects").default_open(first_page == "Projects").resettable(false).groups(vec![
       SettingGroup::new()

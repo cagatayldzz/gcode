@@ -242,3 +242,16 @@ fn relocating_a_project_keeps_its_look_and_place() {
   assert!(!list.relocate(&PathBuf::from("/work/c"), &PathBuf::from("/work/b")));
   assert!(!list.relocate(&PathBuf::from("/work/missing"), &PathBuf::from("/work/d")));
 }
+
+#[test]
+fn swapping_two_projects_exchanges_their_places_and_keeps_their_categories() {
+  let mut list = ProjectList::default();
+  for name in ["a", "b", "c"] {
+    list.add(PathBuf::from(format!("/work/{name}")));
+  }
+  assert!(list.swap_projects(&PathBuf::from("/work/a"), &PathBuf::from("/work/c")));
+  let order: Vec<_> = list.projects.iter().map(|project| project.path.clone()).collect();
+  assert_eq!(order, [PathBuf::from("/work/c"), PathBuf::from("/work/b"), PathBuf::from("/work/a")]);
+  assert!(!list.swap_projects(&PathBuf::from("/work/a"), &PathBuf::from("/work/a")));
+  assert!(!list.swap_projects(&PathBuf::from("/work/a"), &PathBuf::from("/work/missing")));
+}

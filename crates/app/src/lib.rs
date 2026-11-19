@@ -3,8 +3,8 @@
 use gpui_kit::{component::TitleBar, *};
 use vekro_storage::{WindowMode, WindowPlacement};
 use vekro_ui::{
-  Assets, ClearBuffer, CloseTab, CopySelection, NewTerminal, NewWindow, OpenSearchResults, OpenSettings, PasteClipboard, Quit, SaveFile,
-  SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleTerminal, ViewOnHost, Workspace, TOOLBAR_HEIGHT,
+  Assets, ClearBuffer, CloseTab, CopySelection, MentionProjects, NewTerminal, NewWindow, OpenSearchResults, OpenSettings, PasteClipboard, Quit,
+  SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleTerminal, ViewOnHost, Workspace, TOOLBAR_HEIGHT,
 };
 
 /// Starts the application and runs it until it quits.
@@ -30,6 +30,7 @@ pub fn run() {
       KeyBinding::new("cmd-j", ToggleTerminal, None),
       KeyBinding::new("cmd-shift-a", ToggleAgents, None),
       KeyBinding::new("cmd-shift-g", ViewOnHost, None),
+      KeyBinding::new("cmd-shift-m", MentionProjects, None),
       KeyBinding::new("cmd-shift-f", SearchProject, None),
       KeyBinding::new("cmd-enter", OpenSearchResults, Some("ProjectSearch")),
       KeyBinding::new("cmd-d", SplitRight, None),

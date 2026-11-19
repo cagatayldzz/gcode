@@ -3,7 +3,7 @@
 use crate::{
   selection::{extend_selection, move_endpoint, word_range},
   theme::colors,
-  ClearBuffer, CloseTab, CopySelection, NewTerminal, NewWindow, PasteClipboard, SplitDown, SplitRight,
+  ClearBuffer, CloseTab, CopySelection, NewTerminal, PasteClipboard, SplitDown, SplitRight,
 };
 use futures::StreamExt as _;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -119,6 +119,14 @@ impl Terminal {
       hovered: false,
       _events_task: events_task,
     }
+  }
+
+  /// Types `text` into the program as if it was pasted.
+  pub fn insert_text(&mut self, text: &str, cx: &mut Context<Self>) {
+    self.clear_attention(cx);
+    self.session.write(paste_bytes(text, self.session.modes().bracketed_paste));
+    self.selection = None;
+    cx.notify();
   }
 
   /// What the shell calls itself (the window title it reports), or the shell's name.
@@ -606,7 +614,6 @@ impl Render for Terminal {
       .when(has_scrollbar, |this| this.child(div().id("terminal-scrollbar").absolute().size_full().vertical_scrollbar(&scroll_handle)))
       .context_menu(|menu, _, _| {
         menu
-          .item(PopupMenuItem::new("New Window").action(Box::new(NewWindow)))
           .item(PopupMenuItem::new("New Tab").action(Box::new(NewTerminal)))
           .separator()
           .item(PopupMenuItem::new("Split Pane Vertically").action(Box::new(SplitRight)))
