@@ -813,6 +813,42 @@ pub fn history(path: &Path, limit: usize) -> Result<Vec<CommitInfo>, String> {
   )
 }
 
+/// Returns the most recent commits that changed the selected path, starting at HEAD.
+pub fn file_history(path: &Path, limit: usize) -> Result<Vec<CommitInfo>, String> {
+  let result = |error: git2::Error| error.message().to_owned();
+  let repository = Repository::discover(path.parent().ok_or("The file has no parent folder.")?).map_err(result)?;
+  let workdir = repository.workdir().ok_or("The repository has no working tree.")?;
+  let parent = path.parent().ok_or("The file has no parent folder.")?;
+  let parent = parent.canonicalize().map_err(|error| error.to_string())?;
+  let relative = parent.strip_prefix(workdir).map_err(|_| "The file is outside the Git working tree.")?;
+  let relative = relative.join(path.file_name().ok_or("The file has no name.")?);
+  match repository.head() {
+    Ok(_) => {}
+    Err(error) if matches!(error.code(), git2::ErrorCode::UnbornBranch | git2::ErrorCode::NotFound) => return Ok(Vec::new()),
+    Err(error) => return Err(result(error)),
+  }
+
+  let mut walk = repository.revwalk().map_err(result)?;
+  walk.set_sorting(git2::Sort::TIME).map_err(result)?;
+  walk.push_head().map_err(result)?;
+  let mut options = DiffOptions::new();
+  options.pathspec(&relative).disable_pathspec_match(true);
+  let mut history = Vec::new();
+  for id in walk {
+    if history.len() == limit {
+      break;
+    }
+    let commit = repository.find_commit(id.map_err(result)?).map_err(result)?;
+    let tree = commit.tree().map_err(result)?;
+    let parent = commit.parent(0).ok().and_then(|parent| parent.tree().ok());
+    let diff = repository.diff_tree_to_tree(parent.as_ref(), Some(&tree), Some(&mut options)).map_err(result)?;
+    if diff.deltas().len() != 0 {
+      history.push(commit_info(&commit, &Default::default(), &Default::default()));
+    }
+  }
+  Ok(history)
+}
+
 fn commit_diff<'a>(repository: &'a Repository, commit: &git2::Commit, file: Option<&Path>) -> Result<git2::Diff<'a>, String> {
   let tree = commit.tree().map_err(|error| error.message().to_string())?;
   let parent = commit.parent(0).ok().and_then(|parent| parent.tree().ok());

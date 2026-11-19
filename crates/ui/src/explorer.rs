@@ -68,3 +68,53 @@ pub(crate) fn create(parent: &Path, name: &str, is_dir: bool) -> Result<PathBuf,
   };
   made.map(|()| path).map_err(|error| format!("Could not create {name}: {error}"))
 }
+
+/// Moves a file without replacing an existing destination.
+pub(crate) fn move_file(source: &Path, target: &Path) -> std::io::Result<()> {
+  use rustix::fs::{renameat_with, RenameFlags, CWD};
+  renameat_with(CWD, source, CWD, target, RenameFlags::NOREPLACE)?;
+  Ok(())
+}
+
+/// Copies a file without replacing an existing destination. Copies within the same folder receive a new name.
+pub(crate) fn copy_file(source: &Path, target: &Path, metadata: &fs::Metadata, duplicate: bool) -> std::io::Result<PathBuf> {
+  if !duplicate {
+    copy_to_new_file(source, target, metadata)?;
+    return Ok(target.to_path_buf());
+  }
+
+  for index in 1..=10_000 {
+    let candidate = duplicate_path(target, index);
+    match copy_to_new_file(source, &candidate, metadata) {
+      Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+      result => return result.map(|()| candidate),
+    }
+  }
+  Err(std::io::Error::other("No available name for a copy."))
+}
+
+fn duplicate_path(path: &Path, index: u32) -> PathBuf {
+  let mut name = path.file_stem().unwrap_or_default().to_os_string();
+  name.push(" copy");
+  if index > 1 {
+    name.push(format!(" {index}"));
+  }
+  if let Some(extension) = path.extension() {
+    name.push(".");
+    name.push(extension);
+  }
+  path.with_file_name(name)
+}
+
+fn copy_to_new_file(source: &Path, target: &Path, metadata: &fs::Metadata) -> std::io::Result<()> {
+  if metadata.is_symlink() {
+    return std::os::unix::fs::symlink(fs::read_link(source)?, target);
+  }
+  let mut input = fs::File::open(source)?;
+  let mut output = fs::File::create_new(target)?;
+  let result = std::io::copy(&mut input, &mut output).and_then(|_| output.set_permissions(metadata.permissions()));
+  if result.is_err() {
+    let _ = fs::remove_file(target);
+  }
+  result
+}

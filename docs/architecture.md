@@ -59,7 +59,7 @@ apps/vekro ─► app ─► ui ─► terminal
 
 The `Workspace` renders the title band (right of the traffic lights: the **repository switcher**, a fixed first tab with a filterable, category-grouped menu of every project and an Add button; then the Add button), then a row of the **activity bar** (`render_activity_bar`: a 56 px strip with one button each for Explorer and
 Git, which choose `sidebar_tab`, the terminal button under them, and Settings at the bottom with the account warning badge) and the **sidebar** (the selected view, in a Kit `h_resizable` pane, 200–960 px) and, right of it, a column with the Kit **`DockArea`** and the status bar below it, so the sidebar runs down to the bottom of the window. The sidebar is plain
-workspace content, not a dock panel, so it has no tab bar. The dock holds only the center: `EditorPanel`. The terminals are
+workspace content, not a dock panel, so it has no tab bar. The dock holds the main `EditorPanel`. Explorer can open a read-only preview beside it in a horizontal resizable split. The side preview closes when the active project changes. The terminals are
 not dock panels: the activity bar's terminal button (`ToggleTerminal`, `⌘J`; `terminal_open`) makes them fill everything right of the activity bar in place of the sidebar, the dock and the status bar
 (`render_terminal_area`): a tab strip when there are several tabs, and the shown tab as a tree of panes (`terminal_layout.rs`: `Node`,
 `Arrangement`; splits are Kit `h_resizable`/`v_resizable` groups, a pane has a header when its tab has several). `⌘T`, `⌘D`,

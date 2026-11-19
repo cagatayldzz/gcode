@@ -174,7 +174,7 @@ impl Workspace {
   }
 
   fn apply_search_replacement(&mut self, root: PathBuf, edits: Arc<Vec<project_search::Replacement>>, window: &mut Window, cx: &mut Context<Self>) {
-    if self.projects.active.as_ref() != Some(&root) || self.replacement_task.is_some() {
+    if self.projects.active.as_ref() != Some(&root) || self.replacement_task.is_some() || self.file_mutation_pending() {
       return;
     }
     if edits.iter().any(|edit| self.editor_panel.read(cx).is_dirty(&edit.path)) {

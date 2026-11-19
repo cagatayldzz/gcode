@@ -66,7 +66,10 @@ use vekro_hosting::{Connection, KeychainStore, PullRequest, RepoRef, TokenStore 
 use vekro_opencommit::DEFAULT_INSTRUCTIONS;
 use vekro_storage::{Category, Preferences, Project, ProjectList, WindowMode, WindowPlacement};
 
+mod file_actions;
 mod search;
+
+use file_actions::FileActions;
 
 /// Height of the top band: the traffic lights and the title.
 pub const TOOLBAR_HEIGHT: Pixels = px(40.);
@@ -378,6 +381,7 @@ pub struct Workspace {
   syncing: bool,
   dock: Entity<DockArea>,
   editor_panel: Entity<EditorPanel>,
+  file_actions: FileActions,
   /// The shells of every project that has been opened, in tabs and split panes, kept alive while another project is shown.
   terminal_tabs: HashMap<PathBuf, Arrangement<Entity<Terminal>>>,
   _terminal_subscriptions: Vec<Subscription>,
@@ -537,6 +541,7 @@ impl Workspace {
       ],
       dock,
       editor_panel: editor_panel.clone(),
+      file_actions: FileActions::default(),
       terminal_tabs: HashMap::new(),
       _terminal_subscriptions: Vec::new(),
       _appearance: cx.observe_window_appearance(window, |this, window, cx| {
@@ -1385,6 +1390,7 @@ impl Workspace {
     if let (Some(root), Some(file)) = (after.clone(), self.selected_change.clone()) {
       self.change_view.update(cx, |view, cx| view.show(root, file, cx));
     }
+    self.file_actions.clear_side();
     self.editor_panel.update(cx, |editor, cx| editor.switch_project(before, after, cx));
     self.refresh_project();
     if self.git_view == GitView::History {
@@ -2676,6 +2682,11 @@ impl Workspace {
       }
       return;
     }
+    if let Some(side) = self.file_actions.focused_side(window, cx) {
+      side.update(cx, |editor, cx| editor.close_by_shortcut(cx));
+      self.focus_handle.focus(window, cx);
+      return;
+    }
     if self.editor_panel.update(cx, |editor, cx| editor.close_by_shortcut(cx)) {
       // The closed tab held the focus; without a focused element in the window the next ⌘W would reach nothing.
       self.focus_handle.focus(window, cx);
@@ -2684,6 +2695,9 @@ impl Workspace {
 
   /// Saves the file open in the editor.
   pub fn save_file(&mut self, _: &SaveFile, window: &mut Window, cx: &mut Context<Self>) {
+    if self.file_actions.focused_side(window, cx).is_some() {
+      return;
+    }
     match self.editor_panel.update(cx, |editor, cx| editor.save(cx)) {
       Ok(_) => cx.notify(),
       Err(error) => window.push_notification(Notification::error(format!("Could not save: {error}")), cx),
@@ -3870,8 +3884,9 @@ impl Workspace {
     let palette = colors(cx);
     let path = row.path.clone();
     let selected = self.selected_entry.as_ref() == Some(&row.path);
-    let icon_color = if selected { palette.on_accent } else { theme.muted_foreground };
+    let icon_color = if selected { palette.explorer_selected_text } else { theme.muted_foreground };
     let open = self.expanded.contains(&row.path);
+    let menu = self.explorer_menu(Some(row), cx);
     h_flex()
       .id(SharedString::from(format!("entry-{}", row.path.display())))
       .w_full()
@@ -3879,10 +3894,10 @@ impl Workspace {
       .pr_2()
       .py_1()
       .pl(INDENT * row.depth as f32 + px(8.))
-      .rounded_md()
+      .rounded_sm()
       .items_center()
       .cursor_pointer()
-      .when(selected, |entry| entry.bg(theme.primary))
+      .when(selected, |entry| entry.bg(palette.explorer_selected))
       .when(!selected, |entry| entry.hover(|entry| entry.bg(palette.hover)))
       .child(div().size_4().flex_none().when(row.is_dir, |chevron| {
         chevron.child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size_4().text_color(icon_color))
@@ -3891,7 +3906,7 @@ impl Workspace {
       .when(row.is_dir, |entry| entry.child(Icon::new(IconName::FolderClosed).size_4().text_color(icon_color)))
       .child(
         Label::new(row.name.clone())
-          .when(selected, |label| label.text_color(palette.on_accent))
+          .when(selected, |label| label.text_color(palette.explorer_selected_text))
           .flex_1()
           .min_w_0()
           .overflow_hidden()
@@ -3929,6 +3944,7 @@ impl Workspace {
           this.open_file_as(path.clone(), event.click_count() < 2, window, cx);
         }
       }))
+      .context_menu(menu)
   }
 
   fn render_explorer(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3938,8 +3954,8 @@ impl Workspace {
       self.rows.len(),
       cx.processor(|this, range: Range<usize>, _, cx| {
         let rows: Vec<explorer::Row> = this.rows.get(range).map(<[explorer::Row]>::to_vec).unwrap_or_default();
-        // The padding on the right is inside each line, so that the scrollbar sits at the edge of the sidebar.
-        rows.iter().map(|row| div().w_full().pr_3().child(this.explorer_row(row, cx)).into_any_element()).collect::<Vec<_>>()
+        // Inset the rows and keep the scrollbar at the edge of the sidebar.
+        rows.iter().map(|row| div().w_full().px_1p5().child(this.explorer_row(row, cx)).into_any_element()).collect::<Vec<_>>()
       }),
     )
     .track_scroll(&self.explorer_scroll)
@@ -3961,8 +3977,10 @@ impl Workspace {
     let header = h_flex()
       .gap_1()
       .items_center()
-      .pl_2()
+      .pl_5()
       .pr_3()
+      .id("explorer-header")
+      .context_menu(self.explorer_menu(None, cx))
       .child(Label::new(name).flex_1().min_w_0().font_weight(FontWeight::SEMIBOLD).whitespace_nowrap().overflow_hidden().text_ellipsis())
       .child(
         action("explorer-new-file", "icons/file-plus.svg", "New file").on_click(cx.listener(|this, _, window, cx| this.new_entry(false, window, cx))),
@@ -3996,7 +4014,7 @@ impl Workspace {
       v_flex()
         .flex_1()
         .min_h_0()
-        .when(self.sidebar_tab == SidebarTab::Explorer, |sidebar| sidebar.pl_3().pt_3())
+        .when(self.sidebar_tab == SidebarTab::Explorer, |sidebar| sidebar.bg(colors(cx).explorer_background).pt_3())
         .when(self.sidebar_tab == SidebarTab::Search, |sidebar| sidebar.px_3().pt_3())
         .child(content),
     )
@@ -4622,6 +4640,8 @@ impl Render for Workspace {
             .description(EmptyDescription::new().child(description)),
         )
         .into_any_element()
+    } else if let Some(side) = self.file_actions.visible_side(cx) {
+      h_resizable("editor-side-split").child(resizable_panel().child(self.dock.clone())).child(resizable_panel().child(side)).into_any_element()
     } else {
       self.dock.clone().into_any_element()
     };
@@ -4657,6 +4677,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::new_claude))
       .on_action(cx.listener(Self::toggle_all_changes))
       .on_action(cx.listener(Self::open_changed_file))
+      .on_action(cx.listener(Self::run_file_command))
       .on_action(cx.listener(Self::split_right))
       .on_action(cx.listener(Self::view_on_host))
       .on_action(cx.listener(Self::split_down))

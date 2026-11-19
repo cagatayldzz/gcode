@@ -209,6 +209,7 @@ impl EventEmitter<ActiveTab> for EditorPanel {}
 
 pub(crate) struct EditorPanel {
   tabs: Tabs,
+  read_only: bool,
   /// Editors that are ready, by path. Reopening one is instant and keeps its unsaved text.
   files: HashMap<PathBuf, ReadyFile>,
   images: HashMap<PathBuf, ImagePreview>,
@@ -231,6 +232,18 @@ pub(crate) struct EditorPanel {
 
 impl EditorPanel {
   pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    Self::with_read_only(false, window, cx)
+  }
+
+  pub fn side_preview(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    Self::with_read_only(true, window, cx)
+  }
+
+  pub fn has_tabs(&self) -> bool {
+    !self.tabs.items.is_empty()
+  }
+
+  fn with_read_only(read_only: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
     let warmup_task = cx.spawn_in(window, async move |this, cx| {
       cx.background_executor().timer(WARMUP_DELAY).await;
       for (language, sample) in WARMUP_SAMPLES {
@@ -250,6 +263,7 @@ impl EditorPanel {
     });
     Self {
       tabs: Tabs::default(),
+      read_only,
       files: HashMap::new(),
       images: HashMap::new(),
       svg_source: std::collections::HashSet::new(),
@@ -767,7 +781,13 @@ impl Render for EditorPanel {
                 div()
                   .size_full()
                   .cursor_text()
-                  .child(Editor::new(&file.state).readonly(self.replacement_files.contains(path)).appearance(false).bordered(false).size_full())
+                  .child(
+                    Editor::new(&file.state)
+                      .readonly(self.read_only || self.replacement_files.contains(path))
+                      .appearance(false)
+                      .bordered(false)
+                      .size_full(),
+                  )
                   .into_any_element()
               },
             ),

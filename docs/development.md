@@ -22,8 +22,9 @@ runs it). After cloning run `bun install`.
 | `bun run icon` | redraw `AppIcon.icns` and `DevIcon.icns` from `apps/vekro/macos/icon.svg` (needs Google Chrome) |
 | `bun run commit` | `git add -A && oco --yes` (needs [OpenCommit](https://github.com/di-sukharev/opencommit)) |
 
-`bun run update` runs `cargo upgrade --incompatible` followed by `cargo update`. If the manifest
-requirements already cover the available versions, only `Cargo.lock` may change. Bun runs the
+`bun run update` runs `cargo upgrade --incompatible` followed by `cargo update`. Direct Cargo dependencies use full version requirements
+so compatible upgrades can also update their minimum versions in the manifests. When only indirect
+dependencies have updates, only `Cargo.lock` may change. Bun runs the
 project commands, and this workspace has no JavaScript package dependencies.
 
 ## Scripts

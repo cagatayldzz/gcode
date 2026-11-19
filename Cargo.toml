@@ -19,15 +19,15 @@ vekro-ui = { path = "crates/ui" }
 alacritty_terminal = "0.26.0"
 gpui-kit = { version = "0.10.0", features = ["gpui-fast", "syntect"] }
 gpui-kit-assets = "0.10.0"
-futures = "0.3"
-serde_json = "1"
-git2 = { version = "0.21", default-features = false }
+futures = "0.3.34"
+serde_json = "1.0.154"
+git2 = { version = "0.21.0", default-features = false }
 vekro-git = { path = "crates/git" }
 vekro-opencommit = { path = "crates/opencommit" }
 vekro-hosting = { path = "crates/hosting" }
 vekro-version = { path = "crates/version" }
 vekro-updater = { path = "crates/updater" }
-ureq = { version = "3", features = ["json"] }
+ureq = { version = "3.5.2", features = ["json"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

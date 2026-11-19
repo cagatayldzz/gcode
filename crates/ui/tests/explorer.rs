@@ -38,3 +38,25 @@ fn creating_an_entry_makes_subfolders_and_refuses_to_leave_or_replace() {
   assert!(explorer::create(&root, "/etc/outside", false).is_err());
   fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn copying_and_moving_files_preserve_existing_destinations() {
+  let root = tempfile::tempdir().unwrap();
+  let source = root.path().join("notes.md");
+  let existing = root.path().join("notes copy.md");
+  let moved = root.path().join("renamed.md");
+  fs::write(&source, "original").unwrap();
+  fs::write(&existing, "existing").unwrap();
+  let metadata = fs::symlink_metadata(&source).unwrap();
+
+  assert!(explorer::move_file(&source, &existing).is_err());
+  assert!(explorer::copy_file(&source, &existing, &metadata, false).is_err());
+  assert_eq!(fs::read_to_string(&existing).unwrap(), "existing");
+
+  let copy = explorer::copy_file(&source, &source, &metadata, true).unwrap();
+  assert_eq!(copy, root.path().join("notes copy 2.md"));
+  assert_eq!(fs::read_to_string(copy).unwrap(), "original");
+  explorer::move_file(&source, &moved).unwrap();
+  assert!(!source.exists());
+  assert_eq!(fs::read_to_string(moved).unwrap(), "original");
+}

@@ -24,6 +24,28 @@ fn commit_all(dir: &std::path::Path, message: &str) {
 }
 
 #[test]
+fn the_file_timeline_tracks_only_the_selected_literal_path() {
+  let dir = repository("file-history");
+  let target = dir.join("notes[1].md");
+  let other = dir.join("notes1.md");
+  assert!(vekro_git::file_history(&target, 10).unwrap().is_empty());
+  fs::write(&target, "first version").unwrap();
+  fs::write(&other, "other file").unwrap();
+  commit_all(&dir, "initial");
+  fs::write(&other, "unrelated change").unwrap();
+  commit_all(&dir, "unrelated");
+  fs::write(&target, "second version").unwrap();
+  commit_all(&dir, "edit selected file");
+
+  let history = vekro_git::file_history(&target, 10).unwrap();
+  let mut summaries: Vec<_> = history.iter().map(|commit| commit.summary.as_str()).collect();
+  summaries.sort_unstable();
+  assert_eq!(summaries, ["edit selected file", "initial"]);
+  assert_eq!(vekro_git::file_history(&target, 1).unwrap().len(), 1);
+  fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn a_new_branch_is_created_and_checked_out() {
   let dir = repository("create");
   fs::write(dir.join("a.txt"), "a").unwrap();
