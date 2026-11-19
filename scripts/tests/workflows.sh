@@ -17,10 +17,15 @@ assert_contains "workflow_dispatch:" "$release" "release is started by hand"
 assert_contains "github.ref_name == github.event.repository.default_branch" "$release" "release runs from the default branch only"
 assert_contains "cancel-in-progress: false" "$release" "a running release is never cancelled"
 assert_contains "needs: [prepare, verify]" "$release" "publish waits for verification"
-assert_contains "needs: [validate, prepare, macos_arm64]" "$release" "verification waits for validation and the build, which also runs the checks"
+assert_contains "needs: [validate, prepare, macos_arm64, macos_checks]" "$release" "verification waits for validation, the build and the checks"
+assert_contains "cargo test --locked --workspace" "$release" "the workspace is tested while the app builds"
 assert_contains "--draft" "$release" "the release is created as a draft first"
 assert_contains "sha256sum --check SHA256SUMS.txt" "$release" "checksums are verified before publishing"
 assert_contains "bash scripts/release.sh finalize" "$release" "assets are finalized by the release script"
+
+cache_line="$(grep -n 'rust-cache' <<<"$action" | head -n 1 | cut -d: -f1)"
+inputs_line="$(grep -n 'release-inputs' <<<"$action" | head -n 1 | cut -d: -f1)"
+[[ "$cache_line" -lt "$inputs_line" ]] || { echo "FAIL: the Rust cache is restored before the stamped version files are downloaded" >&2; failures=$((failures + 1)); }
 
 assert_contains "bash scripts/notarize-app.sh" "$action" "the build notarizes the app"
 assert_contains "bash scripts/release.sh package" "$action" "the build packages with the release script"

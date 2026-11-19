@@ -83,7 +83,7 @@ jobs:
             dist/RELEASE_NOTES.md
 
   macos_arm64:
-    name: 3 · macOS build and checks
+    name: 3 · macOS build
     needs: prepare
     runs-on: macos-26
     timeout-minutes: 120
@@ -99,18 +99,31 @@ jobs:
         with:
           arch: arm64
           release-tag: ${{ needs.prepare.outputs.tag }}
-      # The checks run on the runner that built the application and reuse its compiled dependencies. A separate macOS job
-      # waited for a second runner, and compiled everything again from an empty cache.
+
+  # The lint and the tests run beside the build, not after it, on the unstamped code: they do not need the new version, and
+  # their cache key stays the same from one release to the next.
+  macos_checks:
+    name: 3 · macOS lint and tests
+    needs: prepare
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-macos-checks
       - name: Lint and test the workspace
         run: |
-          rustup component add clippy
           cargo clippy --locked --workspace --all-targets -- -D warnings
           cargo test --locked --workspace
 
   verify:
     name: 4 · Verify packages
     if: success()
-    needs: [validate, prepare, macos_arm64]
+    needs: [validate, prepare, macos_arm64, macos_checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

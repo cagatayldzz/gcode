@@ -10,18 +10,20 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/download-artifact@v8
-      with:
-        name: release-inputs
-        path: .
     - name: Install stable Rust
       shell: bash
       run: |
         rustup toolchain install stable --profile minimal
         rustup default stable
+    # The cache is restored before the stamped version files arrive: its key hashes Cargo.toml and Cargo.lock, and the stamp
+    # changes both in every release, so a restore after it would never find the compiled dependencies.
     - uses: Swatinem/rust-cache@v2
       with:
         shared-key: release-macos-${{ inputs.arch }}
+    - uses: actions/download-artifact@v8
+      with:
+        name: release-inputs
+        path: .
     - name: Build macOS application
       shell: bash
       run: bash scripts/app.sh release --build
