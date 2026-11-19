@@ -76,13 +76,13 @@ impl EventEmitter<TerminalExited> for Terminal {}
 impl EventEmitter<TerminalAttentionChanged> for Terminal {}
 
 impl Terminal {
-  /// Starts the login shell in `directory`. Kept apart from [`Terminal::new`] so a failure can be reported
-  /// before an entity exists.
-  pub fn start(directory: PathBuf, cx: &App) -> std::io::Result<Started> {
+  /// Starts `program` (with its arguments) in `directory`, or the login shell for `None`. Kept apart from [`Terminal::new`] so a
+  /// failure can be reported before an entity exists.
+  pub fn start(directory: PathBuf, program: Option<(String, Vec<String>)>, cx: &App) -> std::io::Result<Started> {
     let (sender, receiver) = futures::channel::mpsc::unbounded::<SessionEvent>();
     let pending = Arc::new(AtomicBool::new(false));
     let notify_pending = pending.clone();
-    let options = SessionOptions { program: None, working_directory: Some(directory.clone()), palette: Some(palette(cx)) };
+    let options = SessionOptions { program, working_directory: Some(directory.clone()), palette: Some(palette(cx)) };
     let session = Session::spawn(options, 80, 24, move |event| {
       // Redraws are coalesced: one queued wakeup covers any number that follow.
       if event == SessionEvent::Wakeup && notify_pending.swap(true, Ordering::AcqRel) {

@@ -1,5 +1,6 @@
 //! The Vekro interface: projects, editor, terminal and Git in one window, built with GPUI Kit.
 
+mod agents;
 mod all_changes;
 mod assets;
 mod change_view;
@@ -48,6 +49,10 @@ actions!(
     SaveFile,
     CloseTab,
     ToggleTerminal,
+    ToggleAgents,
+    // The AI view: a new Codex or Claude session in the open project.
+    NewCodex,
+    NewClaude,
     ToggleAllChanges,
     // Terminal panes: split side by side, split one above the other.
     SplitRight,

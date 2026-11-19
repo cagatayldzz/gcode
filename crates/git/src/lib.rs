@@ -97,6 +97,13 @@ impl Summary {
   pub fn changed(&self) -> usize {
     self.changes.len()
   }
+
+  /// How many files have changes, and whether commits are waiting to be pushed (the branch is ahead of its remote, or was
+  /// never published while the repository has a remote).
+  pub fn status(&self) -> (usize, bool) {
+    let push = self.sync.as_ref().is_some_and(|sync| sync.ahead > 0 || !sync.upstream);
+    (self.changed(), push)
+  }
 }
 
 /// Reads the repository containing `path`; `None` when it is not inside one.
@@ -146,9 +153,7 @@ pub fn summary(path: &Path) -> Option<Summary> {
 /// What the project menu shows beside a project: how many files have changes, and whether commits are waiting to be pushed
 /// (the branch is ahead of its remote, or was never published while the repository has a remote). `None` outside a repository.
 pub fn quick_status(path: &Path) -> Option<(usize, bool)> {
-  let summary = summary(path)?;
-  let push = summary.sync.as_ref().is_some_and(|sync| sync.ahead > 0 || !sync.upstream);
-  Some((summary.changed(), push))
+  Some(summary(path)?.status())
 }
 
 /// The folder name `git clone` would pick for `url`: `https://github.com/a/vekro.git` gives `vekro`.

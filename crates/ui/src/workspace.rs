@@ -1,4 +1,5 @@
 use crate::{
+  agents::{AgentKind, AgentTabs},
   all_changes::{AllChanges, OpenChangedFile},
   change_view::ChangeView,
   commit_settings::{CommitSettings, CommitSettingsSaved},
@@ -22,8 +23,8 @@ use crate::{
   terminal_layout::{Arrangement, Direction, Node},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
-  AddProject, CheckForUpdates, CloseTab, NewTerminal, OpenSearchResults, OpenSettings, SaveFile, SearchProject, SplitDown, SplitRight,
-  ToggleAllChanges, ToggleTerminal, ViewOnHost,
+  AddProject, CheckForUpdates, CloseTab, NewClaude, NewCodex, NewTerminal, OpenSearchResults, OpenSettings, SaveFile, SearchProject, SplitDown,
+  SplitRight, ToggleAgents, ToggleAllChanges, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{base::Selectable as _, prelude::FluentBuilder as _};
 use gpui_kit::{
@@ -56,7 +57,7 @@ use std::{
     atomic::{AtomicBool, AtomicU32, Ordering},
     Arc, Mutex,
   },
-  time::Duration,
+  time::{Duration, Instant},
 };
 use vekro_git::{BranchChoices, BranchRef, CommitInfo, Comparison, Summary};
 use vekro_hosting::{Connection, KeychainStore, PullRequest, RepoRef, TokenStore as _};
@@ -93,6 +94,9 @@ const HOVER_PREPARE_DELAY: Duration = Duration::from_millis(120);
 
 /// How often the Git summary and the folder tree are read again while the window is open.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+
+/// How often the changes of the favorite projects are read for their tabs in the title bar.
+const FAVORITE_STATUS_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Width of the sidebar when the window opens.
 const SIDEBAR_WIDTH: Pixels = px(280.);
@@ -326,10 +330,16 @@ pub struct Workspace {
   menu_host: Option<String>,
   /// The terminals fill the main area (the right part of the window) in place of the editor.
   terminal_open: bool,
+  /// The AI view (Codex, Claude) fills the main area, like the terminals do; the two never show together.
+  agent_open: bool,
+  /// The agent sessions of each project; the sessions keep running while another project or view is shown.
+  agent_tabs: HashMap<PathBuf, AgentTabs<Entity<Terminal>>>,
   /// A commit message is being generated.
   generating: bool,
   /// What each project holds, read when the project menu opens and while it is open.
   project_status: HashMap<PathBuf, ProjectStatus>,
+  /// When the project status was last read in the background.
+  project_status_read: Option<Instant>,
   /// The push, pull or fetch that is running.
   remote_work: Option<RemoteWork>,
   /// A finished push, pull or fetch whose fill is still running out to the right: where it stood, and which run it was.
@@ -447,8 +457,11 @@ impl Workspace {
       window_active: true,
       menu_host: None,
       terminal_open: false,
+      agent_open: false,
+      agent_tabs: HashMap::new(),
       generating: false,
       project_status: HashMap::new(),
+      project_status_read: None,
       remote_work: None,
       remote_finish: None,
       remote_runs: 0,
@@ -594,10 +607,22 @@ impl Workspace {
 
   /// Starts a shell in `root`; the caller puts it in a tab or a pane.
   fn start_terminal(&mut self, root: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Option<Entity<Terminal>> {
-    let started = match Terminal::start(root, cx) {
+    self.start_program(root, None, "a shell", window, cx)
+  }
+
+  /// Starts `program` in `root` (the login shell for `None`); `what` names it in the notification when it cannot start.
+  fn start_program(
+    &mut self,
+    root: PathBuf,
+    program: Option<(String, Vec<String>)>,
+    what: &str,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Option<Entity<Terminal>> {
+    let started = match Terminal::start(root, program, cx) {
       Ok(started) => started,
       Err(error) => {
-        window.push_notification(Notification::error(format!("Could not start a shell: {error}")), cx);
+        window.push_notification(Notification::error(format!("Could not start {what}: {error}")), cx);
         return None;
       }
     };
@@ -640,6 +665,7 @@ impl Workspace {
   /// Shows the terminals in the main area and puts the keyboard in the shell.
   fn show_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     self.terminal_open = true;
+    self.agent_open = false;
     self.ensure_terminal(window, cx);
     self.focus_terminal(window, cx);
     cx.notify();
@@ -661,6 +687,7 @@ impl Workspace {
     let Some(terminal) = self.start_terminal(root.clone(), window, cx) else { return };
     self.terminal_tabs.entry(root).or_insert_with(Arrangement::new).add_tab(terminal.clone());
     self.terminal_open = true;
+    self.agent_open = false;
     self.focus_pane(&terminal, window, cx);
     cx.notify();
   }
@@ -712,11 +739,80 @@ impl Workspace {
     }
   }
 
-  /// Hides the terminals; the shells keep running. The keyboard goes back to the window, so shortcuts keep working.
+  /// Hides the terminals and the AI view; the programs keep running. The keyboard goes back to the window, so shortcuts keep working.
   pub(crate) fn hide_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     self.terminal_open = false;
+    self.agent_open = false;
     self.focus_handle.focus(window, cx);
     cx.notify();
+  }
+
+  /// The agent sessions of the open project.
+  fn agents(&self) -> Option<&AgentTabs<Entity<Terminal>>> {
+    self.projects.active.as_ref().and_then(|root| self.agent_tabs.get(root))
+  }
+
+  /// Either full-width view is showing: the terminals or the AI view. The sidebar, the editor and the status bar are hidden then.
+  fn full_area_open(&self) -> bool {
+    self.terminal_open || self.agent_open
+  }
+
+  /// Gives the keyboard to the shown agent session, once it is drawn.
+  fn focus_agent(&self, window: &mut Window, cx: &mut Context<Self>) {
+    if let Some(tab) = self.agents().and_then(AgentTabs::current) {
+      self.focus_pane(&tab.session, window, cx);
+    }
+  }
+
+  /// The activity bar's AI button and its shortcut: the AI view takes the main area, or gives it back to the editor.
+  pub fn toggle_agents(&mut self, _: &ToggleAgents, window: &mut Window, cx: &mut Context<Self>) {
+    if self.agent_open {
+      self.hide_terminal(window, cx);
+    } else {
+      self.terminal_open = false;
+      self.agent_open = true;
+      self.focus_agent(window, cx);
+      cx.notify();
+    }
+  }
+
+  pub fn new_codex(&mut self, _: &NewCodex, window: &mut Window, cx: &mut Context<Self>) {
+    self.new_agent(AgentKind::Codex, window, cx);
+  }
+
+  pub fn new_claude(&mut self, _: &NewClaude, window: &mut Window, cx: &mut Context<Self>) {
+    self.new_agent(AgentKind::Claude, window, cx);
+  }
+
+  /// Starts an agent in a tab of its own in the open project and shows the AI view. It runs in the user's login shell, so
+  /// the PATH of their shell finds it.
+  fn new_agent(&mut self, kind: AgentKind, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    let shell = std::env::var("SHELL").ok().filter(|shell| !shell.is_empty()).unwrap_or_else(|| "/bin/zsh".to_owned());
+    let program = (shell, vec!["-l".to_owned(), "-i".to_owned(), "-c".to_owned(), kind.shell_line()]);
+    let Some(terminal) = self.start_program(root.clone(), Some(program), kind.label(), window, cx) else { return };
+    self.agent_tabs.entry(root).or_insert_with(AgentTabs::new).add(kind, terminal.clone());
+    self.terminal_open = false;
+    self.agent_open = true;
+    self.focus_pane(&terminal, window, cx);
+    cx.notify();
+  }
+
+  fn select_agent_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    if let Some(root) = self.projects.active.clone() {
+      if let Some(tabs) = self.agent_tabs.get_mut(&root) {
+        tabs.select(index);
+      }
+    }
+    self.focus_agent(window, cx);
+    cx.notify();
+  }
+
+  /// Closes an agent session: the agent stops.
+  fn close_agent_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+    if let Some(session) = self.agents().and_then(|tabs| tabs.tabs.get(index)).map(|tab| tab.session.clone()) {
+      self.close_pane(session, window, cx);
+    }
   }
 
   /// Takes a pane out, because its shell exited or it was closed: the shell stops, a tab left without panes goes, and when the
@@ -726,6 +822,14 @@ impl Workspace {
       tabs.remove(&terminal);
     }
     self.terminal_tabs.retain(|_, tabs| !tabs.is_empty());
+    for tabs in self.agent_tabs.values_mut() {
+      tabs.remove(&terminal);
+    }
+    self.agent_tabs.retain(|_, tabs| !tabs.is_empty());
+    // The AI view stays open when its last session ends: it shows the choice of agents again.
+    if self.agent_open {
+      self.focus_agent(window, cx);
+    }
     if self.terminal_open {
       if self.arrangement().is_some() {
         self.focus_terminal(window, cx);
@@ -1092,6 +1196,7 @@ impl Workspace {
       self.persist_projects();
     }
     self.terminal_tabs.remove(path);
+    self.agent_tabs.remove(path);
     self.views.remove(path);
     cx.notify();
   }
@@ -1122,6 +1227,7 @@ impl Workspace {
       this.persist_projects();
       if chosen.rename_folder {
         this.terminal_tabs.remove(&chosen.path);
+        this.agent_tabs.remove(&chosen.path);
         this.views.remove(&chosen.path);
         if this.projects.active.as_ref() == Some(&path) {
           this.refresh_project();
@@ -1282,9 +1388,11 @@ impl Workspace {
           this.load_history(cx);
         }
         this.sync_menus(false, cx);
-        // While the project menu is open, what each project holds is kept up to date.
+        // While the project menu is open, what each project holds is kept up to date; otherwise the favorites' tabs are, less often.
         if this.projects_menu_open {
-          this.load_project_status(cx);
+          this.load_project_status(true, cx);
+        } else if this.project_status_read.is_none_or(|read| read.elapsed() >= FAVORITE_STATUS_INTERVAL) {
+          this.load_project_status(false, cx);
         }
         if this.all_changes_open
           && this.sidebar_tab == SidebarTab::Git
@@ -1416,6 +1524,11 @@ impl Workspace {
     } else {
       root.canonicalize().ok().and_then(|canonical| path.strip_prefix(canonical).ok()).map(|relative| root.join(relative)).unwrap_or(path)
     };
+    self.reveal_file(root, path, window, cx);
+  }
+
+  /// Opens a file in the editor and shows it in the Explorer: its folders open and the tree scrolls to it.
+  fn reveal_file(&mut self, root: PathBuf, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
     self.sidebar_tab = SidebarTab::Explorer;
     self.close_project_search(cx);
     let expanded = self.expanded.len();
@@ -1431,7 +1544,7 @@ impl Workspace {
 
   pub fn search_project(&mut self, _: &SearchProject, window: &mut Window, cx: &mut Context<Self>) {
     self.sidebar_tab = SidebarTab::Search;
-    if self.terminal_open {
+    if self.full_area_open() {
       self.hide_terminal(window, cx);
     }
     if !self.search_open {
@@ -1642,7 +1755,7 @@ impl Workspace {
   pub(crate) fn open_change_in_editor(&mut self, file: &Path, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
     match vekro_git::workdir_file(&root, file).filter(|path| path.is_file()) {
-      Some(path) => self.open_file(path, window, cx),
+      Some(path) => self.reveal_file(root, path, window, cx),
       None => window.push_notification(Notification::error(format!("{} is not on the disk.", file.display())), cx),
     }
   }
@@ -2539,7 +2652,7 @@ impl Workspace {
   fn set_projects_menu(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
     self.projects_menu_open = open;
     if open {
-      self.load_project_status(cx);
+      self.load_project_status(true, cx);
       self.project_filter.update(cx, |input, cx| input.set_value("", window, cx));
       let focus = self.project_filter.read(cx).focus_handle(cx);
       window.defer(cx, move |window, cx| focus.focus(window, cx));
@@ -2547,9 +2660,26 @@ impl Workspace {
     cx.notify();
   }
 
-  /// Reads what every project holds (changed files, commits to push) off the interface thread, for the project menu.
-  fn load_project_status(&mut self, cx: &mut Context<Self>) {
-    let paths: Vec<PathBuf> = self.projects.projects.iter().map(|project| project.path.clone()).collect();
+  /// What a project holds: for the open project what the window already read, for the others what the last background read found.
+  fn status_of(&self, path: &Path) -> Option<ProjectStatus> {
+    if self.projects.active.as_deref() == Some(path) {
+      if let Some(git) = &self.git {
+        let (changed, push) = git.status();
+        return Some(ProjectStatus { changed, push });
+      }
+    }
+    self.project_status.get(path).copied()
+  }
+
+  /// Reads what projects hold (changed files, commits to push) off the interface thread: every project for the project menu
+  /// (`all`), else the favorites, whose tabs show it.
+  fn load_project_status(&mut self, all: bool, cx: &mut Context<Self>) {
+    self.project_status_read = Some(Instant::now());
+    let paths: Vec<PathBuf> = if all {
+      self.projects.projects.iter().map(|project| project.path.clone()).collect()
+    } else {
+      self.projects.favorites().map(|project| project.path.clone()).collect()
+    };
     let work = cx.background_executor().spawn(async move {
       paths
         .into_iter()
@@ -2559,8 +2689,11 @@ impl Workspace {
     cx.spawn(async move |this, cx| {
       let found = work.await;
       let _ = this.update(cx, |this, cx| {
-        if this.project_status != found {
-          this.project_status = found;
+        // All projects replace what was known; the favorites only refresh their own entries.
+        let mut next = if all { HashMap::new() } else { this.project_status.clone() };
+        next.extend(found);
+        if this.project_status != next {
+          this.project_status = next;
           cx.notify();
         }
       });
@@ -2967,6 +3100,7 @@ impl Workspace {
         let path = project.path.clone();
         let selected = self.projects.active.as_ref() == Some(&path);
         let look = avatar_look(project, selected, cx);
+        let status = self.status_of(&path);
         let workspace = workspace.clone();
         Button::new(SharedString::from(format!("favorite-project-{}", path.display())))
           .custom(
@@ -3009,7 +3143,8 @@ impl Workspace {
                   .overflow_hidden()
                   .whitespace_nowrap()
                   .text_ellipsis(),
-              ),
+              )
+              .children(project_status_marks("favorite", &path, status.as_ref(), selected, cx)),
           )
           .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.select_project(path.clone(), window, cx)))
           .into_any_element()
@@ -3207,7 +3342,14 @@ impl Workspace {
               .child(Icon::empty().path(change_kind_icon(change.kind)).size_4().flex_none().text_color(kind_color(change.kind, &palette)))
               .on_click(cx.listener({
                 let file = file.clone();
-                move |this, _, _, cx| this.open_change(file.clone(), cx)
+                // A double click opens the file itself, in the editor with the Explorer; one click shows its diff.
+                move |this, event: &ClickEvent, window, cx| {
+                  if event.click_count() >= 2 {
+                    this.open_change_in_editor(&file, window, cx);
+                  } else {
+                    this.open_change(file.clone(), cx);
+                  }
+                }
               })),
           )
           .context_menu({
@@ -3299,7 +3441,10 @@ impl Workspace {
       .underline()
       .selected_index(usize::from(self.git_view == GitView::History))
       .on_click(cx.listener(|this, index: &usize, _, cx| this.set_git_view(if *index == 1 { GitView::History } else { GitView::Changes }, cx)))
-      .children([Tab::new().cursor_pointer().label("Changes"), Tab::new().cursor_pointer().label("History")]);
+      .children([
+        Tab::new().cursor_pointer().label("Changes").when(git.changed() > 0, |tab| tab.suffix(count_badge(git.changed(), cx))),
+        Tab::new().cursor_pointer().label("History"),
+      ]);
     let body = match self.git_view {
       GitView::Changes => v_flex()
         .flex_1()
@@ -4100,38 +4245,22 @@ impl Workspace {
       let workspace = workspace.clone();
       let focus = self.focus_handle.clone();
       let button =
-        rail_button(tab.label(), tab.icon(), tab.label(), tab == self.sidebar_tab && !self.terminal_open, true, &palette, move |_, window, cx| {
+        rail_button(tab.label(), tab.icon(), tab.label(), tab == self.sidebar_tab && !self.full_area_open(), true, &palette, move |_, window, cx| {
           if tab == SidebarTab::Search {
             focus.dispatch_action(&SearchProject, window, cx);
             return;
           }
           workspace.update(cx, |this, cx| {
             this.sidebar_tab = tab;
-            // The view of the sidebar and the editor come back when the terminals were taking the main area.
-            if this.terminal_open {
+            // The view of the sidebar and the editor come back when the terminals or the AI view were taking the main area.
+            if this.full_area_open() {
               this.hide_terminal(window, cx);
             }
             cx.notify();
           })
         });
       // The Git button shows how many files have changes, in a small blue circle at its top right.
-      let badge = (tab == SidebarTab::Git && changed > 0).then(|| {
-        div()
-          .absolute()
-          .top_0()
-          .right(-BADGE_OVERHANG)
-          .min_w_4()
-          .h_4()
-          .px_1()
-          .flex()
-          .items_center()
-          .justify_center()
-          .rounded_full()
-          .bg(theme.primary)
-          .text_color(palette.on_accent)
-          .text_size(BADGE_FONT_SIZE)
-          .child(if changed > 99 { "99+".to_string() } else { changed.to_string() })
-      });
+      let badge = (tab == SidebarTab::Git && changed > 0).then(|| count_badge(changed, cx).absolute().top_0().right(-BADGE_OVERHANG));
       div().relative().child(button).children(badge)
     });
     let attention = self.settings.read(cx).accounts.items.iter().any(|account| account.issue.is_some());
@@ -4140,6 +4269,15 @@ impl Workspace {
       rail_button("terminal-toggle", Icon::empty().path("icons/terminal.svg"), "Terminal", self.terminal_open, true, &palette, |_, window, cx| {
         window.dispatch_action(Box::new(ToggleTerminal), cx)
       });
+    let agents = rail_button(
+      "agents-toggle",
+      Icon::empty().path("icons/bot-message-square.svg"),
+      "AI agents",
+      self.agent_open,
+      true,
+      &palette,
+      |_, window, cx| window.dispatch_action(Box::new(ToggleAgents), cx),
+    );
     let settings = div()
       .relative()
       .child(rail_button("project-settings-open", Icon::new(IconName::Settings), "Project settings", false, true, &palette, {
@@ -4198,6 +4336,7 @@ impl Workspace {
             .child(Icon::empty().path("icons/triangle-alert.svg").size_3().text_color(palette.on_accent)),
         )
       }))
+      .child(agents)
       .child(div().flex_1())
       .child(settings)
   }
@@ -4245,6 +4384,81 @@ impl Workspace {
       .size_full()
       .children(strip)
       .child(div().flex_1().min_h_0().child(self.render_pane_node(&node, headers, &root.to_string_lossy(), cx)))
+      .into_any_element()
+  }
+
+  /// The AI view, filling the main area. It is not a terminal window: a header names the project and holds one tab per
+  /// session (agent icon and name) and a menu to start another agent, and with no session it shows the choice of agents.
+  fn render_agent_area(&self, cx: &mut Context<Self>) -> AnyElement {
+    let theme = cx.theme().clone();
+    let palette = colors(cx);
+    let Some(root) = self.projects.active.clone() else {
+      return Label::new("No project is open.").text_color(theme.muted_foreground).p_3().into_any_element();
+    };
+    let project = SharedString::from(root.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default());
+    let workspace = cx.entity();
+    let picker =
+      Button::new("agent-new").ghost().xsmall().icon(Icon::empty().path("icons/plus.svg").size_4()).tooltip("New agent session").dropdown_menu(
+        move |menu, _, _| {
+          AgentKind::ALL.into_iter().fold(menu, |menu, kind| {
+            let workspace = workspace.clone();
+            menu.item(
+              PopupMenuItem::new(kind.label())
+                .icon(Icon::empty().path(kind.icon()))
+                .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.new_agent(kind, window, cx))),
+            )
+          })
+        },
+      );
+    let Some(tabs) = self.agents() else {
+      return self.render_agent_empty(&project, cx);
+    };
+    let strip_tabs = tabs.tabs.iter().enumerate().map(|(index, tab)| {
+      let key = tab.session.entity_id().to_string();
+      let close = Button::new(SharedString::from(format!("close-agent-tab-{key}")))
+        .ghost()
+        .xsmall()
+        .icon(Icon::empty().path("icons/x.svg").size_4())
+        .tooltip("Close")
+        .on_click(cx.listener(move |this, _, window, cx| {
+          // The click must not also reach the tab and select it.
+          cx.stop_propagation();
+          this.close_agent_tab(index, window, cx);
+        }));
+      let label = h_flex().gap_1p5().items_center().child(Icon::empty().path(tab.kind.icon()).size_4()).child(tab.kind.label());
+      strip_tab(SharedString::from(format!("agent-tab-{key}")), label, index == tabs.active, close, cx)
+        .on_click(cx.listener(move |this, _, window, cx| this.select_agent_tab(index, window, cx)))
+    });
+    let header = strip(cx)
+      .child(h_flex().flex_1().min_w_0().h_full().children(strip_tabs))
+      .child(div().px_1().child(picker))
+      .child(Label::new(project).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).pr_3());
+    let shown = tabs.current().map(|tab| tab.session.clone());
+    v_flex().size_full().child(header).child(div().flex_1().min_h_0().bg(palette.background).children(shown)).into_any_element()
+  }
+
+  /// The AI view with no session: the agents to start.
+  fn render_agent_empty(&self, project: &SharedString, cx: &mut Context<Self>) -> AnyElement {
+    let buttons = AgentKind::ALL.map(|kind| {
+      let button = Button::new(SharedString::from(format!("agent-start-{}", kind.command())))
+        .outline()
+        .icon(Icon::empty().path(kind.icon()).size_4())
+        .label(SharedString::from(format!("Start {}", kind.label())))
+        .tooltip(kind.description());
+      match kind {
+        AgentKind::Codex => button.on_click(cx.listener(|this, _, window, cx| this.new_codex(&NewCodex, window, cx))),
+        AgentKind::Claude => button.on_click(cx.listener(|this, _, window, cx| this.new_claude(&NewClaude, window, cx))),
+      }
+    });
+    Empty::new()
+      .size_full()
+      .child(
+        EmptyHeader::new()
+          .media(EmptyMedia::new().with_variant(EmptyMediaVariant::Icon).child(Icon::empty().path("icons/bot-message-square.svg")))
+          .title(EmptyTitle::new().child("AI agents"))
+          .description(EmptyDescription::new().child(SharedString::from(format!("Start Codex or Claude in {project}.")))),
+      )
+      .child(h_flex().gap_2().children(buttons))
       .into_any_element()
   }
 
@@ -4335,6 +4549,45 @@ impl Workspace {
   }
 }
 
+/// What is waiting in a project, for its row in the project menu and its tab in the title bar: commits to push (an arrow), and
+/// files with changes (a dot). `on_accent` draws them for the open project's tab, which is filled with the accent color.
+fn project_status_marks(scope: &str, path: &Path, status: Option<&ProjectStatus>, on_accent: bool, cx: &App) -> Vec<AnyElement> {
+  let palette = colors(cx);
+  let (push, changed) = status.map_or((false, 0), |status| (status.push, status.changed));
+  let dot = if on_accent { palette.on_accent } else { cx.theme().primary };
+  let arrow = if on_accent { palette.on_accent } else { cx.theme().muted_foreground };
+  let mut marks = Vec::new();
+  if push {
+    marks.push(
+      div()
+        .id(SharedString::from(format!("{scope}-push-{}", path.display())))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .when(!on_accent, |mark| mark.px_2().rounded_full().bg(palette.hover))
+        .tooltip(|window, cx| Tooltip::new("Commits waiting to be pushed").build(window, cx))
+        .child(Icon::empty().path("icons/arrow-up.svg").size_3p5().text_color(arrow))
+        .into_any_element(),
+    );
+  }
+  if changed > 0 {
+    marks.push(
+      div()
+        .id(SharedString::from(format!("{scope}-changes-{}", path.display())))
+        .flex_none()
+        .size_2()
+        .rounded_full()
+        .bg(dot)
+        .tooltip(move |window, cx| {
+          Tooltip::new(if changed == 1 { "1 uncommitted change".to_string() } else { format!("{changed} uncommitted changes") }).build(window, cx)
+        })
+        .into_any_element(),
+    );
+  }
+  marks
+}
+
 /// One project in a list (a category's list, the repository menu): its avatar and name; a click opens it and closes the list,
 /// a right click opens the project's menu.
 fn project_list_row(workspace: &Entity<Workspace>, project: &Project, selected: bool, status: Option<&ProjectStatus>, cx: &App) -> AnyElement {
@@ -4394,36 +4647,7 @@ fn project_list_row(workspace: &Entity<Workspace>, project: &Project, selected: 
         .when(look.icon.is_none(), |avatar| avatar.child(look.letter.clone())),
     )
     .child(Label::new(name).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
-    // What is waiting in the project: commits to push (an arrow), and files with changes (a blue dot).
-    .when(status.is_some_and(|status| status.push), |row| {
-      row.child(
-        div()
-          .id(SharedString::from(format!("project-push-{}", path.display())))
-          .flex()
-          .flex_none()
-          .items_center()
-          .justify_center()
-          .px_2()
-          .rounded_full()
-          .bg(palette.hover)
-          .tooltip(|window, cx| Tooltip::new("Commits waiting to be pushed").build(window, cx))
-          .child(Icon::empty().path("icons/arrow-up.svg").size_3p5().text_color(muted)),
-      )
-    })
-    .when(status.is_some_and(|status| status.changed > 0), |row| {
-      let changed = status.map_or(0, |status| status.changed);
-      row.child(
-        div()
-          .id(SharedString::from(format!("project-changes-{}", path.display())))
-          .flex_none()
-          .size_2()
-          .rounded_full()
-          .bg(cx.theme().primary)
-          .tooltip(move |window, cx| {
-            Tooltip::new(if changed == 1 { "1 uncommitted change".to_string() } else { format!("{changed} uncommitted changes") }).build(window, cx)
-          }),
-      )
-    })
+    .children(project_status_marks("list", &path, status, false, cx))
     .on_click({
       let workspace = workspace.clone();
       move |_, window, cx| {
@@ -4486,6 +4710,24 @@ fn category_label(index: usize, category: &Category) -> String {
 
 /// A square icon button for the title bar, as tall as the repository switcher. The Kit's `Button` fixes its icon at a small
 /// size, so this draws the icon itself at `size_5`.
+/// A small blue circle with a count (99+ above that), for the files with changes.
+fn count_badge(count: usize, cx: &App) -> Div {
+  let palette = colors(cx);
+  div()
+    .min_w_4()
+    .h_4()
+    .px_1()
+    .flex()
+    .flex_none()
+    .items_center()
+    .justify_center()
+    .rounded_full()
+    .bg(cx.theme().primary)
+    .text_color(palette.on_accent)
+    .text_size(BADGE_FONT_SIZE)
+    .child(if count > 99 { "99+".to_string() } else { count.to_string() })
+}
+
 fn rail_button(
   id: &'static str,
   icon: Icon,
@@ -4574,12 +4816,18 @@ impl Render for Workspace {
       self.dock.clone().into_any_element()
     };
     // The terminals take the whole main area, like a terminal window; the sidebar stays beside it.
-    let main_area = if self.terminal_open { self.render_terminal_area(cx).into_any_element() } else { editor_area };
+    let main_area = if self.terminal_open {
+      self.render_terminal_area(cx).into_any_element()
+    } else if self.agent_open {
+      self.render_agent_area(cx)
+    } else {
+      editor_area
+    };
     v_flex()
       .id("workspace")
       .key_context("Workspace")
       .track_focus(&self.focus_handle)
-      .when(self.terminal_open, |this| {
+      .when(self.full_area_open(), |this| {
         let command_held = window.modifiers().platform;
         this.on_modifiers_changed(move |event, window, _| {
           if event.modifiers.platform != command_held {
@@ -4594,6 +4842,9 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::open_search_results))
       .on_action(cx.listener(Self::new_terminal))
       .on_action(cx.listener(Self::toggle_terminal))
+      .on_action(cx.listener(Self::toggle_agents))
+      .on_action(cx.listener(Self::new_codex))
+      .on_action(cx.listener(Self::new_claude))
       .on_action(cx.listener(Self::toggle_all_changes))
       .on_action(cx.listener(Self::open_changed_file))
       .on_action(cx.listener(Self::split_right))
@@ -4620,7 +4871,7 @@ impl Render for Workspace {
             })),
         ),
       )
-      .child(h_flex().flex_1().min_h_0().child(self.render_activity_bar(cx)).child(if self.terminal_open {
+      .child(h_flex().flex_1().min_h_0().child(self.render_activity_bar(cx)).child(if self.full_area_open() {
         // The terminals take everything right of the activity bar: no sidebar and no status bar, like a terminal window.
         div().flex_1().min_w_0().h_full().child(main_area).into_any_element()
       } else {

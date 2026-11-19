@@ -1,6 +1,8 @@
 //! The menu bar of the application: only what is needed, with the shortcuts the actions already have.
 
-use crate::{AddProject, CheckForUpdates, CloseTab, NewWindow, OpenSettings, Quit, SaveFile, ToggleTerminal, ViewOnHost};
+use crate::{
+  AddProject, CheckForUpdates, CloseTab, NewClaude, NewCodex, NewWindow, OpenSettings, Quit, SaveFile, ToggleAgents, ToggleTerminal, ViewOnHost,
+};
 use gpui_kit::*;
 
 /// The menus. `host` names the service of the open project's remote ("GitHub", "GitLab", "Azure DevOps", or a host name): the
@@ -24,7 +26,13 @@ pub fn menus(host: Option<&str>) -> Vec<Menu> {
       MenuItem::action("Save", SaveFile),
       MenuItem::action("Close Tab", CloseTab),
     ]),
-    Menu::new("View").items([MenuItem::action("Toggle Terminal", ToggleTerminal)]),
+    Menu::new("View").items([
+      MenuItem::action("Toggle Terminal", ToggleTerminal),
+      MenuItem::action("Toggle AI Agents", ToggleAgents),
+      MenuItem::separator(),
+      MenuItem::action("New Codex Session", NewCodex),
+      MenuItem::action("New Claude Session", NewClaude),
+    ]),
     Menu::new("Repository").items([MenuItem::action(view, ViewOnHost).disabled(host.is_none())]),
   ]
 }

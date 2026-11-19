@@ -27,6 +27,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/editor.rs` | `EditorPanel`: tabs (`Tabs`) of file editors, shown with the Kit default `TabBar` that the panel draws itself (the dock title bar is off), plus SVG and ICNS previews decoded off the interface thread |
 | `crates/ui/src/terminal.rs` | `Terminal` (a view): draws a `Session`, handles keys, mouse, selection, scrolling, paste and its right-click menu |
 | `crates/ui/src/menus.rs` | the menu bar (`menus`); the app sets it at startup and the window in front updates the Repository item with the service of the open project's remote (`Workspace::sync_menus`, `view_on_host`, `vekro_hosting::web_repository`) |
+| `crates/ui/src/agents.rs` | the AI agents (`AgentKind`: Codex, Claude; the shell line that runs each) and a project's agent sessions as plain data (`AgentTabs`), tested without a window |
 | `crates/ui/src/terminal_layout.rs` | the tabs and split panes of a project's terminals as plain data (`Arrangement`, `Node`, `Direction`), tested without a window |
 | `crates/ui/src/commit_settings.rs` | the OpenCommit settings dialog (model, diff size, language, message style, instructions, push after commit) |
 | `crates/ui/src/all_changes.rs` | `AllChanges`: a single virtualized Kit diff of the working tree; the review controls sit in each file header |
@@ -62,6 +63,8 @@ not dock panels: the activity bar's terminal button (`ToggleTerminal`, `⌘J`; `
 `Arrangement`; splits are Kit `h_resizable`/`v_resizable` groups, a pane has a header when its tab has several). `⌘T`, `⌘D`,
 `⇧⌘D` and `⌘W` act on the shell that has the keyboard; a terminal's right-click menu (`terminal.rs`) uses the same actions.
 Showing the editor again keeps the shells running.
+
+The **AI view** is the activity bar's last button (`ToggleAgents`, `⇧⌘A`; `agent_open`). It fills the same area as the terminals (the two never show together; `full_area_open`) but is not a terminal window: its header holds one tab per session (agent icon and name), a menu to start another agent, and the project name, with no splits. A session is a `Terminal` that runs `$SHELL -l -i -c "exec codex"` (or `claude`) in the project folder, so the user's PATH finds the agent; a missing agent prints a message and waits for Enter. `NewCodex` and `NewClaude` start a session. With no session the view shows the choice of agents (`render_agent_empty`); when the last session ends it stays open and shows it again. Sessions live in `Workspace.agent_tabs` per project and keep running while another project or view is shown.
 
 The Kit draws the dock chrome of the editor (the title, zoom button and `…` menu).
 
