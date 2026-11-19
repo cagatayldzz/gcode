@@ -3066,7 +3066,10 @@ impl Workspace {
       .child(h_flex().gap_2().items_center().child(Icon::empty().path("icons/folder.svg").size_5()).child(
         Icon::new(if self.projects_menu_open { IconName::ChevronUp } else { IconName::ChevronDown }).size_4().text_color(theme.muted_foreground),
       ));
+    // The popover has no padding of its own: the list's scrollbar then runs along the menu's right edge, and the padding sits
+    // inside the header and inside the list.
     Popover::new("repository-menu")
+      .p_0()
       .anchor(Anchor::TopLeft)
       .open(self.projects_menu_open)
       .on_open_change({
@@ -3139,15 +3142,16 @@ impl Workspace {
         v_flex()
           .w(PROJECT_MENU_WIDTH)
           .gap_1()
-          .child(h_flex().gap_2().items_center().child(div().flex_1().child(Input::new(&filter))).child(add).child(sort))
+          .child(h_flex().gap_2().items_center().p_3().pb_0().child(div().flex_1().child(Input::new(&filter))).child(add).child(sort))
           .child(
-            v_flex()
-              .id("repository-list")
-              .max_h(MENU_LIST_MAX_HEIGHT)
-              .overflow_y_scrollbar()
-              .gap_0p5()
-              .when(rows.is_empty(), |list| list.child(Label::new("No matching projects").px_2().py_1().text_color(theme.muted_foreground)))
-              .children(rows),
+            div().id("repository-list").max_h(MENU_LIST_MAX_HEIGHT).overflow_y_scrollbar().child(
+              v_flex()
+                .gap_0p5()
+                .px_3()
+                .pb_3()
+                .when(rows.is_empty(), |list| list.child(Label::new("No matching projects").px_2().py_1().text_color(theme.muted_foreground)))
+                .children(rows),
+            ),
           )
       })
   }
