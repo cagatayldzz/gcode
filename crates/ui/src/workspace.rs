@@ -4,7 +4,7 @@ use crate::{
   change_view::ChangeView,
   commit_settings::{CommitSettings, CommitSettingsSaved},
   commit_view::CommitView,
-  components::{avatar_look, display_path, strip, strip_tab},
+  components::{avatar_look, display_path, selected_style, strip, strip_tab},
   connect_account::{AccountConnected, ConnectAccount},
   connections::{accounts_path, credentials_for_repository, describe, AccountsList},
   editor::{ActiveTab, EditorPanel},
@@ -35,7 +35,7 @@ use gpui_kit::{
     dock::{panel_handle, DockArea, DockLayout, DockSkin},
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     h_flex,
-    input::{Input, InputEvent, InputState, Textarea, TextareaState},
+    input::{Input, InputEvent, InputState, TextareaState},
     kbd::Kbd,
     label::Label,
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
@@ -503,6 +503,7 @@ impl Workspace {
         // Any change to a setting is saved and applied in every window.
         cx.observe_in(&settings, window, |this, settings, window, cx| {
           this.announce_update(window, cx);
+          this.continue_update(window, cx);
           let preferences = settings.read(cx).preferences.clone();
           if let Err(error) = preferences.save(&Preferences::default_path()) {
             eprintln!("Could not save the settings: {error}");
@@ -1119,9 +1120,15 @@ impl Workspace {
     self._setup_subscription = Some(cx.subscribe_in(&setup, window, |this, _, event: &ProjectReady, window, cx| {
       window.close_all_dialogs(cx);
       let path = event.0.clone();
-      this.switch_project(window, cx, move |projects| projects.add(path));
+      // The new project gets a tab in the title bar, and opens in the Explorer, not in the terminal that was showing.
+      this.switch_project(window, cx, move |projects| {
+        projects.add(path.clone());
+        projects.set_favorite(&path, true);
+      });
+      this.sidebar_tab = SidebarTab::Explorer;
+      this.hide_terminal(window, cx);
     }));
-    window.open_dialog(cx, move |dialog, _, _| dialog.p_0().width(px(520.)).child(setup.clone()));
+    window.open_dialog(cx, move |dialog, _, _| dialog.p_0().width(px(560.)).child(setup.clone()));
   }
 
   /// Writes the project list; a failure is logged, the window keeps working.
@@ -1521,12 +1528,12 @@ impl Workspace {
     let title = title.into();
     let field = input.clone();
     let muted = cx.theme().muted_foreground;
-    window.open_dialog(cx, move |dialog, _, _| {
+    window.open_dialog(cx, move |dialog, _, cx| {
       dialog
         .title(title.clone())
         .width(px(420.))
         .p_5()
-        .child(v_flex().gap_2().child(Input::new(&field)).child(Label::new(hint).text_size(FONT_SIZE_SM).text_color(muted)))
+        .child(v_flex().gap_2().child(crate::components::soft_input(&field, cx)).child(Label::new(hint).text_size(FONT_SIZE_SM).text_color(muted)))
     });
     let focus = input.read(cx).focus_handle(cx);
     window.defer(cx, move |window, cx| focus.focus(window, cx));
@@ -1564,7 +1571,22 @@ impl Workspace {
 
   /// Opens a file from the Explorer in the editor.
   fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-    let result = self.editor_panel.update(cx, |editor, cx| editor.open_file(path.clone(), window, cx));
+    self.open_file_as(path, false, window, cx);
+  }
+
+  /// Opens a file; `preview` shows it in the preview tab, which the next preview replaces.
+  fn open_file_as(&mut self, path: PathBuf, preview: bool, window: &mut Window, cx: &mut Context<Self>) {
+    let result =
+      self.editor_panel.update(
+        cx,
+        |editor, cx| {
+          if preview {
+            editor.open_preview(path.clone(), window, cx)
+          } else {
+            editor.open_file(path.clone(), window, cx)
+          }
+        },
+      );
     match result {
       Ok(()) => {
         self.selected_entry = Some(path);
@@ -1798,6 +1820,7 @@ impl Workspace {
     let Some(root) = self.projects.active.clone() else { return };
     self.all_changes_open = !self.all_changes_open;
     if self.all_changes_open {
+      self.selected_change = None;
       self.hide_terminal(window, cx);
       self.all_changes.update(cx, |view, cx| view.reload(root, cx));
     }
@@ -1807,6 +1830,14 @@ impl Workspace {
   /// Shows the changes of a changed file in the main area, in place of the editor. Choosing another file replaces them.
   fn open_change(&mut self, file: PathBuf, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
+    if self.all_changes_open {
+      // The list on the left is the table of contents of the all-changes view: choosing a file scrolls to it.
+      let path = file.to_string_lossy().into_owned();
+      self.all_changes.update(cx, |view, cx| view.scroll_to(&path, cx));
+      self.selected_change = Some(file);
+      cx.notify();
+      return;
+    }
     self.all_changes_open = false;
     self.change_view.update(cx, |view, cx| view.show(root, file.clone(), cx));
     self.selected_change = Some(file);
@@ -2017,6 +2048,69 @@ impl Workspace {
       self.settings.update(cx, |model, _| model.updates.announced = Some(tag));
       window.push_notification(Notification::info(format!("Vekro {version} is available. Download it in Settings → Updates.")), cx);
     }
+  }
+
+  /// Follows the title bar's Update button: restarts once the update is downloaded, or says why it failed.
+  fn continue_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let (ready, failed) = {
+      let state = &self.settings.read(cx).updates;
+      if !state.restart_when_ready {
+        return;
+      }
+      match &state.update {
+        AppUpdate::Ready(_) => (true, None),
+        AppUpdate::Failed(message) => (false, Some(message.clone())),
+        _ => return,
+      }
+    };
+    self.settings.update(cx, |model, _| model.updates.restart_when_ready = false);
+    if ready {
+      self.settings.update(cx, |model, cx| model.restart_to_update(cx));
+    }
+    if let Some(message) = failed {
+      window.push_notification(Notification::error(format!("The update failed: {message}")), cx);
+    }
+  }
+
+  /// The blue Update button at the right of the title bar, shown while a newer Vekro is available. It downloads the update
+  /// (the button turns into a loader) and restarts into it.
+  fn render_update_button(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let (update, restarting) = {
+      let state = &self.settings.read(cx).updates;
+      (state.update.clone(), state.restart_when_ready)
+    };
+    let working = matches!(update, AppUpdate::Working(..)) || (restarting && matches!(update, AppUpdate::Ready(_)));
+    if !matches!(update, AppUpdate::Available(_) | AppUpdate::Working(..) | AppUpdate::Ready(_)) {
+      return None;
+    }
+    let ready = matches!(update, AppUpdate::Ready(_)) && !restarting;
+    let settings = self.settings.clone();
+    Some(
+      Button::new("title-update")
+        .small()
+        .custom(selected_style(cx))
+        .label(if working {
+          "Updating…"
+        } else if ready {
+          "Restart"
+        } else {
+          "Update"
+        })
+        .loading(working)
+        .disabled(working)
+        .tooltip(if ready { "Restart to finish the update" } else { "Download the new version and restart" })
+        .on_click(move |_, _, cx| {
+          settings.update(cx, |model, cx| {
+            model.updates.restart_when_ready = true;
+            if matches!(model.updates.update, AppUpdate::Ready(_)) {
+              model.restart_to_update(cx);
+            } else {
+              model.download_update(cx);
+            }
+            cx.notify();
+          })
+        }),
+    )
   }
 
   /// Opens the dialog that connects a GitHub, GitLab or Azure DevOps account.
@@ -2924,7 +3018,7 @@ impl Workspace {
             };
             v_flex()
               .gap_2()
-              .child(h_flex().gap_2().items_center().child(div().flex_1().child(Input::new(&filter))).child(new_branch))
+              .child(h_flex().gap_2().items_center().child(div().flex_1().child(crate::components::soft_input(&filter, cx))).child(new_branch))
               .child(
                 v_flex()
                   .id("branch-list")
@@ -3039,7 +3133,7 @@ impl Workspace {
             };
             v_flex()
               .gap_2()
-              .child(h_flex().gap_2().items_center().child(div().flex_1().child(Input::new(&filter))).child(refresh))
+              .child(h_flex().gap_2().items_center().child(div().flex_1().child(crate::components::soft_input(&filter, cx))).child(refresh))
               .child(list)
               .child(div().h_px().bg(palette.border))
               .child(create)
@@ -3142,7 +3236,16 @@ impl Workspace {
         v_flex()
           .w(PROJECT_MENU_WIDTH)
           .gap_1()
-          .child(h_flex().gap_2().items_center().p_3().pb_0().child(div().flex_1().child(Input::new(&filter))).child(add).child(sort))
+          .child(
+            h_flex()
+              .gap_2()
+              .items_center()
+              .p_3()
+              .pb_0()
+              .child(div().flex_1().child(crate::components::soft_input(&filter, cx)))
+              .child(add)
+              .child(sort),
+          )
           .child(
             div().id("repository-list").max_h(MENU_LIST_MAX_HEIGHT).overflow_y_scrollbar().child(
               v_flex()
@@ -3403,7 +3506,7 @@ impl Workspace {
     let changes_list =
       v_flex().id("git-changes").flex_1().min_h_0().overflow_y_scrollbar().children(git.changes.iter().map(|change| {
         let file = change.path.clone();
-        let selected = !self.all_changes_open && self.selected_change.as_ref() == Some(&change.path);
+        let selected = self.selected_change.as_ref() == Some(&change.path);
         let included = !self.excluded.contains(&change.path);
         let name = change.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
         let folder = change.path.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
@@ -3505,33 +3608,38 @@ impl Workspace {
       .bg(palette.surface)
       .child(Input::new(&self.commit_summary).small().bg(palette.background).border_color(palette.border))
       .child(
-        div().relative().child(Textarea::new(&self.commit_description).h(rems(4.5)).bg(palette.background).border_color(palette.border)).child(
-          h_flex()
-            .absolute()
-            .right_1()
-            .bottom_1()
-            .gap_0p5()
-            .child(
-              Button::new("commit-settings")
-                .custom(ButtonCustomVariant::new(cx).color(palette.surface).foreground(palette.text).hover(palette.hover).active(palette.hover))
-                .cursor_pointer()
-                .small()
-                .icon(Icon::empty().path("icons/settings-2.svg"))
-                .tooltip("OpenCommit settings")
-                .on_click(cx.listener(|this, _, window, cx| this.open_commit_settings(window, cx))),
-            )
-            .child(
-              Button::new("generate-message")
-                .custom(ButtonCustomVariant::new(cx).color(palette.surface).foreground(cx.theme().primary).hover(palette.hover).active(palette.hover))
-                .cursor_pointer()
-                .small()
-                .icon(Icon::empty().path("icons/sparkles.svg"))
-                .loading(self.generating)
-                .disabled(chosen == 0 || self.generating)
-                .tooltip("Generate the summary and description with OpenCommit")
-                .on_click(cx.listener(|this, _, window, cx| this.generate_commit_message(window, cx))),
-            ),
-        ),
+        div()
+          .relative()
+          .child(crate::components::soft_textarea(&self.commit_description, cx).h(rems(4.5)).bg(palette.background).border_color(palette.border))
+          .child(
+            h_flex()
+              .absolute()
+              .right_1()
+              .bottom_1()
+              .gap_0p5()
+              .child(
+                Button::new("commit-settings")
+                  .custom(ButtonCustomVariant::new(cx).color(palette.surface).foreground(palette.text).hover(palette.hover).active(palette.hover))
+                  .cursor_pointer()
+                  .small()
+                  .icon(Icon::empty().path("icons/settings-2.svg"))
+                  .tooltip("OpenCommit settings")
+                  .on_click(cx.listener(|this, _, window, cx| this.open_commit_settings(window, cx))),
+              )
+              .child(
+                Button::new("generate-message")
+                  .custom(
+                    ButtonCustomVariant::new(cx).color(palette.surface).foreground(cx.theme().primary).hover(palette.hover).active(palette.hover),
+                  )
+                  .cursor_pointer()
+                  .small()
+                  .icon(Icon::empty().path("icons/sparkles.svg"))
+                  .loading(self.generating)
+                  .disabled(chosen == 0 || self.generating)
+                  .tooltip("Generate the summary and description with OpenCommit")
+                  .on_click(cx.listener(|this, _, window, cx| this.generate_commit_message(window, cx))),
+              ),
+          ),
       )
       .child(
         Button::new("commit")
@@ -3775,6 +3883,7 @@ impl Workspace {
   /// The field above the History list: choose a branch to compare with, or the branch chosen, with a button to stop comparing.
   fn render_compare_field(&self, cx: &mut Context<Self>) -> AnyElement {
     let theme = cx.theme().clone();
+    let palette = colors(cx);
     let branch_icon = || Icon::empty().path("icons/git-branch.svg").size_4().text_color(theme.muted_foreground);
     let field = match &self.compare {
       Some(view) => h_flex()
@@ -3784,7 +3893,7 @@ impl Workspace {
         .items_center()
         .rounded_md()
         .border_1()
-        .border_color(theme.input)
+        .border_color(palette.border)
         .child(branch_icon())
         .child(Label::new(view.branch.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
         .child(
@@ -3799,7 +3908,7 @@ impl Workspace {
       None => h_flex()
         .gap_1()
         .items_center()
-        .child(div().flex_1().child(Input::new(&self.compare_filter).prefix(branch_icon())))
+        .child(div().flex_1().child(crate::components::soft_input(&self.compare_filter, cx).prefix(branch_icon())))
         .when(self.compare_open, |row| {
           row.child(
             Button::new("compare-close")
@@ -4003,12 +4112,13 @@ impl Workspace {
           .detach();
         }))
       })
-      .on_click(cx.listener(move |this, _, window, cx| {
+      .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
         if this.rows.iter().any(|row| row.path == path && row.is_dir) {
           this.selected_entry = Some(path.clone());
           this.toggle_folder(path.clone(), cx);
         } else {
-          this.open_file(path.clone(), window, cx);
+          // A single click previews the file; a double click keeps it.
+          this.open_file_as(path.clone(), event.click_count() < 2, window, cx);
         }
       }))
   }
@@ -4168,13 +4278,13 @@ impl Workspace {
                 cx.notify();
               })),
           )
-          .child(Input::new(&self.search_state).small().w_full().disabled(self.projects.active.is_none()).suffix(flags)),
+          .child(crate::components::soft_input(&self.search_state, cx).small().w_full().disabled(self.projects.active.is_none()).suffix(flags)),
       )
       .when(self.search_show_replace, |panel| {
         panel.child(
           h_flex()
             .gap_1()
-            .child(Input::new(&self.search_replace).small().w_full().disabled(self.projects.active.is_none()).suffix(
+            .child(crate::components::soft_input(&self.search_replace, cx).small().w_full().disabled(self.projects.active.is_none()).suffix(
               option("AB", "Preserve case", self.search_preserve_case).on_click(cx.listener(|this, _, _, cx| {
                 this.search_preserve_case = !this.search_preserve_case;
                 cx.notify();
@@ -4204,8 +4314,12 @@ impl Workspace {
         panel.child(
           v_flex()
             .gap_2()
-            .child(v_flex().gap_1().child(Label::new("Files to include").text_xs()).child(Input::new(&self.search_include).small()))
-            .child(v_flex().gap_1().child(Label::new("Files to exclude").text_xs()).child(Input::new(&self.search_exclude).small())),
+            .child(
+              v_flex().gap_1().child(Label::new("Files to include").text_xs()).child(crate::components::soft_input(&self.search_include, cx).small()),
+            )
+            .child(
+              v_flex().gap_1().child(Label::new("Files to exclude").text_xs()).child(crate::components::soft_input(&self.search_exclude, cx).small()),
+            ),
         )
       })
       .when(!status.is_empty(), |panel| {
@@ -5016,7 +5130,9 @@ impl Render for Workspace {
             .children(self.render_favorite_projects(cx))
             .child(rail_button("title-add", Icon::new(IconName::Plus), "Add project", false, false, &palette, |_, window, cx| {
               window.dispatch_action(Box::new(AddProject), cx)
-            })),
+            }))
+            .child(div().flex_1())
+            .children(self.render_update_button(cx)),
         ),
       )
       .child(h_flex().flex_1().min_h_0().child(self.render_activity_bar(cx)).child(if self.full_area_open() {

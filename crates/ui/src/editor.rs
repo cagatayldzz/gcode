@@ -128,6 +128,8 @@ enum ImagePreview {
 struct Tabs {
   /// The files in the tabs, in tab order.
   items: Vec<PathBuf>,
+  /// The tab opened with a single click: the next single click replaces it, until it is pinned (double click, or an edit).
+  preview: Option<PathBuf>,
   active: usize,
   /// Which tab the close shortcut takes next.
   close_order: CloseOrder,
@@ -141,6 +143,7 @@ impl Tabs {
   /// Shows the tab for which `same` is true, or adds `tab` and shows it.
   fn show(&mut self, tab: PathBuf, same: impl Fn(&PathBuf) -> bool) {
     self.close_order.reset();
+    self.pin(&tab);
     match self.items.iter().position(same) {
       Some(index) => {
         self.items[index] = tab;
@@ -153,12 +156,43 @@ impl Tabs {
     }
   }
 
+  /// Shows `tab` as a preview: an open tab is only shown, and a new one takes the place of the current preview.
+  /// Returns the file whose preview tab was replaced.
+  fn show_preview(&mut self, tab: PathBuf) -> Option<PathBuf> {
+    self.close_order.reset();
+    if let Some(index) = self.items.iter().position(|open| *open == tab) {
+      self.active = index;
+      return None;
+    }
+    let slot = self.preview.as_ref().and_then(|preview| self.items.iter().position(|open| open == preview));
+    self.preview = Some(tab.clone());
+    match slot {
+      Some(index) => {
+        self.active = index;
+        Some(std::mem::replace(&mut self.items[index], tab))
+      }
+      None => {
+        self.items.push(tab);
+        self.active = self.items.len() - 1;
+        None
+      }
+    }
+  }
+
+  /// Makes the preview tab of `path` a regular tab.
+  fn pin(&mut self, path: &Path) {
+    if self.preview.as_deref() == Some(path) {
+      self.preview = None;
+    }
+  }
+
   /// Takes away a tab; the one on its right (else on its left) is shown.
   fn remove(&mut self, index: usize) {
     if index >= self.items.len() {
       return;
     }
-    self.items.remove(index);
+    let removed = self.items.remove(index);
+    self.pin(&removed);
     if self.active > index || self.active >= self.items.len() {
       self.active = self.active.saturating_sub(1);
     }
@@ -314,6 +348,23 @@ impl EditorPanel {
 
   /// Opens a text editor or image preview in a file tab.
   pub fn open_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+    self.open(path, false, window, cx)
+  }
+
+  /// Opens a file in the preview tab (a single click in the Explorer): it is replaced by the next preview.
+  pub fn open_preview(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+    self.open(path, true, window, cx)
+  }
+
+  /// Keeps the tab of `index` (a double click on it).
+  fn pin_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+    if let Some(path) = self.tabs.items.get(index).cloned() {
+      self.tabs.pin(&path);
+      cx.notify();
+    }
+  }
+
+  fn open(&mut self, path: PathBuf, preview: bool, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
     if let Some(format) = PreviewFormat::for_path(&path) {
       if !self.images.contains_key(&path) {
         self.load_image(path.clone(), format, cx);
@@ -326,7 +377,14 @@ impl EditorPanel {
       self.touch(&path);
     }
     self.report_active = false;
-    self.tabs.show(path.clone(), |open| *open == path);
+    if preview {
+      if let Some(replaced) = self.tabs.show_preview(path) {
+        self.images.remove(&replaced);
+        self.svg_source.remove(&replaced);
+      }
+    } else {
+      self.tabs.show(path.clone(), |open| *open == path);
+    }
     self.announce(cx);
     Ok(())
   }
@@ -422,6 +480,7 @@ impl EditorPanel {
       if matches!(event, InputEvent::Change) {
         if let Some(file) = this.files.get_mut(&owner) {
           file.dirty = true;
+          this.tabs.pin(&owner);
           cx.notify();
         }
       }
@@ -498,6 +557,7 @@ impl EditorPanel {
       }
     }
     self.recent.retain(|recent| recent != path);
+    self.tabs.pin(path);
     let kept: Vec<PathBuf> = self.tabs.items.iter().filter(|open| open.as_path() != path).cloned().collect();
     if kept.len() != self.tabs.items.len() {
       self.tabs.active = self.tabs.active.min(kept.len().saturating_sub(1));
@@ -619,7 +679,8 @@ impl EditorPanel {
   /// The tab bar, drawn by the panel itself so the first tab sits at the edge of the pane.
   fn render_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let tabs = self.tabs.items.iter().enumerate().map(|(index, path)| {
-      let label = format!("{}{}", display_name(path), if self.is_dirty(path) { " •" } else { "" });
+      let name = format!("{}{}", display_name(path), if self.is_dirty(path) { " •" } else { "" });
+      let label = div().italic().when(self.tabs.preview.as_ref() != Some(path), |label| label.not_italic()).child(name);
       let close = Button::new(SharedString::from(format!("close-tab:{}", path.display())))
         .ghost()
         .xsmall()
@@ -631,7 +692,12 @@ impl EditorPanel {
           this.close_tab(index, cx);
         }));
       strip_tab(SharedString::from(format!("editor-tab:{}", path.display())), label, !self.report_active && index == self.tabs.active, close, cx)
-        .on_click(cx.listener(move |this, _, _, cx| this.activate(index, cx)))
+        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+          this.activate(index, cx);
+          if event.click_count() >= 2 {
+            this.pin_tab(index, cx);
+          }
+        }))
     });
     strip(cx).children(tabs).children(self.search_report.as_ref().map(|(title, _)| {
       let close = Button::new("close-search-report").ghost().xsmall().icon(IconName::Close).tooltip("Close search results").on_click(cx.listener(

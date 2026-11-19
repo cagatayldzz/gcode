@@ -6,7 +6,12 @@ use crate::{
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  component::{button::ButtonCustomVariant, h_flex, ActiveTheme as _},
+  component::{
+    button::ButtonCustomVariant,
+    h_flex,
+    input::{Input, InputState, Textarea, TextareaState},
+    ActiveTheme as _,
+  },
   *,
 };
 use vekro_storage::Project;
@@ -16,6 +21,16 @@ use vekro_storage::Project;
 pub(crate) fn selected_style(cx: &App) -> ButtonCustomVariant {
   let primary = cx.theme().primary;
   ButtonCustomVariant::new(cx).color(primary).foreground(colors(cx).on_accent).hover(primary).active(primary)
+}
+
+/// A text field with the soft border the dialogs use; the kit's own `theme.input` border is as strong as a checkbox's.
+pub(crate) fn soft_input(state: &Entity<InputState>, cx: &App) -> Input {
+  Input::new(state).border_color(colors(cx).border)
+}
+
+/// A multi-line field with the same soft border.
+pub(crate) fn soft_textarea(state: &Entity<TextareaState>, cx: &App) -> Textarea {
+  Textarea::new(state).border_color(colors(cx).border)
 }
 
 /// A path for display: the home folder is written as `~`.

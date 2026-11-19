@@ -2,8 +2,9 @@
 //! Appearance and Git settings share a footer with project management controls.
 
 use crate::{
-  components::{avatar_look, display_path, selected_style},
-  theme::{colors, project_color, PROJECT_COLORS},
+  components::{avatar_look, display_path},
+  project_setup::field,
+  theme::{colors, project_color, FONT_SIZE, FONT_SIZE_SM, PROJECT_COLORS},
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -11,10 +12,10 @@ use gpui_kit::{
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{InputEvent, InputState},
     label::Label,
     tab::{Tab, TabBar},
-    v_flex, ActiveTheme, Icon, Sizable as _, StyledExt as _, WindowExt as _,
+    v_flex, ActiveTheme, Icon, StyledExt as _, WindowExt as _,
   },
   *,
 };
@@ -69,7 +70,6 @@ pub(crate) enum ProjectSettingsEvent {
 
 pub(crate) struct ProjectSettings {
   project: Project,
-  title: SharedString,
   input: Entity<InputState>,
   remote_input: Entity<InputState>,
   remote: String,
@@ -96,7 +96,6 @@ impl ProjectSettings {
     });
     Self {
       project: project.clone(),
-      title: SharedString::from(project.name()),
       input,
       remote_input,
       remote,
@@ -131,15 +130,28 @@ impl ProjectSettings {
   fn swatch(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement {
     let (name, value) = PROJECT_COLORS[index];
     let chosen = self.color.as_deref() == Some(value);
-    let theme = cx.theme().clone();
+    let palette = colors(cx);
+    // A ring around the color marks the chosen one; the check keeps it readable on any color.
     div()
       .id(SharedString::from(format!("color-{name}")))
-      .size_6()
+      .size_8()
+      .flex()
+      .items_center()
+      .justify_center()
       .rounded_full()
-      .cursor_pointer()
       .border_2()
-      .border_color(if chosen { theme.foreground } else { theme.transparent })
-      .when_some(project_color(value), |swatch, color| swatch.bg(color))
+      .cursor_pointer()
+      .border_color(if chosen { palette.text } else { gpui_kit::transparent_black() })
+      .child(
+        div()
+          .size_5()
+          .flex()
+          .items_center()
+          .justify_center()
+          .rounded_full()
+          .when_some(project_color(value), |swatch, color| swatch.bg(color))
+          .when(chosen, |swatch| swatch.child(Icon::empty().path("icons/check.svg").size_3().text_color(white()))),
+      )
       .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(name).build(window, cx))
       .on_click(cx.listener(move |this, _, _, cx| {
         this.color = Some(value.into());
@@ -147,23 +159,36 @@ impl ProjectSettings {
       }))
   }
 
+  /// One square tile of the icon grid: the project's initial when `name` is `None`.
   fn icon_button(&self, name: Option<&'static str>, cx: &mut Context<Self>) -> impl IntoElement {
     let chosen = self.icon.as_deref() == name;
-    let id = SharedString::from(format!("icon-{}", name.unwrap_or("letter")));
-    Button::new(id)
-      .small()
-      .when(chosen, |button| button.custom(selected_style(cx)))
-      .when(!chosen, |button| button.ghost())
-      .when_some(name, |button, name| button.icon(Icon::empty().path(format!("icons/{name}.svg"))))
-      .when(name.is_none(), |button| button.label("Aa"))
-      .accessibility_label(name.unwrap_or("Use project initial"))
+    let palette = colors(cx);
+    let theme = cx.theme().clone();
+    let tint = if chosen { palette.on_accent } else { theme.muted_foreground };
+    div()
+      .id(SharedString::from(format!("icon-{}", name.unwrap_or("letter"))))
+      .size_9()
+      .flex()
+      .items_center()
+      .justify_center()
+      .rounded_md()
+      .cursor_pointer()
+      .when(chosen, |tile| tile.bg(palette.accent))
+      .when(!chosen, |tile| tile.hover(|tile| tile.bg(palette.selected)))
+      .text_color(tint)
+      .map(|tile| match name {
+        Some(name) => tile.child(Icon::empty().path(format!("icons/{name}.svg")).size_4()),
+        None => tile.child(Label::new("Aa").text_size(FONT_SIZE_SM).font_semibold()),
+      })
+      .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(name.unwrap_or("Project initial")).build(window, cx))
       .on_click(cx.listener(move |this, _, _, cx| {
         this.icon = name.map(str::to_owned);
         cx.notify();
       }))
   }
 
-  fn appearance(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  /// The avatar, the name as typed and the folder: how the project looks in the project menu.
+  fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let mut project = self.project.clone();
     let name = self.input.read(cx).value().trim().to_string();
@@ -171,112 +196,124 @@ impl ProjectSettings {
     project.icon.clone_from(&self.icon);
     project.color.clone_from(&self.color);
     let avatar = avatar_look(&project, true, cx);
-    let preview = h_flex()
+    h_flex()
       .gap_3()
-      .rounded_md()
-      .border_1()
-      .border_color(palette.border)
-      .bg(palette.surface_alt)
-      .p_3()
+      .items_center()
+      .px_6()
+      .pt_5()
+      .pb_4()
       .child(
         div()
           .flex()
           .items_center()
           .justify_center()
-          .size_10()
+          .size_12()
           .flex_none()
-          .rounded_md()
+          .rounded_lg()
+          .text_lg()
           .font_semibold()
           .text_color(avatar.text)
           .when_some(avatar.fill, |badge, fill| badge.bg(fill))
           .map(|badge| match avatar.icon {
-            Some(path) => badge.child(Icon::empty().path(path).size_5()),
+            Some(path) => badge.child(Icon::empty().path(path).size_6()),
             None => badge.child(avatar.letter),
           }),
       )
       .child(
         v_flex()
           .min_w_0()
-          .gap_1()
-          .child(Label::new("Project menu preview").text_xs().text_color(palette.text_secondary))
-          .child(div().truncate().text_sm().font_semibold().child(project.name())),
-      );
-    v_flex()
-      .gap_4()
-      .child(preview)
-      .child(v_flex().gap_2().child(Label::new("Display name").font_semibold()).child(Input::new(&self.input)).when(
-        self.folder_differs(cx),
-        |column| {
-          column
-            .child(Checkbox::new("rename-folder").label("Also rename the folder on disk").checked(self.rename_folder).on_click(cx.listener(
-              |this, checked: &bool, _, cx| {
-                this.rename_folder = *checked;
-                cx.notify();
-              },
-            )))
-            .child(
-              Label::new("Terminals of this project restart and its open files close. Unsaved files block the rename.")
-                .text_xs()
-                .text_color(palette.text_secondary),
-            )
-        },
-      ))
-      .child(
-        v_flex().gap_2().child(Label::new("Color").font_semibold()).child(
-          h_flex()
-            .gap_2()
-            .flex_wrap()
-            .child(
-              Button::new("color-none").small().label("Default").when(self.color.is_none(), |button| button.custom(selected_style(cx))).on_click(
-                cx.listener(|this, _, _, cx| {
-                  this.color = None;
-                  cx.notify();
-                }),
-              ),
-            )
-            .children((0..PROJECT_COLORS.len()).map(|index| self.swatch(index, cx))),
-        ),
+          .gap_0p5()
+          .child(div().truncate().text_lg().font_semibold().child(project.name()))
+          .child(div().truncate().text_size(FONT_SIZE_SM).text_color(palette.text_secondary).child(display_path(&self.project.path))),
       )
-      .child(v_flex().gap_2().child(Label::new("Icon").font_semibold()).child(
-        h_flex().gap_1().flex_wrap().child(self.icon_button(None, cx)).children(PROJECT_ICONS.iter().map(|name| self.icon_button(Some(name), cx))),
-      ))
+  }
+
+  fn appearance(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let palette = colors(cx);
+    let muted = cx.theme().muted_foreground;
+    let default_color = self.color.is_none();
+    let name_field = v_flex().gap_2().child(crate::components::soft_input(&self.input, cx)).when(self.folder_differs(cx), |column| {
+      column
+        .child(Checkbox::new("rename-folder").label("Also rename the folder on disk").checked(self.rename_folder).on_click(cx.listener(
+          |this, checked: &bool, _, cx| {
+            this.rename_folder = *checked;
+            cx.notify();
+          },
+        )))
+        .child(
+          Label::new("Terminals of this project restart and its open files close. Unsaved files block the rename.")
+            .text_size(FONT_SIZE_SM)
+            .text_color(palette.text_secondary),
+        )
+    });
+    let colors_row = h_flex()
+      .gap_1()
+      .items_center()
+      .flex_wrap()
+      .child(
+        div()
+          .id("color-none")
+          .h_8()
+          .px_3()
+          .mr_1()
+          .flex()
+          .items_center()
+          .rounded_full()
+          .cursor_pointer()
+          .text_size(FONT_SIZE_SM)
+          .when(default_color, |pill| pill.bg(palette.accent).text_color(palette.on_accent))
+          .when(!default_color, |pill| pill.bg(palette.surface_alt).text_color(palette.text_secondary).hover(|pill| pill.bg(palette.selected)))
+          .child("Default")
+          .on_click(cx.listener(|this, _, _, cx| {
+            this.color = None;
+            cx.notify();
+          })),
+      )
+      .children((0..PROJECT_COLORS.len()).map(|index| self.swatch(index, cx)));
+    let icons = h_flex()
+      .gap_0p5()
+      .flex_wrap()
+      .p_1()
+      .rounded_md()
+      .border_1()
+      .border_color(palette.border)
+      .child(self.icon_button(None, cx))
+      .children(PROJECT_ICONS.iter().map(|name| self.icon_button(Some(name), cx)));
+    v_flex().gap_4().child(field("Display name", muted, name_field)).child(field("Color", muted, colors_row)).child(field("Icon", muted, icons))
   }
 }
 
 impl Render for ProjectSettings {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
+    let muted = cx.theme().muted_foreground;
+    let tab = |label: &'static str, icon: &'static str| {
+      Tab::new().cursor_pointer().child(h_flex().gap_2().items_center().child(Icon::empty().path(icon).size_4()).child(label))
+    };
     let tabs = TabBar::new("project-settings-tabs")
+      .segmented()
       .selected_index(self.tab)
       .on_click(cx.listener(|this, index: &usize, _, cx| {
         this.tab = *index;
         cx.notify();
       }))
-      .child(Tab::new().cursor_pointer().label("Appearance"))
-      .child(Tab::new().cursor_pointer().label("Git"));
+      .child(tab("Appearance", "icons/palette.svg"))
+      .child(tab("Git", "icons/git-branch.svg"));
     let body = if self.tab == 0 {
       self.appearance(cx).into_any_element()
     } else {
       v_flex()
         .gap_2()
-        .child(Label::new("Git remote").font_semibold())
-        .child(Input::new(&self.remote_input))
-        .child(Label::new("Update the remote URL when the repository moves.").text_xs().text_color(palette.text_secondary))
+        .child(field("Git remote", muted, crate::components::soft_input(&self.remote_input, cx)))
+        .child(Label::new("Update the remote URL when the repository moves.").text_size(FONT_SIZE_SM).text_color(palette.text_secondary))
         .into_any_element()
     };
     v_flex()
       .overflow_hidden()
-      .child(
-        v_flex()
-          .gap_1()
-          .px_6()
-          .pt_5()
-          .pb_3()
-          .child(Label::new(self.title.clone()).text_lg().font_semibold())
-          .child(div().truncate().text_xs().text_color(palette.text_secondary).child(display_path(&self.project.path))),
-      )
-      .child(div().px_6().border_b_1().border_color(palette.border).child(tabs))
-      .child(div().id("project-settings-body").h(rems(23.)).overflow_y_scroll().px_6().py_4().child(body))
+      .text_size(FONT_SIZE)
+      .child(self.header(cx))
+      .child(div().px_6().pb_4().child(tabs))
+      .child(div().id("project-settings-body").h(rems(21.)).overflow_y_scroll().px_6().pb_5().child(body))
       .child(
         h_flex()
           .justify_between()
@@ -290,7 +327,7 @@ impl Render for ProjectSettings {
               .label("Remove project")
               .icon(Icon::empty().path("icons/trash.svg"))
               .danger()
-              .outline()
+              .ghost()
               .on_click(cx.listener(|this, _, _, cx| cx.emit(ProjectSettingsEvent::RemoveRequested(this.project.path.clone())))),
           )
           .child(

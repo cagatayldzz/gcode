@@ -21,7 +21,7 @@ use gpui_kit::{
 use vekro_hosting::{Account, KeychainStore, Repository, TokenStore as _};
 
 /// The tallest the list gets before it scrolls.
-const LIST_MAX_HEIGHT: Pixels = px(220.);
+const LIST_MAX_HEIGHT: Pixels = px(240.);
 
 /// Sent with the HTTPS address of the repository the user chose.
 pub(crate) struct RepositoryChosen(pub String);
@@ -37,6 +37,8 @@ enum Listing {
 pub(crate) struct RepositoryPicker {
   accounts: Vec<Account>,
   selected: usize,
+  /// The address last chosen, marked in the list.
+  current: Option<String>,
   listing: Listing,
   filter: Entity<InputState>,
   /// Which load the shown list belongs to, so that a slow answer for another account is ignored.
@@ -48,7 +50,7 @@ impl RepositoryPicker {
   pub fn new(accounts: Vec<Account>, window: &mut Window, cx: &mut Context<Self>) -> Self {
     let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter repositories"));
     let subscription = cx.subscribe(&filter, |_, _, _: &InputEvent, cx| cx.notify());
-    let mut this = Self { accounts, selected: 0, listing: Listing::Loading, filter, epoch: 0, _subscription: subscription };
+    let mut this = Self { accounts, selected: 0, current: None, listing: Listing::Loading, filter, epoch: 0, _subscription: subscription };
     this.load(cx);
     this
   }
@@ -90,7 +92,7 @@ impl Render for RepositoryPicker {
       Button::new(SharedString::from(format!("picker-account-{}", account.key())))
         .small()
         .when(chosen, |button| button.custom(selected_style(cx)))
-        .when(!chosen, |button| button.outline())
+        .when(!chosen, |button| button.ghost())
         .icon(Icon::empty().path(provider_icon(account.provider)))
         .label(account.label())
         .on_click(cx.listener(move |this, _, _, cx| {
@@ -116,15 +118,21 @@ impl Render for RepositoryPicker {
           .filter(|repository| query.is_empty() || repository.name.to_lowercase().contains(&query))
           .map(|repository| {
             let url = repository.clone_url.clone();
+            let chosen = self.current.as_deref() == Some(url.as_str());
+            let (owner, name) = match repository.name.rsplit_once('/') {
+              Some((owner, name)) => (Some(format!("{owner}/")), name.to_string()),
+              None => (None, repository.name.clone()),
+            };
             h_flex()
               .id(SharedString::from(format!("repository-{}", repository.clone_url)))
-              .gap_2()
-              .px_2()
-              .py_1()
+              .gap_2p5()
+              .px_2p5()
+              .py_1p5()
               .rounded_md()
               .items_center()
               .cursor_pointer()
-              .hover(|row| row.bg(palette.hover))
+              .when(chosen, |row| row.bg(palette.selected))
+              .when(!chosen, |row| row.hover(|row| row.bg(palette.hover)))
               .child(
                 Icon::empty()
                   .path(if repository.private { "icons/lock.svg" } else { "icons/globe.svg" })
@@ -133,9 +141,18 @@ impl Render for RepositoryPicker {
                   .text_color(theme.muted_foreground),
               )
               .child(
-                v_flex().flex_1().min_w_0().child(Label::new(repository.name.clone()).overflow_hidden().whitespace_nowrap().text_ellipsis()).when(
-                  !repository.description.is_empty(),
-                  |column| {
+                v_flex()
+                  .flex_1()
+                  .min_w_0()
+                  .child(
+                    h_flex()
+                      .min_w_0()
+                      .overflow_hidden()
+                      .whitespace_nowrap()
+                      .children(owner.map(|owner| Label::new(owner).text_color(theme.muted_foreground)))
+                      .child(Label::new(name).font_weight(FontWeight::SEMIBOLD)),
+                  )
+                  .when(!repository.description.is_empty(), |column| {
                     column.child(
                       Label::new(repository.description.clone())
                         .text_size(FONT_SIZE_SM)
@@ -144,10 +161,14 @@ impl Render for RepositoryPicker {
                         .whitespace_nowrap()
                         .text_ellipsis(),
                     )
-                  },
-                ),
+                  }),
               )
-              .on_click(cx.listener(move |_, _, _, cx| cx.emit(RepositoryChosen(url.clone()))))
+              .when(chosen, |row| row.child(Icon::empty().path("icons/check.svg").size_4().flex_none().text_color(palette.accent)))
+              .on_click(cx.listener(move |this, _, _, cx| {
+                this.current = Some(url.clone());
+                cx.emit(RepositoryChosen(url.clone()));
+                cx.notify();
+              }))
               .into_any_element()
           })
           .collect();
@@ -157,18 +178,14 @@ impl Render for RepositoryPicker {
             .p_2()
             .into_any_element()
         } else {
-          v_flex().id("repository-list").max_h(LIST_MAX_HEIGHT).overflow_y_scrollbar().gap_0p5().children(rows).into_any_element()
+          v_flex().id("repository-list").max_h(LIST_MAX_HEIGHT).overflow_y_scrollbar().gap_0p5().p_1().children(rows).into_any_element()
         }
       }
     };
     v_flex()
       .gap_2()
-      .p_2()
-      .rounded_md()
-      .border_1()
-      .border_color(theme.input)
       .when(self.accounts.len() > 1, |column| column.child(h_flex().gap_2().flex_wrap().children(accounts)))
-      .child(Input::new(&self.filter))
-      .child(body)
+      .child(Input::new(&self.filter).border_color(palette.border))
+      .child(v_flex().rounded_md().border_1().border_color(palette.border).min_h_16().child(body))
   }
 }

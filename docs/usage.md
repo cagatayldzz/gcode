@@ -159,8 +159,10 @@ in the main area, in place of the editor, with the path on top (staged and unsta
 added). Choosing another file replaces it, no tab is added; it updates as you save, and the editor tabs come back when you leave the
 Changes view. PNG, JPEG, WebP, BMP, and TIFF files show an image preview. Modified images show the original and current versions side by side.
 
-Use **Show all changes** in the Changes header to review the file diffs in one scrollable panel. Each file header can collapse its diff,
-copy its relative path, and mark it as **Viewed**. The header also shows added and removed line counts. Viewed marks are kept while the
+Use **Show all changes** in the Changes header to review the file diffs in one scrollable panel. A bar on top shows the totals and
+has **Jump to file** (a menu with each file's line counts; reviewed files are checked), **Next unviewed**, and buttons to collapse or
+expand every file. Clicking a file in the list on the left scrolls the panel to it. Each file header shows the file name with its
+folder, can collapse its diff, copy its relative path, and mark it as **Viewed**. The header also shows added and removed line counts. Viewed marks are kept while the
 current project is open and are independent of the checkboxes used to select files for a commit.
 
 A bar above the editor holds the **current branch** and a button that keeps the branch in step with its remote (**Publish branch**,

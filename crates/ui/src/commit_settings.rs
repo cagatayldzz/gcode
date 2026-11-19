@@ -9,7 +9,7 @@ use gpui_kit::{
   component::{
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Input, InputState, Textarea, TextareaState},
+    input::{InputState, TextareaState},
     label::Label,
     scroll::ScrollableElement as _,
     select::{Select, SelectState},
@@ -160,8 +160,8 @@ impl Render for CommitSettings {
     let generation = Self::section(
       "Generation",
       vec![
-        Self::row("API key", div().w_64().child(Input::new(&self.api_key).mask_toggle())),
-        Self::row("API URL", div().w_64().child(Input::new(&self.api_url))),
+        Self::row("API key", div().w_64().child(crate::components::soft_input(&self.api_key, cx).mask_toggle())),
+        Self::row("API URL", div().w_64().child(crate::components::soft_input(&self.api_url, cx))),
         Self::row("Model", div().w_64().child(Select::new(&self.model).menu_width(px(256.)))),
         Self::row("Largest diff", div().w_64().child(Select::new(&self.tokens).menu_width(px(256.)))),
         Self::row("Language", div().w_64().child(Select::new(&self.language).menu_width(px(256.)))),
@@ -185,7 +185,7 @@ impl Render for CommitSettings {
     let instructions = v_flex()
       .gap_1p5()
       .child(Label::new("Commit instructions").font_weight(FontWeight::SEMIBOLD))
-      .child(Textarea::new(&self.instructions).h_20())
+      .child(crate::components::soft_textarea(&self.instructions, cx).h_20())
       .child(
         Label::new("Sent to the model with every generated message, on top of the rules above. Leave empty for none.")
           .text_size(FONT_SIZE_SM)

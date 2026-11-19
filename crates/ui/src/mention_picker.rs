@@ -6,7 +6,7 @@ use gpui_kit::{
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{InputEvent, InputState},
     label::Label,
     scroll::ScrollableElement as _,
     v_flex, ActiveTheme as _, Sizable as _,
@@ -115,7 +115,7 @@ impl Render for MentionPicker {
     let count = self.ticked.len();
     v_flex()
       .gap_2()
-      .child(Input::new(&self.filter))
+      .child(crate::components::soft_input(&self.filter, cx))
       .child(if rows.is_empty() {
         Label::new("No project matches.").text_color(theme.muted_foreground).p_2().into_any_element()
       } else {

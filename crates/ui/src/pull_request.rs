@@ -6,7 +6,7 @@ use gpui_kit::{
   component::{
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Input, InputState, Textarea, TextareaState},
+    input::{InputState, TextareaState},
     label::Label,
     switch::Switch,
     v_flex, ActiveTheme as _, Disableable as _, WindowExt as _,
@@ -158,9 +158,9 @@ impl Render for PullRequestForm {
       .gap_4()
       .child(Label::new(format!("From {} into the branch below.", self.source)).text_color(muted))
       .when_some(warning, |form, warning| form.child(Label::new(warning).text_size(FONT_SIZE_SM).text_color(cx.theme().warning)))
-      .child(field("Title", Input::new(&self.title).into_any_element()))
-      .child(field("Description", Textarea::new(&self.description).h(px(110.)).into_any_element()))
-      .child(field("Target branch", Input::new(&self.target).into_any_element()))
+      .child(field("Title", crate::components::soft_input(&self.title, cx).into_any_element()))
+      .child(field("Description", crate::components::soft_textarea(&self.description, cx).h(px(110.)).into_any_element()))
+      .child(field("Target branch", crate::components::soft_input(&self.target, cx).into_any_element()))
       .child(h_flex().gap_2().items_center().child(Label::new("Open as a draft").flex_1()).child(
         Switch::new("pull-request-draft").checked(self.draft).on_change(cx.listener(|this, checked: &bool, _, cx| {
           this.draft = *checked;

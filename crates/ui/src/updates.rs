@@ -54,13 +54,15 @@ pub(crate) struct UpdateState {
   pub checked: Option<SystemTime>,
   /// The release a window already announced, so each is announced once.
   pub announced: Option<String>,
+  /// Set by the title bar's Update button: restart as soon as the download is ready.
+  pub restart_when_ready: bool,
   last_release: Option<Release>,
   staged: Option<Staged>,
 }
 
 impl UpdateState {
   pub fn new() -> Self {
-    Self { update: AppUpdate::Idle, checked: None, announced: None, last_release: None, staged: None }
+    Self { update: AppUpdate::Idle, checked: None, announced: None, restart_when_ready: false, last_release: None, staged: None }
   }
 }
 

@@ -10,7 +10,7 @@ use gpui_kit::{
   component::{
     button::{Button, ButtonVariants as _},
     h_flex,
-    input::{Input, InputEvent, InputState},
+    input::{InputEvent, InputState},
     label::Label,
     v_flex, ActiveTheme as _, Disableable as _, Icon, Sizable as _, WindowExt as _,
   },
@@ -153,11 +153,14 @@ impl Render for ConnectAccount {
       .gap_4()
       .child(h_flex().gap_2().children(Provider::ALL.map(|provider| self.provider_button(provider, cx))))
       .child(self.guide(cx))
-      .when(azure, |form| form.child(field("Organization", Input::new(&self.organization).into_any_element())))
+      .when(azure, |form| form.child(field("Organization", crate::components::soft_input(&self.organization, cx).into_any_element())))
       .when(!azure, |form| {
-        form.child(field("Host (leave empty for the service itself, or enter your own server)", Input::new(&self.host).into_any_element()))
+        form.child(field(
+          "Host (leave empty for the service itself, or enter your own server)",
+          crate::components::soft_input(&self.host, cx).into_any_element(),
+        ))
       })
-      .child(field("Personal access token", Input::new(&self.token).mask_toggle().into_any_element()))
+      .child(field("Personal access token", crate::components::soft_input(&self.token, cx).mask_toggle().into_any_element()))
       .child(
         Label::new("The token is checked with the service and kept in the macOS Keychain. Git uses it over HTTPS for this host.")
           .text_size(FONT_SIZE_SM)

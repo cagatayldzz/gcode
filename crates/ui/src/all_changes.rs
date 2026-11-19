@@ -1,6 +1,10 @@
 //! The working tree's changes in one virtualized Kit diff. Each file's header carries the review controls.
 
-use crate::{diff_view::ShownDiff, settings::code_font_size, theme::colors};
+use crate::{
+  diff_view::ShownDiff,
+  settings::code_font_size,
+  theme::{colors, FONT_SIZE_SM},
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -13,12 +17,11 @@ use gpui_kit::{
     menu::{DropdownMenu as _, PopupMenuItem},
     progress::ProgressCircle,
     spinner::Spinner,
-    text::TextView,
-    v_flex, ActiveTheme as _, Icon, IconName, Sizable as _,
+    v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
   },
   *,
 };
-use std::{collections::HashSet, path::PathBuf, rc::Rc, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 #[derive(Action, Clone, PartialEq)]
 #[action(namespace = vekro, no_json)]
@@ -80,6 +83,120 @@ impl AllChanges {
   }
 }
 
+impl AllChanges {
+  /// Scrolls to a file's header and opens it, whether it was folded or not.
+  pub fn scroll_to(&mut self, path: &str, cx: &mut Context<Self>) {
+    if let Some(diff) = &self.diff {
+      diff.state().update(cx, |state, cx| {
+        state.set_file_collapsed(path, false, cx);
+        state.scroll_to_file(path, cx);
+      });
+    }
+  }
+
+  /// Jumps to the first file not marked as viewed.
+  fn next_unviewed(&mut self, cx: &mut Context<Self>) {
+    let Some(diff) = &self.diff else { return };
+    let next = diff.state().read(cx).files().iter().map(|file| file.path().clone()).find(|path| !self.viewed.contains(path));
+    if let Some(path) = next {
+      self.scroll_to(&path, cx);
+    }
+  }
+
+  /// Folds every file to its header, or opens them all.
+  fn set_all_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+    if let Some(diff) = &self.diff {
+      diff.state().update(cx, |state, cx| state.set_all_files_collapsed(collapsed, cx));
+    }
+  }
+
+  /// The bar above the diff: what changed in total, the jump menu, the review shortcuts and the progress.
+  fn toolbar(&self, state: &Entity<DiffState>, cx: &mut Context<Self>) -> impl IntoElement {
+    let palette = colors(cx);
+    let muted = cx.theme().muted_foreground;
+    let files: Vec<(SharedString, usize, usize)> =
+      state.read(cx).files().iter().map(|file| (file.path().clone(), file.additions(), file.deletions())).collect();
+    let (count, viewed) = (files.len(), self.viewed.len());
+    let (added, removed) = files.iter().fold((0, 0), |(added, removed), (_, a, d)| (added + a, removed + d));
+    let all_viewed = viewed >= count;
+    let reviewed = self.viewed.clone();
+    let menu_state = state.clone();
+    let jump = Button::new("all-changes-files")
+      .ghost()
+      .small()
+      .icon(Icon::empty().path("icons/files.svg"))
+      .label("Jump to file")
+      .child(Icon::new(IconName::ChevronDown).size_3())
+      .dropdown_menu(move |menu, _, _| {
+        files.iter().fold(menu.scrollable(true).max_h(px(360.)), |menu, (path, added, removed)| {
+          let (target, state) = (path.clone(), menu_state.clone());
+          menu.item(PopupMenuItem::new(format!("{path}   +{added} −{removed}")).checked(reviewed.contains(path)).on_click(move |_, _, cx| {
+            state.update(cx, |state, cx| {
+              state.set_file_collapsed(&target, false, cx);
+              state.scroll_to_file(&target, cx);
+            })
+          }))
+        })
+      });
+    h_flex()
+      .flex_none()
+      .gap_3()
+      .px_4()
+      .py_1p5()
+      .items_center()
+      .border_b_1()
+      .border_color(palette.border)
+      .bg(palette.surface_alt)
+      .child(jump)
+      .child(
+        h_flex()
+          .gap_2()
+          .items_center()
+          .text_size(FONT_SIZE_SM)
+          .child(Label::new(if count == 1 { "1 file".to_string() } else { format!("{count} files") }).text_color(muted))
+          .child(div().text_color(palette.new).child(format!("+{added}")))
+          .child(div().text_color(palette.deleted).child(format!("−{removed}"))),
+      )
+      .child(div().flex_1())
+      .child(
+        Button::new("all-changes-next")
+          .ghost()
+          .small()
+          .icon(Icon::empty().path("icons/arrow-down-to-line.svg"))
+          .label("Next unviewed")
+          .disabled(all_viewed)
+          .on_click(cx.listener(|this, _, _, cx| this.next_unviewed(cx))),
+      )
+      .child(
+        Button::new("all-changes-collapse")
+          .ghost()
+          .small()
+          .icon(Icon::empty().path("icons/chevrons-down-up.svg"))
+          .tooltip("Collapse all files")
+          .accessibility_label("Collapse all files")
+          .on_click(cx.listener(|this, _, _, cx| this.set_all_collapsed(true, cx))),
+      )
+      .child(
+        Button::new("all-changes-expand")
+          .ghost()
+          .small()
+          .icon(Icon::empty().path("icons/chevrons-up-down.svg"))
+          .tooltip("Expand all files")
+          .accessibility_label("Expand all files")
+          .on_click(cx.listener(|this, _, _, cx| this.set_all_collapsed(false, cx))),
+      )
+      .child(
+        h_flex()
+          .gap_1p5()
+          .items_center()
+          .text_size(FONT_SIZE_SM)
+          .text_color(if all_viewed { palette.new } else { muted })
+          .child(ProgressCircle::new("viewed-progress").xsmall().value(100. * viewed as f32 / count.max(1) as f32))
+          .child(format!("{viewed} / {count} viewed")),
+      )
+  }
+}
+
 impl Render for AllChanges {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let muted = cx.theme().muted_foreground;
@@ -93,8 +210,6 @@ impl Render for AllChanges {
       return h_flex().gap_2().p_4().child(Spinner::new().small()).child(Label::new("Loading changes…").text_color(muted)).into_any_element();
     };
     let state = diff.state().clone();
-    let paths: Rc<[SharedString]> = state.read(cx).files().iter().map(|file| file.path().clone()).collect();
-    let (count, viewed) = (paths.len(), self.viewed.len());
     let view = cx.entity().downgrade();
     let diff = diff
       .view(cx)
@@ -106,43 +221,11 @@ impl Render for AllChanges {
     v_flex()
       .size_full()
       .min_h_0()
-      .pt_4()
-      .gap_2()
-      .child(toolbar(paths, state, count, viewed, cx).px_4())
+      .child(self.toolbar(&state, cx))
       // The diff owns its scrolling, so its scrollbar sits at the right edge of the area.
       .child(div().flex_1().min_h_0().overflow_hidden().cursor_text().child(diff))
       .into_any_element()
   }
-}
-
-/// The bar above the diff: a menu that jumps to a file, and the review progress.
-fn toolbar(paths: Rc<[SharedString]>, state: Entity<DiffState>, count: usize, viewed: usize, cx: &App) -> Div {
-  h_flex()
-    .justify_between()
-    .gap_2()
-    .child(
-      Button::new("all-changes-files")
-        .ghost()
-        .small()
-        .icon(Icon::empty().path("icons/files.svg"))
-        .label("All changes")
-        .child(Icon::new(IconName::ChevronDown).size_3())
-        .dropdown_menu(move |menu, _, _| {
-          paths.iter().fold(menu.scrollable(true), |menu, path| {
-            let path = path.clone();
-            let state = state.clone();
-            menu.item(PopupMenuItem::new(path.clone()).on_click(move |_, _, cx| state.update(cx, |state, cx| state.scroll_to_file(&path, cx))))
-          })
-        }),
-    )
-    .child(
-      h_flex()
-        .gap_1()
-        .text_xs()
-        .text_color(cx.theme().muted_foreground)
-        .child(ProgressCircle::new("viewed-progress").xsmall().value(100. * viewed as f32 / count.max(1) as f32))
-        .child(format!("{viewed} / {count} viewed")),
-    )
 }
 
 /// The content of a file's header: its path with the open and copy buttons, the size of the change, and the review checkbox.
@@ -173,15 +256,7 @@ fn file_header(file: &DiffFile, view: &WeakEntity<AllChanges>, cx: &App) -> impl
         .flex_1()
         .min_w_0()
         .gap_2()
-        // A text view, so the path can be selected with the mouse.
-        .child(
-          div()
-            .min_w_0()
-            .overflow_hidden()
-            .text_sm()
-            .cursor_text()
-            .child(TextView::markdown(SharedString::from(format!("diff-title-{path}")), escape_markdown(&title)).selectable(true)),
-        )
+        .child(file_title(&path, &title, cx))
         .when_some(modified, |row, modified| {
           row.child(
             div().cursor_pointer().child(
@@ -239,14 +314,22 @@ fn file_header(file: &DiffFile, view: &WeakEntity<AllChanges>, cx: &App) -> impl
     )))
 }
 
-/// `text` with the characters that Markdown reads as formatting escaped, so a path is shown as written.
-fn escape_markdown(text: &str) -> String {
-  let mut escaped = String::with_capacity(text.len());
-  for character in text.chars() {
-    if "\\`*_{}[]<>()#+-.!|~&".contains(character) {
-      escaped.push('\\');
-    }
-    escaped.push(character);
-  }
-  escaped
+/// The file's name in bold with its folder after it, soft: the name is what the eye looks for. A rename shows both paths.
+fn file_title(path: &str, title: &str, cx: &App) -> impl IntoElement {
+  let palette = colors(cx);
+  let renamed = title != path;
+  let (folder, name) = match path.rsplit_once('/') {
+    Some((folder, name)) if !renamed => (Some(format!("{folder}/")), name),
+    _ => (None, title),
+  };
+  h_flex()
+    .min_w_0()
+    .overflow_hidden()
+    .whitespace_nowrap()
+    .gap_0()
+    .text_sm()
+    .child(div().flex_none().font_semibold().child(name.to_string()))
+    .children(folder.map(|folder| {
+      div().ml_2().min_w_0().overflow_hidden().text_ellipsis().text_size(FONT_SIZE_SM).text_color(palette.text_secondary).child(folder)
+    }))
 }
