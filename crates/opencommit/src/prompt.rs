@@ -55,7 +55,11 @@ pub fn estimate_tokens(text: &str) -> usize {
 /// Cuts a unified diff into parts of at most `max_tokens` (estimated), per file: files are kept whole and grouped while they
 /// fit; a file that alone is too large is cut at a line and marked as truncated.
 pub fn split_diff(diff: &str, max_tokens: usize) -> Vec<String> {
-  let max_tokens = max_tokens.max(1);
+  split_diff_with_budget(diff, max_tokens, estimate_tokens)
+}
+
+pub(crate) fn split_diff_with_budget(diff: &str, budget: usize, size: fn(&str) -> usize) -> Vec<String> {
+  let budget = budget.max(1);
   let mut files: Vec<String> = Vec::new();
   for line in diff.split_inclusive('\n') {
     if line.starts_with("diff --git ") || files.is_empty() {
@@ -68,8 +72,8 @@ pub fn split_diff(diff: &str, max_tokens: usize) -> Vec<String> {
   let mut parts: Vec<String> = Vec::new();
   let mut current = String::new();
   for file in files.into_iter().filter(|file| !file.trim().is_empty()) {
-    let file = if estimate_tokens(&file) > max_tokens { truncate(&file, max_tokens) } else { file };
-    if !current.is_empty() && estimate_tokens(&current) + estimate_tokens(&file) > max_tokens {
+    let file = if size(&file) > budget { truncate(&file, budget, size) } else { file };
+    if !current.is_empty() && size(&current) + size(&file) > budget {
       parts.push(std::mem::take(&mut current));
     }
     current.push_str(&file);
@@ -80,10 +84,10 @@ pub fn split_diff(diff: &str, max_tokens: usize) -> Vec<String> {
   parts
 }
 
-fn truncate(file: &str, max_tokens: usize) -> String {
+fn truncate(file: &str, budget: usize, size: fn(&str) -> usize) -> String {
   let mut kept = String::new();
   for line in file.split_inclusive('\n') {
-    if estimate_tokens(&kept) + estimate_tokens(line) + 8 > max_tokens {
+    if size(&kept) + size(line) + 8.max(size("\n[diff truncated]\n")) > budget {
       break;
     }
     kept.push_str(line);

@@ -1,5 +1,5 @@
 use std::{fs, path::PathBuf};
-use vekro_opencommit::{Config, DEFAULT_INSTRUCTIONS, DEFAULT_MAX_INPUT_TOKENS, DEFAULT_MODEL};
+use vekro_opencommit::{Config, Provider, DEFAULT_INSTRUCTIONS, DEFAULT_MAX_INPUT_TOKENS, DEFAULT_MODEL};
 
 fn temp_file(name: &str) -> PathBuf {
   let dir = std::env::temp_dir().join(format!("vekro-opencommit-{name}-{}", std::process::id()));
@@ -11,6 +11,7 @@ fn temp_file(name: &str) -> PathBuf {
 #[test]
 fn a_missing_file_gives_the_defaults() {
   let config = Config::load(&temp_file("missing"));
+  assert_eq!(config.provider, Provider::OpenAiCompatible);
   assert_eq!(config.model, DEFAULT_MODEL);
   assert_eq!(config.max_input_tokens, DEFAULT_MAX_INPUT_TOKENS);
   assert_eq!(config.language, "en");
@@ -80,4 +81,22 @@ fn the_file_is_private_to_the_user() {
   let path = temp_file("mode");
   Config::default().save(&path).unwrap();
   assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+}
+
+#[test]
+fn selecting_apple_intelligence_preserves_the_cli_provider_and_api_key() {
+  let path = temp_file("provider");
+  fs::write(&path, "OCO_AI_PROVIDER=openai\nOCO_API_KEY=sk-keep\n").unwrap();
+  let mut config = Config::load(&path);
+  config.provider = Provider::AppleIntelligence;
+  config.save(&path).unwrap();
+  assert_eq!(Config::load(&path), config);
+  assert!(fs::read_to_string(&path).unwrap().contains("OCO_AI_PROVIDER=openai\n"));
+  assert!(!Config { api_key: String::new(), ..config.clone() }.needs_api_key());
+
+  config.provider = Provider::OpenAiCompatible;
+  config.save(&path).unwrap();
+  assert_eq!(Config::load(&path), config);
+  assert!(!fs::read_to_string(&path).unwrap().contains("VEKRO_COMMIT_PROVIDER"));
+  assert!(Config::default().needs_api_key());
 }

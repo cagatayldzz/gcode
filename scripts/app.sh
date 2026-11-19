@@ -99,6 +99,10 @@ bundle() {
   rm -rf "$app_dir"
   mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
   cp "$project_dir/target/$configuration/Vekro" "$app_dir/Contents/MacOS/Vekro"
+  if [[ "$(uname -m)" == arm64 ]]; then
+    xcrun --sdk macosx swiftc -parse-as-library -O -target arm64-apple-macosx15.0 \
+      "$project_dir/crates/opencommit/AppleIntelligence.swift" -o "$app_dir/Contents/MacOS/vekro-apple-intelligence"
+  fi
   cp "$resources/Info.plist" "$app_dir/Contents/Info.plist"
   if [[ "$configuration" == debug ]]; then
     cp "$resources/DevIcon.icns" "$app_dir/Contents/Resources/DevIcon.icns"
@@ -111,7 +115,10 @@ bundle() {
 
 # Local development signature. Distribution requires Developer ID + notarization.
 sign() {
-  local output
+  local output helper="$app_dir/Contents/MacOS/vekro-apple-intelligence"
+  if [[ -x "$helper" ]]; then
+    output="$(codesign --force --sign - "$helper" 2>&1)" || fail "$output"
+  fi
   output="$(codesign --force --sign - "$app_dir" 2>&1)" || fail "$output"
 }
 

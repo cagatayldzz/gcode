@@ -1,4 +1,4 @@
-use crate::{estimate_tokens, parse_message, split_diff, system_prompt, Config, Message};
+use crate::{estimate_tokens, parse_message, split_diff, system_prompt, Config, Message, Provider};
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -50,25 +50,41 @@ pub fn generate(config: &Config, instructions: &str, diff: &str) -> Result<Messa
   if diff.trim().is_empty() {
     return Err("There are no changes to describe.".into());
   }
-  if config.api_key.is_empty() && config.api_url.is_empty() {
+  if config.needs_api_key() {
     return Err("Add your API key in the OpenCommit settings first.".into());
   }
   let system = system_prompt(config, instructions);
-  let budget = (config.max_input_tokens as usize).saturating_sub(estimate_tokens(&system) + RESERVED_TOKENS).max(RESERVED_TOKENS);
-  let parts = split_diff(diff, budget);
-  let answer = if let [only] = parts.as_slice() {
-    complete(config, &system, only)?
-  } else {
-    let mut summaries = Vec::new();
-    for part in &parts {
-      summaries.push(complete(config, &system, part)?);
+  let answer = match config.provider {
+    Provider::OpenAiCompatible => generate_openai(config, &system, diff)?,
+    Provider::AppleIntelligence => {
+      #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+      {
+        crate::apple::generate(&system, diff)?
+      }
+      #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+      {
+        return Err("Apple Intelligence requires an Apple silicon Mac with macOS 26 or later.".into());
+      }
     }
-    let merge = format!("These commit messages describe parts of one change. Merge them into a single commit message:\n\n{}", summaries.join("\n\n"));
-    complete(config, &system, &merge)?
   };
   let message = parse_message(&answer, config.one_line);
   if message.summary.is_empty() {
     return Err("The service sent no commit message.".into());
   }
   Ok(message)
+}
+
+fn generate_openai(config: &Config, system: &str, diff: &str) -> Result<String, String> {
+  let budget = (config.max_input_tokens as usize).saturating_sub(estimate_tokens(system) + RESERVED_TOKENS).max(RESERVED_TOKENS);
+  let parts = split_diff(diff, budget);
+  if let [only] = parts.as_slice() {
+    complete(config, system, only)
+  } else {
+    let mut summaries = Vec::new();
+    for part in &parts {
+      summaries.push(complete(config, system, part)?);
+    }
+    let merge = format!("These commit messages describe parts of one change. Merge them into a single commit message:\n\n{}", summaries.join("\n\n"));
+    complete(config, system, &merge)
+  }
 }

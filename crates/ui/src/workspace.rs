@@ -2198,7 +2198,7 @@ impl Workspace {
       let model = self.settings.read(cx);
       (model.opencommit.clone(), model.preferences.commit_instructions.clone().unwrap_or_else(|| DEFAULT_INSTRUCTIONS.to_string()))
     };
-    if config.api_key.is_empty() && config.api_url.is_empty() {
+    if config.needs_api_key() {
       window.push_notification(Notification::error("Add your API key to generate commit messages."), cx);
       self.open_commit_settings(window, cx);
       return;

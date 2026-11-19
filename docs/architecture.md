@@ -30,7 +30,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/mention_picker.rs` | the project list that `⇧⌘M` (`MentionProjects`) opens in the AI view and the terminals: tick projects, and their paths are written into the prompt |
 | `crates/ui/src/agents.rs` | the AI agents (`AgentKind`: Codex, Claude; the shell line that runs each) and a project's agent sessions as plain data (`AgentTabs`), tested without a window |
 | `crates/ui/src/terminal_layout.rs` | the tabs and split panes of a project's terminals as plain data (`Arrangement`, `Node`, `Direction`), tested without a window |
-| `crates/ui/src/commit_settings.rs` | the OpenCommit settings dialog (model, diff size, language, message style, instructions, push after commit) |
+| `crates/ui/src/commit_settings.rs` | the OpenCommit settings dialog (provider, model, diff size, language, message style, instructions, push after commit) |
 | `crates/ui/src/all_changes.rs` | `AllChanges`: a single virtualized Kit diff of the working tree; the review controls sit in each file header |
 | `crates/ui/src/change_view.rs` | `ChangeView`: the diff of the chosen file of the Changes view in the main area, in place of the editor (re-read every refresh, redrawn only when it differs) |
 | `crates/git/src/compare.rs` | comparing the current branch with another (`compare_choices`, `compare`); the History view's "Select Branch to Compare…" uses it |
@@ -51,7 +51,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/ui/src/updates.rs` | the update state of the shared settings model (`UpdateState`, `AppUpdate`) with its actions, and `UpdatePanel`, the Updates page of Settings |
 | `crates/hosting/src/` | `accounts.rs` (`Account`, `Accounts`, `TokenStore`: the macOS Keychain through `security`, or memory), `api.rs` (verify, repositories, pull requests per service), `remote.rs` (`RepoRef`: which repository a remote URL names) |
 | `crates/ui/src/{connections,connect_account,repository_picker,pull_request}.rs` | the accounts list in Settings and the helpers that find the login for a remote; the Connect dialog; the repository list of the Clone tab; the Create pull request dialog |
-| `crates/opencommit/src/` | `config.rs` (`Config`, the `~/.opencommit` file), `prompt.rs` (rules, diff splitting, parsing the answer), `client.rs` (`generate`, the chat API request) |
+| `crates/opencommit/src/` | `config.rs` (`Config`, the `~/.opencommit` file), `prompt.rs` (rules, diff splitting, parsing the answer), `client.rs` (`generate`, the chat API request), `apple.rs` (on-device helper client) |
 | `crates/storage/src/` | `paths.rs` (data directory), `projects.rs` (`ProjectList`), `preferences.rs` (`Preferences`) |
 
 ## Window layout
@@ -131,6 +131,10 @@ Conventional Commits message, which fills the summary and description fields. A 
 file, each part is summarized, and the summaries are merged in a last request. Nothing is committed by generating. The settings
 live in the user's `~/.opencommit` (shared with the `oco` command; unknown lines are kept, the file is mode 0600; the
 `VEKRO_OPENCOMMIT_CONFIG` variable names another file for scratch runs); the commit instructions are in `preferences.json`.
+Vekro's `VEKRO_COMMIT_PROVIDER` key selects the optional Apple Intelligence provider and leaves the `oco` provider settings available
+to the CLI. The arm64 app ships a signed Swift helper in `Contents/MacOS`. It calls the on-device Foundation Models framework
+on macOS 26 or later and exchanges JSON over stdin and text over stdout. Apple Intelligence uses a smaller diff budget and
+merges draft messages in batches. The app reports availability errors and keeps requests with the selected provider.
 With "Push after commit" the commit button pushes with the `git` program after committing.
 
 ## Updates

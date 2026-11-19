@@ -31,9 +31,17 @@ pub const LANGUAGES: [(&str, &str); 10] = [
   ("zh_CN", "简体中文"),
 ];
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Provider {
+  #[default]
+  OpenAiCompatible,
+  AppleIntelligence,
+}
+
 /// The OpenCommit settings. Keys this program does not know stay in the file untouched when it is saved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
+  pub provider: Provider,
   /// The API key; empty when none is set.
   pub api_key: String,
   /// The base URL of an OpenAI-compatible API; empty for OpenAI.
@@ -59,6 +67,7 @@ pub struct Config {
 impl Default for Config {
   fn default() -> Self {
     Self {
+      provider: Provider::default(),
       api_key: String::new(),
       api_url: String::new(),
       model: DEFAULT_MODEL.into(),
@@ -109,6 +118,10 @@ fn flag(value: &str) -> Option<bool> {
 }
 
 impl Config {
+  pub fn needs_api_key(&self) -> bool {
+    self.provider == Provider::OpenAiCompatible && self.api_key.is_empty() && self.api_url.is_empty()
+  }
+
   /// Reads the file; a missing or unreadable one gives the defaults, and a key that is not there keeps its default.
   pub fn load(path: &Path) -> Self {
     let mut config = Self::default();
@@ -116,6 +129,9 @@ impl Config {
     for (key, value) in entries(&text) {
       let empty = matches!(value, "" | "undefined" | "null");
       match key {
+        "VEKRO_COMMIT_PROVIDER" => {
+          config.provider = if value == "apple-intelligence" { Provider::AppleIntelligence } else { Provider::default() };
+        }
         "OCO_API_KEY" => config.api_key = if empty { String::new() } else { value.into() },
         "OCO_API_URL" => config.api_url = if empty { String::new() } else { value.into() },
         "OCO_MODEL" if !empty => config.model = value.into(),
@@ -135,6 +151,13 @@ impl Config {
 
   fn values(&self) -> Vec<(&'static str, String)> {
     vec![
+      (
+        "VEKRO_COMMIT_PROVIDER",
+        match self.provider {
+          Provider::OpenAiCompatible => String::new(),
+          Provider::AppleIntelligence => "apple-intelligence".into(),
+        },
+      ),
       ("OCO_API_KEY", self.api_key.clone()),
       ("OCO_API_URL", self.api_url.clone()),
       ("OCO_MODEL", self.model.clone()),

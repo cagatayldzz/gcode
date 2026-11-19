@@ -47,6 +47,10 @@ identity="$(security find-identity -v -p codesigning "$keychain_path" | \
 [[ "$identity" =~ ^[[:xdigit:]]{40}$ ]] || { echo "Expected one valid Developer ID Application identity for APPLE_TEAM_ID." >&2; exit 1; }
 
 # Seal the app with hardened runtime and a secure timestamp.
+helper="$app_dir/Contents/MacOS/vekro-apple-intelligence"
+if [[ -x "$helper" ]]; then
+  codesign --force --sign "$identity" --keychain "$keychain_path" --options runtime --timestamp "$helper"
+fi
 codesign --force --sign "$identity" --keychain "$keychain_path" --options runtime --timestamp "$app_dir"
 codesign --verify --deep --strict --verbose=2 "$app_dir"
 

@@ -18,7 +18,7 @@ use gpui_kit::{
   },
   *,
 };
-use vekro_opencommit::{config_path, Config, DEFAULT_INSTRUCTIONS, DEFAULT_MAX_INPUT_TOKENS, LANGUAGES, MODELS, TOKEN_LIMITS};
+use vekro_opencommit::{config_path, Config, Provider, DEFAULT_INSTRUCTIONS, DEFAULT_MAX_INPUT_TOKENS, LANGUAGES, MODELS, TOKEN_LIMITS};
 
 /// The tallest the form gets before it scrolls, so the buttons stay in view.
 const BODY_MAX_HEIGHT: Pixels = px(520.);
@@ -33,6 +33,8 @@ type Choice = Entity<SelectState<Vec<SharedString>>>;
 
 pub(crate) struct CommitSettings {
   config: Config,
+  provider: Choice,
+  _provider_observer: Subscription,
   api_key: Entity<InputState>,
   api_url: Entity<InputState>,
   models: Vec<String>,
@@ -78,6 +80,13 @@ impl CommitSettings {
     let model_index = models.iter().position(|model| *model == config.model).unwrap_or(0);
     let token_index = limits.iter().position(|limit| *limit == config.max_input_tokens).unwrap_or(0);
     let language_index = languages.iter().position(|(code, _)| *code == config.language).unwrap_or(0);
+    let provider = choice(
+      vec!["OpenAI-compatible".into(), "Apple Intelligence (On-device)".into()],
+      usize::from(config.provider == Provider::AppleIntelligence),
+      window,
+      cx,
+    );
+    let provider_observer = cx.observe(&provider, |_, _, cx| cx.notify());
     let model = choice(models.clone(), model_index, window, cx);
     let tokens = choice(limits.iter().map(|limit| token_label(*limit)).collect(), token_index, window, cx);
     let language = choice(languages.into_iter().map(|(_, label)| label).collect(), language_index, window, cx);
@@ -91,11 +100,19 @@ impl CommitSettings {
     };
     let text = instructions.unwrap_or_else(|| DEFAULT_INSTRUCTIONS.to_string());
     let instructions = cx.new(|cx| TextareaState::new(window, cx).placeholder("Optional instructions for the model").default_value(text));
-    Self { config, api_key, api_url, models, model, tokens, language, instructions }
+    Self { config, provider, _provider_observer: provider_observer, api_key, api_url, models, model, tokens, language, instructions }
+  }
+
+  fn selected_provider(&self, cx: &App) -> Provider {
+    match self.provider.read(cx).selected_index(cx).map(|index| index.row) {
+      Some(1) => Provider::AppleIntelligence,
+      _ => Provider::OpenAiCompatible,
+    }
   }
 
   fn save(&mut self, cx: &mut Context<Self>) {
     let mut config = self.config.clone();
+    config.provider = self.selected_provider(cx);
     if let Some(model) = self.model.read(cx).selected_index(cx).and_then(|index| self.models.get(index.row)) {
       config.model = model.clone();
     }
@@ -157,19 +174,26 @@ impl CommitSettings {
 impl Render for CommitSettings {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let muted = cx.theme().muted_foreground;
-    let generation = Self::section(
-      "Generation",
-      vec![
+    let apple = self.selected_provider(cx) == Provider::AppleIntelligence;
+    let mut generation_rows = vec![Self::row("Provider", div().w_64().child(Select::new(&self.provider).menu_width(px(256.))))];
+    if !apple {
+      generation_rows.extend([
         Self::row("API key", div().w_64().child(crate::components::soft_input(&self.api_key, cx).mask_toggle())),
         Self::row("API URL", div().w_64().child(crate::components::soft_input(&self.api_url, cx))),
         Self::row("Model", div().w_64().child(Select::new(&self.model).menu_width(px(256.)))),
         Self::row("Largest diff", div().w_64().child(Select::new(&self.tokens).menu_width(px(256.)))),
-        Self::row("Language", div().w_64().child(Select::new(&self.language).menu_width(px(256.)))),
-        Self::row("Commit format", Label::new("Conventional Commits").text_color(muted)),
-      ],
-      Some("A larger diff is split per file and the parts are summarized, then merged into one message. A higher limit sends more per request at a higher token cost. Leave the API URL empty for OpenAI; any OpenAI-compatible service works.".into()),
-      cx,
-    );
+      ]);
+    }
+    generation_rows.extend([
+      Self::row("Language", div().w_64().child(Select::new(&self.language).menu_width(px(256.)))),
+      Self::row("Commit format", Label::new("Conventional Commits").text_color(muted)),
+    ]);
+    let help = if apple {
+      "Generates commit messages on this Mac without an API key. Requires Apple silicon, macOS 26 or later, and Apple Intelligence enabled. Large diffs are summarized in parts."
+    } else {
+      "A larger diff is split per file and the parts are summarized, then merged into one message. A higher limit sends more per request at a higher token cost. Leave the API URL empty for OpenAI; any OpenAI-compatible service works."
+    };
+    let generation = Self::section("Generation", generation_rows, Some(help.into()), cx);
     let message = Self::section(
       "Message",
       vec![
