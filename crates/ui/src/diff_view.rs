@@ -49,49 +49,65 @@ impl ShownDiff {
   }
 }
 
-/// The lines a unified patch removes (old numbers) and adds (new numbers), grouped into runs, by file in patch order.
-fn changed_ranges(patch: &str, files: &[DiffFile]) -> Vec<ChangedRange> {
-  let mut ranges: Vec<ChangedRange> = Vec::new();
-  let mut file: Option<usize> = None;
-  let mut in_hunk = false;
-  let (mut old, mut new) = (0usize, 0usize);
-  let mut note = |file: Option<usize>, side: DiffSide, line: usize| {
-    let Some(path) = file.and_then(|index| files.get(index)).map(|file| file.path().clone()) else { return };
-    match ranges.last_mut() {
-      Some(last) if last.path == path && last.side == side && last.end + 1 == line => last.end = line,
-      _ => ranges.push(ChangedRange { path, side, start: line, end: line }),
-    }
-  };
+/// Visits source lines in patch order. Context is represented by its modified-side line number.
+pub(crate) fn visit_patch_lines(patch: &str, files: &[DiffFile], mut visit: impl FnMut(&DiffFile, DiffSide, usize, bool, usize)) {
+  let mut files = files.iter();
+  let mut file = files.next();
+  let mut saw_file_header = false;
+  let mut hunk = None;
   for text in patch.lines() {
     if text.starts_with("diff --git ") {
-      file = Some(file.map_or(0, |index| index + 1));
-      in_hunk = false;
-    } else if text.starts_with("@@") {
-      // "@@ -old,count +new,count @@"
-      let mut numbers =
-        text.split_whitespace().skip(1).map(|part| part.trim_start_matches(['-', '+']).split(',').next().and_then(|n| n.parse::<usize>().ok()));
-      (old, new) = (numbers.next().flatten().unwrap_or(0), numbers.next().flatten().unwrap_or(0));
-      in_hunk = true;
-      if file.is_none() {
-        file = Some(0);
+      if saw_file_header {
+        file = files.next();
       }
-    } else if in_hunk {
-      match text.as_bytes().first() {
+      saw_file_header = true;
+      hunk = None;
+    } else if text.starts_with("@@ ") {
+      hunk = hunk_start(text).map(|(old, new)| (old, new, 0));
+    } else if let (Some(file), Some((old, new, row))) = (file, &mut hunk) {
+      let (side, line, changed) = match text.as_bytes().first() {
         Some(b'-') => {
-          note(file, DiffSide::Original, old);
-          old += 1;
+          let line = *old;
+          *old += 1;
+          (DiffSide::Original, line, true)
         }
         Some(b'+') => {
-          note(file, DiffSide::Modified, new);
-          new += 1;
+          let line = *new;
+          *new += 1;
+          (DiffSide::Modified, line, true)
         }
-        Some(b'\\') => {}
-        _ => {
-          old += 1;
-          new += 1;
+        Some(b' ') => {
+          let line = *new;
+          *old += 1;
+          *new += 1;
+          (DiffSide::Modified, line, false)
         }
-      }
+        _ => continue,
+      };
+      visit(file, side, line, changed, *row);
+      *row += 1;
     }
   }
+}
+
+fn hunk_start(header: &str) -> Option<(usize, usize)> {
+  let mut ranges = header.split_whitespace().skip(1);
+  let start = |range: &str, prefix| range.strip_prefix(prefix)?.split(',').next()?.parse::<usize>().ok();
+  Some((start(ranges.next()?, '-')?, start(ranges.next()?, '+')?))
+}
+
+/// The added and removed lines, grouped into runs by file and side.
+fn changed_ranges(patch: &str, files: &[DiffFile]) -> Vec<ChangedRange> {
+  let mut ranges: Vec<ChangedRange> = Vec::new();
+  visit_patch_lines(patch, files, |file, side, line, changed, _| {
+    if !changed {
+      return;
+    }
+    let path = file.path();
+    match ranges.last_mut() {
+      Some(last) if &last.path == path && last.side == side && last.end + 1 == line => last.end = line,
+      _ => ranges.push(ChangedRange { path: path.clone(), side, start: line, end: line }),
+    }
+  });
   ranges
 }

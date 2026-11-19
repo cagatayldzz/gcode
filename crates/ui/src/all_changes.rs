@@ -1,7 +1,7 @@
 //! The working tree's changes in one virtualized Kit diff. Each file's header carries the review controls.
 
 use crate::{
-  diff_view::ShownDiff,
+  diff_view::{visit_patch_lines, ShownDiff},
   settings::code_font_size,
   theme::{colors, FONT_SIZE_SM},
 };
@@ -11,7 +11,7 @@ use gpui_kit::{
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     clipboard::Clipboard,
-    diff::{DiffFile, DiffState},
+    diff::{DiffFile, DiffGutterMarker, DiffLinePosition, DiffState},
     h_flex,
     label::Label,
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -21,7 +21,17 @@ use gpui_kit::{
   },
   *,
 };
-use std::{collections::HashSet, path::PathBuf, sync::Arc};
+use std::{cell::RefCell, collections::HashSet, path::PathBuf, rc::Rc, sync::Arc};
+
+// The Kit adds a one-pixel separator above every header after the first one.
+const FILE_HEADER_SEPARATOR: Pixels = px(1.);
+
+#[derive(Default)]
+struct FileHeaderLayout {
+  above: Option<SharedString>,
+  below: Option<(SharedString, Pixels)>,
+  first_line: Option<(SharedString, Pixels)>,
+}
 
 #[derive(Action, Clone, PartialEq)]
 #[action(namespace = vekro, no_json)]
@@ -34,6 +44,8 @@ pub(crate) struct AllChanges {
   viewed: HashSet<SharedString>,
   error: Option<SharedString>,
   task: Option<Task<()>>,
+  current_file: Rc<RefCell<Option<SharedString>>>,
+  line_probes: Vec<DiffGutterMarker>,
 }
 
 impl AllChanges {
@@ -53,7 +65,8 @@ impl AllChanges {
         return Ok(None);
       }
       let files = DiffFile::parse(&patch).map_err(|error| error.to_string())?;
-      Ok::<_, String>(Some((patch, files)))
+      let line_probes = line_probes(&patch, &files);
+      Ok::<_, String>(Some((patch, files, line_probes)))
     });
     self.task = Some(cx.spawn(async move |this, cx| {
       let result = work.await;
@@ -61,7 +74,8 @@ impl AllChanges {
         this.task = None;
         match result {
           Ok(None) => return,
-          Ok(Some((patch, files))) => {
+          Ok(Some((patch, files, line_probes))) => {
+            this.line_probes = line_probes;
             let paths: HashSet<_> = files.iter().map(DiffFile::path).collect();
             this.viewed.retain(|path| paths.contains(path));
             if let Some(diff) = &mut this.diff {
@@ -87,10 +101,7 @@ impl AllChanges {
   /// Scrolls to a file's header and opens it, whether it was folded or not.
   pub fn scroll_to(&mut self, path: &str, cx: &mut Context<Self>) {
     if let Some(diff) = &self.diff {
-      diff.state().update(cx, |state, cx| {
-        state.set_file_collapsed(path, false, cx);
-        state.scroll_to_file(path, cx);
-      });
+      reveal_file(diff.state(), path, cx);
     }
   }
 
@@ -131,10 +142,7 @@ impl AllChanges {
         files.iter().fold(menu.scrollable(true).max_h(px(360.)), |menu, (path, added, removed)| {
           let (target, state) = (path.clone(), menu_state.clone());
           menu.item(PopupMenuItem::new(format!("{path}   +{added} −{removed}")).checked(reviewed.contains(path)).on_click(move |_, _, cx| {
-            state.update(cx, |state, cx| {
-              state.set_file_collapsed(&target, false, cx);
-              state.scroll_to_file(&target, cx);
-            })
+            reveal_file(&state, &target, cx);
           }))
         })
       });
@@ -197,6 +205,13 @@ impl AllChanges {
   }
 }
 
+fn reveal_file(state: &Entity<DiffState>, path: &str, cx: &mut App) {
+  state.update(cx, |state, cx| {
+    state.set_file_collapsed(path, false, cx);
+    state.scroll_to_file(path, cx);
+  });
+}
+
 impl Render for AllChanges {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let muted = cx.theme().muted_foreground;
@@ -211,25 +226,134 @@ impl Render for AllChanges {
     };
     let state = diff.state().clone();
     let view = cx.entity().downgrade();
+    let layout = Rc::new(RefCell::new(FileHeaderLayout::default()));
+    let header_layout = layout.clone();
+    let line_layout = layout.clone();
+    let header_view = view.clone();
     let diff = diff
       .view(cx)
       .soft_wrap(true)
       .text_size(code_font_size(cx))
       .border_0()
       .size_full()
-      .render_header(move |file, _, cx| file_header(file, &view, cx));
+      .gutter_markers(self.line_probes.iter().cloned())
+      .render_gutter_marker(move |marker, _, _| {
+        let layout = line_layout.clone();
+        let path = marker.position().path().clone();
+        canvas(
+          move |bounds, _, _| {
+            let mut layout = layout.borrow_mut();
+            if layout.first_line.as_ref().is_none_or(|(_, top)| bounds.top() < *top) {
+              layout.first_line = Some((path, bounds.top()));
+            }
+          },
+          |_, _, _, _| {},
+        )
+        .size_full()
+      })
+      .render_header(move |file, _, cx| {
+        let layout = header_layout.clone();
+        let path = file.path().clone();
+        file_header(file, &header_view, cx).relative().child(
+          canvas(
+            move |bounds, window, _| {
+              // Measure the top of the Kit row, including its vertical padding and separator.
+              let header_top = bounds.top() - window.rem_size() / 4.;
+              let offset = header_top - window.content_mask().bounds.top();
+              let mut layout = layout.borrow_mut();
+              if offset < Pixels::ZERO {
+                layout.above = Some(path);
+              } else if layout.below.as_ref().is_none_or(|(_, top)| offset < *top) {
+                layout.below = Some((path, offset));
+              }
+            },
+            |_, _, _, _| {},
+          )
+          .absolute()
+          .inset_0(),
+        )
+      });
+    let current_file = self.current_file.clone();
+    let sticky_state = state.clone();
+    let sticky_header = canvas(
+      move |viewport, window, cx| {
+        let FileHeaderLayout { above, below, first_line } = std::mem::take(&mut *layout.borrow_mut());
+        let files = sticky_state.read(cx).files();
+        let mut current = current_file.borrow_mut();
+        // When the next header reaches the top it can take over in the list itself.
+        if let Some((path, _)) = below.as_ref().filter(|(_, offset)| *offset <= FILE_HEADER_SEPARATOR) {
+          *current = Some(path.clone());
+          return;
+        }
+        if let Some(path) = above {
+          *current = Some(path);
+        } else if let Some((next, _)) = &below {
+          *current =
+            files.iter().position(|file| file.path() == next).and_then(|index| index.checked_sub(1)).map(|index| files[index].path().clone());
+        } else if let Some((path, _)) = first_line {
+          *current = Some(path);
+        }
+        let Some(file) = current.as_ref().and_then(|path| files.iter().find(|file| file.path() == path)) else { return };
+        let state = sticky_state.clone();
+        let path = file.path().clone();
+        let collapsed = state.read(cx).is_file_collapsed(&path);
+        let mut header = h_flex()
+          .id(SharedString::from(format!("sticky-diff-header-{path}")))
+          .block_mouse_except_scroll()
+          .w(viewport.size.width)
+          .gap_1()
+          .pl_1()
+          .pr_3()
+          .py_1()
+          .border_b_1()
+          .border_color(cx.theme().border)
+          .bg(colors(cx).background)
+          .child(
+            Button::new("collapse-sticky-file")
+              .ghost()
+              .xsmall()
+              .icon(if collapsed { IconName::ChevronRight } else { IconName::ChevronDown })
+              .accessibility_label(if collapsed { "Expand file" } else { "Collapse file" })
+              .on_click(move |_, _, cx| {
+                state.update(cx, |state, cx| state.set_file_collapsed(&path, !collapsed, cx));
+              }),
+          )
+          .child(div().flex_1().min_w_0().child(file_header(file, &view, cx)))
+          .into_any_element();
+        let size = header.layout_as_root(size(viewport.size.width.into(), AvailableSpace::MinContent), window, cx);
+        let offset = below.map_or(Pixels::ZERO, |(_, top)| (top - size.height).min(Pixels::ZERO));
+        window.defer_draw(header, viewport.origin + point(Pixels::ZERO, offset), 0, Some(ContentMask { bounds: viewport }));
+      },
+      |_, _, _, _| {},
+    )
+    .absolute()
+    .inset_0();
     v_flex()
       .size_full()
       .min_h_0()
       .child(self.toolbar(&state, cx))
       // The diff owns its scrolling, so its scrollbar sits at the right edge of the area.
-      .child(div().flex_1().min_h_0().overflow_hidden().cursor_text().child(diff))
+      .child(div().relative().flex_1().min_h_0().overflow_hidden().cursor_text().child(diff).child(sticky_header))
       .into_any_element()
   }
 }
 
+/// Sparse row probes identify the file after a scroll skips its original header.
+fn line_probes(patch: &str, files: &[DiffFile]) -> Vec<DiffGutterMarker> {
+  const PROBE_INTERVAL: usize = 8;
+  let mut probes = Vec::new();
+  visit_patch_lines(patch, files, |file, side, number, _, row| {
+    if row.is_multiple_of(PROBE_INTERVAL) {
+      let path = file.path();
+      let id = SharedString::from(format!("sticky-probe-{path}-{side:?}-{number}"));
+      probes.push(DiffGutterMarker::new(id, DiffLinePosition::new(path.clone(), side, number)));
+    }
+  });
+  probes
+}
+
 /// The content of a file's header: its path with the open and copy buttons, the size of the change, and the review checkbox.
-fn file_header(file: &DiffFile, view: &WeakEntity<AllChanges>, cx: &App) -> impl IntoElement {
+fn file_header(file: &DiffFile, view: &WeakEntity<AllChanges>, cx: &App) -> Div {
   let palette = colors(cx);
   let (added, removed) = (file.additions(), file.deletions());
   let total = added + removed;

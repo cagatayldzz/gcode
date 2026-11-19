@@ -24,6 +24,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/visual-check/` | offline screenshot pixel inspection and coordinate conversion |
 | `crates/app/src/lib.rs` | startup: key bindings, quit, opening and closing windows |
 | `crates/ui/src/workspace.rs` | `Workspace` (one per window): projects, the title bar (repository switcher, tabs), the sidebar, the status bar, the dock and the terminals of every project |
+| `crates/ui/src/workspace/search.rs` | project search and replacement actions, search sidebar rendering |
 | `crates/ui/src/editor.rs` | `EditorPanel`: tabs (`Tabs`) of file editors, shown with the Kit default `TabBar` that the panel draws itself (the dock title bar is off), plus SVG and ICNS previews decoded off the interface thread |
 | `crates/ui/src/terminal.rs` | `Terminal` (a view): draws a `Session`, handles keys, mouse, selection, scrolling, paste and its right-click menu |
 | `crates/ui/src/menus.rs` | the menu bar (`menus`); the app sets it at startup and the window in front updates the Repository item with the service of the open project's remote (`Workspace::sync_menus`, `view_on_host`, `vekro_hosting::web_repository`) |

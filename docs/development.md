@@ -73,11 +73,15 @@ Tests live in `crates/<crate>/tests/`, never inline. Terminal session tests run 
 (`/bin/sh -c …`) through a PTY. Git tests create repositories in temporary directories. Tests that touch
 the data directory use temporary directories; `VEKRO_DATA_DIR` overrides the location.
 
-Shell tests for the scripts and workflows live in `scripts/tests/`. The interface has no automated tests; check a change by running `bun run dev`.
+Shell tests for the scripts and workflows live in `scripts/tests/`.
+
+For routine changes, run `cargo check --locked -p <package>` and `cargo test --locked -p <package>` for
+the affected package, then `bun run check` for the workspace. These checks run without bundling or opening
+Vekro. Use `bun run dev` when visual inspection is requested.
 
 ## Visual inspection with a computer-use agent
 
-Run `bun run dev` with a scratch `VEKRO_DATA_DIR`. Use the agent's computer-use tool to select the development app by bundle ID
+When explicitly requested, run `bun run dev` with a scratch `VEKRO_DATA_DIR`. Use the agent's computer-use tool to select the development app by bundle ID
 `com.cagatayldzz.vekro.dev`, inspect its accessibility tree, and take a fresh window screenshot. Prefer accessible controls; use
 coordinates from the current screenshot when a control is not exposed. After each action, inspect the new state before continuing.
 The operating system may require Screen Recording and Accessibility permissions for the computer-use host.
