@@ -157,6 +157,9 @@ jobs:
     needs: [prepare, verify]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # Creating the release and its tag is the only job that writes to the repository.
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
