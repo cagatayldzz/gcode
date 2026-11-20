@@ -10,7 +10,7 @@ A Vekro window has these parts:
   and the changed files, each with a checkbox (click a file to see its diff in the main area; right-click for **Open in Editor** and
   **Discard changes**, which asks first, throws away every change to that file and deletes it if it is new). Below the list
   is the commit box: type a **Summary** (required) and, if you like, a **Description**, then **Commit N files to
-  <branch>**. Only the ticked files go into the commit; the others (staged or not) stay as they are, so they show up
+  &lt;branch&gt;**. Only the ticked files go into the commit; the others (staged or not) stay as they are, so they show up
   again in the list. A commit needs `user.name` and `user.email` in your Git configuration.
 - the **main area**: tabs of files, filling the rest of the window (in the Git tab it shows the diff of the chosen file or commit instead), (the terminals take it over while they are shown, see Terminals below).
 

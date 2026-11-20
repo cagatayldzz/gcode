@@ -34,8 +34,9 @@ for variable in APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_ID APP
   assert_contains "secrets.$variable" "$release" "release reads $variable"
 done
 
-# Only shell and Rust: no other scripting runtimes in automation.
+# App and release automation use shell and Rust. VitePress uses Bun in the documentation workflow.
 for file in .github/workflows/*.yml .github/actions/*/action.yml scripts/*.sh; do
+  [[ "$file" == .github/workflows/docs.yml ]] && continue
   if grep -Eq '(^|[^a-z])(bun|npm|node|python3?|ruby)( |$)' "$file"; then
     echo "FAIL: $file uses a runtime other than shell and Rust" >&2
     failures=$((failures + 1))

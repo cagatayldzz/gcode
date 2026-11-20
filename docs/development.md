@@ -24,12 +24,17 @@ runs it). After cloning run `bun install`.
 
 `bun run update` runs `cargo upgrade --incompatible` followed by `cargo update`. Direct Cargo dependencies use full version requirements
 so compatible upgrades can also update their minimum versions in the manifests. When only indirect
-dependencies have updates, only `Cargo.lock` may change. Bun runs the
-project commands, and this workspace has no JavaScript package dependencies.
+dependencies have updates, only `Cargo.lock` may change. The VitePress dependency is managed separately through Bun.
+
+## Documentation site
+
+Run `bun install` and `bun run docs:dev` to edit the VitePress site locally. Run `bun run docs:build` to generate the static site and `bun run docs:preview` to preview that build.
+
+For GitHub Pages, set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**. The **Deploy documentation** workflow builds and publishes the site on documentation updates to `main`. You can also run it manually from **Actions**.
 
 ## Scripts
 
-Automation uses only shell and Rust; there is no TypeScript or other runtime in scripts or workflows.
+App and release automation use shell and Rust. The documentation workflow uses Bun and VitePress.
 
 | Path | Purpose |
 | --- | --- |
