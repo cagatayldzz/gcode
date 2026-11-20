@@ -8,17 +8,12 @@ use gpui_kit::{
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
 const MIN_LINES: usize = 80;
-const MAX_SAMPLES: usize = 640;
-const MAX_COLUMNS: usize = 100;
 const EDIT_DEBOUNCE: Duration = Duration::from_millis(90);
 const MIN_VIEWPORT_FRACTION: f32 = 0.025;
 
-#[derive(Clone, Copy)]
-struct Line {
-  start: usize,
-  end: usize,
-  accent_end: usize,
-}
+mod outline;
+
+use outline::{sample, Line, MAX_COLUMNS};
 
 #[derive(Clone, Copy)]
 struct Viewport {
@@ -72,30 +67,7 @@ impl Minimap {
       if debounce {
         background.timer(EDIT_DEBOUNCE).await;
       }
-      let lines: Arc<[Line]> = background
-        .spawn(async move {
-          let samples = count.min(MAX_SAMPLES);
-          (0..samples)
-            .map(|index| {
-              let mut start = MAX_COLUMNS;
-              let mut end = 0;
-              let mut accent_end = 0;
-              for (column, character) in text.slice_line(index * count / samples).chars().take(MAX_COLUMNS).enumerate() {
-                if !character.is_whitespace() {
-                  start = start.min(column);
-                  end = column + 1;
-                  if accent_end == column {
-                    accent_end = column + 1;
-                  }
-                } else if end == 0 {
-                  accent_end = column + 1;
-                }
-              }
-              Line { start, end, accent_end }
-            })
-            .collect()
-        })
-        .await;
+      let lines = background.spawn(async move { sample(&text) }).await;
       let _ = this.update(cx, |this, cx| {
         this.lines = lines;
         this.refresh = None;

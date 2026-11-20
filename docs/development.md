@@ -89,6 +89,61 @@ For routine changes, run `cargo check --locked -p <package>` and `cargo test --l
 the affected package, then `bun run check` for the workspace. These checks run without bundling or opening
 Vekro. Use `bun run dev` when visual inspection is requested.
 
+## Performance benchmarks
+
+Run the benchmarks manually on the same Mac before and after a change. Match the power source, battery mode, window size,
+theme, and workload. Close unrelated applications and give the Mac time to cool between runs. Record the commit, macOS
+version, and machine model with the results.
+
+```sh
+cargo bench --locked -p vekro-ui --bench performance | tee /tmp/vekro-baseline.csv
+VEKRO_BENCH_SAMPLES=50 cargo bench --locked -p vekro-ui --bench performance -- minimap/
+cargo test --locked -p vekro-ui --bench performance -- --verify
+```
+
+The benchmark reports median and 95th-percentile wall time in microseconds. It warms up each case three times and runs
+20 samples by default. It uses a generated project and local Git history. Fixture creation and resetting files between
+samples stay outside the timed sections. The suite covers folder-tree loading, literal and regex search, replacement
+planning and writing, minimap sampling, Git summary, file history and diff, file copy and rename, and preferences.
+The verification command exercises the same cases once without recording timings. Regular project checks compile the
+suite without running timing measurements.
+
+### Editor responsiveness, CPU, memory, and battery
+
+Generate a scratch fixture for UI profiling. The command prints the directory containing `project` and `other-project`.
+
+```sh
+cargo bench --locked -p vekro-ui --bench performance -- --fixture
+```
+
+Run an optimized Vekro build with a scratch `VEKRO_DATA_DIR` as described in [Running the app in isolation](#running-the-app-in-isolation).
+Add both fixture projects. Find Vekro's PID in Activity Monitor and record one trace per scenario. Keep the CSVs and
+Instruments traces outside the repository.
+
+```sh
+bash scripts/profile-vekro.sh PID 90 > /tmp/vekro-idle.csv
+```
+
+The sampler records the CPU percentage reported by `ps` and resident memory in KiB once per second. Note initial, peak, and
+settled memory, and whether it grows after repeating the same work. Check the Energy tab in Activity Monitor as a separate
+comparison. Energy Impact is a relative indicator. Compare it while running the same scenario for the same duration on
+battery. Inspect child shells separately when the workload uses the terminal.
+
+| Scenario | What to measure |
+| --- | --- |
+| Idle with Explorer visible, then minimized | Wait for startup to settle and record 90 seconds in each state. Watch for periodic CPU spikes and compare Energy Impact. |
+| Explorer and file opening | Expand and collapse the folders, hover from one folder to another, open the first file and reopen it. Observe CPU while scrolling and whether the selected file appears immediately when revealed from Git or Search. |
+| Editor and minimap | Open `large.rs`, type steadily, scroll, then repeatedly drag the minimap from top to bottom. Compare first open and cached reopen, stalls during dragging, peak memory, and memory after closing and reopening tabs. |
+| Tabs and settings | Alternate preview and pinned tabs, use bulk close, switch between the two projects, then adjust the Explorer font size repeatedly. Watch for delayed redraws and memory growth over repeated cycles. |
+| Search and replace | Search for `benchmark_marker`, then use regex and a folder filter. Change queries quickly to exercise cancellation. Replace in the scratch project and observe time to results, peak memory, and time for CPU to settle. Regenerate the fixture before comparing the same replacement again. |
+| Git and file commands | Open Changes and Timeline for `timeline.rs`. Reveal it in Explorer, then copy, rename, and trash a disposable file. Record responsiveness while background work runs. |
+| Terminal | Open a shell and run a repeatable output burst. Record CPU and Energy Impact while output is flowing and after the shell goes idle. |
+
+Use Instruments **Time Profiler** for CPU spikes and **Allocations** for retained memory. For input latency, mark when the
+action starts and inspect the following frames, including frames spent waiting for the first visible update. Use
+[Activity Monitor](https://support.apple.com/guide/activity-monitor/welcome/mac) for whole-process CPU, memory, and energy
+comparisons. The Rust benchmark results measure operation latency independently of GPUI composition and battery usage.
+
 ## Visual inspection with a computer-use agent
 
 When explicitly requested, run `bun run dev` with a scratch `VEKRO_DATA_DIR`. Use the agent's computer-use tool to select the development app by bundle ID

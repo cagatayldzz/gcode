@@ -7409,6 +7409,7 @@ name = "vekro-ui"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "git2",
  "globset",
  "gpui-kit",
  "gpui-kit-assets",
