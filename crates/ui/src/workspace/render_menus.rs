@@ -1,9 +1,10 @@
 //! Status bar, branch picker and repository switcher.
 
 use super::*;
+use gpui_kit::component::text::TextView;
 
 impl Workspace {
-  /// The thin bar at the bottom of the window: the branch and changes on the left, the open file on the right.
+  /// Shows repository status, the selectable project path, and the open file status.
   pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let file = self.editor_panel.read(cx).status(cx);
@@ -20,8 +21,11 @@ impl Workspace {
         )
         .left(if git.changed() == 0 { "No changes".to_string() } else { format!("{} changed", git.changed()) });
     }
-    if let Some(project) = self.projects.active.as_ref().map(|path| display_path(path)) {
-      bar = bar.child(project);
+    if let Some(path) = &self.projects.active {
+      let path_text = display_path(path).replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+      bar = bar.child(
+        TextView::html(SharedString::from(format!("status-project-{}", path.display())), format!("<p>{path_text}</p>")).selectable(true).max_lines(1),
+      );
     }
     for item in file {
       bar = bar.right(item);
@@ -267,18 +271,11 @@ impl Workspace {
   pub(super) fn render_repository_switcher(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let workspace = cx.entity();
     let theme = cx.theme().clone();
-    let palette = colors(cx);
-    let trigger = Button::new("repository-trigger")
-      .custom(ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.rail_item_hover).active(palette.selected))
-      .cursor_pointer()
-      .border_0()
-      .h_8()
-      .max_w_56()
-      .rounded_md()
-      .tooltip("Projects")
-      .child(h_flex().gap_2().items_center().child(Icon::empty().path("icons/folder.svg").size_5()).child(
+    let trigger = project_bar_button("repository-trigger", self.projects_menu_open, cx).tooltip("Projects").child(
+      h_flex().gap_2().items_center().child(Icon::empty().path("icons/folder.svg").size_5()).child(
         Icon::new(if self.projects_menu_open { IconName::ChevronUp } else { IconName::ChevronDown }).size_4().text_color(theme.muted_foreground),
-      ));
+      ),
+    );
     // The popover has no padding of its own: the list's scrollbar then runs along the menu's right edge, and the padding sits
     // inside the header and inside the list.
     Popover::new("repository-menu")

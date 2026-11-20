@@ -17,7 +17,6 @@ pub fn run() {
   });
   app.run(move |cx| {
     gpui_kit::init(cx);
-    vekro_ui::init(cx);
     cx.activate(true);
     cx.bind_keys([
       KeyBinding::new("cmd-q", Quit, None),
@@ -39,8 +38,7 @@ pub fn run() {
       KeyBinding::new("cmd-v", PasteClipboard, Some("Terminal")),
       KeyBinding::new("cmd-k", ClearBuffer, Some("Terminal")),
     ]);
-    // The menu of the Dock icon's right click (macOS).
-    cx.set_dock_menu(vec![MenuItem::action("New Window", NewWindow)]);
+    vekro_ui::init(cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
     // File → New Window and the Profiles menu are handled by `vekro_ui::init`.
     vekro_ui::open_last_window(cx);

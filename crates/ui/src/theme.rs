@@ -44,6 +44,7 @@ pub(crate) struct Colors {
   /// The window title band.
   pub rail: Hsla,
   pub rail_hover: Hsla,
+  pub project_tab_selected: Hsla,
   /// The hover color of an item on a `rail_hover` background, such as the inside of a category.
   pub rail_item_hover: Hsla,
   pub rail_text: Hsla,
@@ -108,6 +109,7 @@ impl Colors {
       hover: hex(0x151b23),
       rail: hex(0x010409),
       rail_hover: hex(0x151b23),
+      project_tab_selected: hex(0x2f353d),
       rail_item_hover: hex(0x212830),
       rail_text: hex(0x9198a1),
       accent: hex(0x1f6feb),
@@ -147,6 +149,7 @@ impl Colors {
       hover: hex(0xf6f8fa),
       rail: hex(0xf6f8fa),
       rail_hover,
+      project_tab_selected: hex(0xdce2e8),
       rail_item_hover: hex(0xd1d9e0),
       rail_text: hex(0x59636e),
       accent: hex(0x0969da),

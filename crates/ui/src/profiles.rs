@@ -38,9 +38,14 @@ pub(crate) fn profile_list(cx: &mut App) -> ProfileList {
 pub(crate) fn update_profiles<T>(cx: &mut App, change: impl FnOnce(&mut ProfileList) -> T) -> T {
   ensure_loaded(cx);
   let list = &mut cx.global_mut::<ProfilesGlobal>().0;
+  let previous_profiles = list.profiles.clone();
   let result = change(list);
   if let Err(error) = list.save(&ProfileList::default_path()) {
     eprintln!("Could not save the profiles: {error}");
+  }
+  if list.profiles != previous_profiles {
+    let menu = crate::menus::dock_menu(&list.profiles);
+    cx.set_dock_menu(menu);
   }
   result
 }
@@ -104,6 +109,7 @@ fn switch_profile(id: &str, cx: &mut App) {
     }
     None => open_window(profile, cx),
   }
+  cx.activate(true);
 }
 
 /// Opens the window of a profile that was just created or chosen. Windows read each other, so call it outside the update of
@@ -123,8 +129,12 @@ pub(crate) fn init(cx: &mut App) {
   // The menu bar until the first window sets its own.
   let list = profile_list(cx);
   cx.set_menus(crate::menus(None, &list.profiles, &list.last));
+  cx.set_dock_menu(crate::menus::dock_menu(&list.profiles));
   cx.on_action(|_: &NewWindow, cx| new_window(cx));
-  cx.on_action(|action: &SwitchProfile, cx| switch_profile(&action.id, cx));
+  cx.on_action(|action: &SwitchProfile, cx| {
+    let id = action.id.clone();
+    cx.defer(move |cx| switch_profile(&id, cx));
+  });
 }
 
 /// The Profiles page of Settings: every profile with its actions.

@@ -21,7 +21,7 @@ use crate::{
     activity_ids, settings_for, settings_view, AccountRecheckRequested, AccountRemoveRequested, AddAllProjectsRequested, CommitSettingsRequested,
     ConnectAccountRequested, SettingsModel,
   },
-  terminal::{Terminal, TerminalAttentionChanged, TerminalExited},
+  terminal::{Terminal, TerminalActivityChanged, TerminalAttentionChanged, TerminalExited},
   terminal_layout::{Arrangement, Direction, Node},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
@@ -777,7 +777,6 @@ impl Render for Workspace {
               window.dispatch_action(Box::new(AddProject), cx)
             }))
             .child(div().flex_1())
-            .children(self.render_profile_badge(cx))
             .children(self.render_update_button(cx)),
         ),
       )

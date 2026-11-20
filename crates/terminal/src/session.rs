@@ -81,6 +81,40 @@ struct Proxy {
   notify: Notify,
   sender: Arc<OnceLock<EventLoopSender>>,
   palette: Arc<Mutex<Palette>>,
+  #[cfg(unix)]
+  foreground: Option<Arc<ForegroundActivity>>,
+}
+
+#[cfg(unix)]
+struct ForegroundActivity {
+  tty: std::fs::File,
+  title_activity: Mutex<Option<(u32, bool)>>,
+}
+
+#[cfg(unix)]
+impl ForegroundActivity {
+  fn group_id(&self) -> Option<u32> {
+    rustix::termios::tcgetpgrp(&self.tty).ok().map(|group| group.as_raw_pid() as u32)
+  }
+
+  fn observe_title(&self, title: &str) {
+    // Codex's activity item is a standalone Braille frame while working. It
+    // disappears when the task ends, even though Codex keeps the foreground.
+    let working = title.split_whitespace().any(|part| matches!(part, "⠋" | "⠙" | "⠹" | "⠸" | "⠼" | "⠴" | "⠦" | "⠧" | "⠇" | "⠏"));
+    let waiting = title.contains("[ ! ] Action Required") || title.contains("[ . ] Action Required");
+    let mut activity = self.title_activity.lock().unwrap_or_else(|error| error.into_inner());
+    if !working && !waiting && activity.is_none() {
+      return;
+    }
+    let Some(group) = self.group_id() else { return };
+    if working || waiting || activity.is_some_and(|(tracked_group, _)| tracked_group == group) {
+      *activity = Some((group, working));
+    }
+  }
+
+  fn is_working(&self, group: u32) -> bool {
+    self.title_activity.lock().unwrap_or_else(|error| error.into_inner()).is_none_or(|(tracked_group, working)| tracked_group != group || working)
+  }
 }
 
 impl EventListener for Proxy {
@@ -88,8 +122,8 @@ impl EventListener for Proxy {
     match event {
       Event::Wakeup => (self.notify)(SessionEvent::Wakeup),
       Event::Bell => (self.notify)(SessionEvent::Bell),
-      Event::Title(title) => (self.notify)(SessionEvent::Title(title)),
-      Event::ResetTitle => (self.notify)(SessionEvent::Title(String::new())),
+      Event::Title(title) => self.send_title(title),
+      Event::ResetTitle => self.send_title(String::new()),
       Event::ClipboardStore(_, text) => (self.notify)(SessionEvent::ClipboardStore(text)),
       // ChildExit arrives before the PTY's remaining output is drained. Term::exit sends Exit
       // after that drain, so consumers can safely read the final screen before closing the pane.
@@ -113,6 +147,16 @@ impl EventListener for Proxy {
       }
       _ => {}
     }
+  }
+}
+
+impl Proxy {
+  fn send_title(&self, title: String) {
+    #[cfg(unix)]
+    if let Some(foreground) = &self.foreground {
+      foreground.observe_title(&title);
+    }
+    (self.notify)(SessionEvent::Title(title));
   }
 }
 
@@ -142,6 +186,10 @@ pub struct Session {
   palette: Arc<Mutex<Palette>>,
   #[cfg(unix)]
   child_id: u32,
+  #[cfg(unix)]
+  foreground: Option<Arc<ForegroundActivity>>,
+  #[cfg(target_os = "macos")]
+  starts_through_login: bool,
   notify: Notify,
   #[cfg(unix)]
   directory_refresh: Arc<Mutex<DirectoryRefresh>>,
@@ -167,8 +215,8 @@ impl Session {
     tty::setup_env();
     let (columns, lines) = (columns.max(2), lines.max(1));
     let palette = Arc::new(Mutex::new(options.palette.unwrap_or_else(Palette::dark)));
-    let proxy = Proxy { notify: Arc::new(notify), sender: Arc::new(OnceLock::new()), palette: palette.clone() };
-    let term = Arc::new(FairMutex::new(Term::new(Config::default(), &Size { columns, lines }, proxy.clone())));
+    #[cfg(target_os = "macos")]
+    let starts_through_login = options.program.is_none();
     let pty_options = Options {
       shell: options.program.map(|(program, args)| Shell::new(program, args)),
       working_directory: options.working_directory,
@@ -178,6 +226,16 @@ impl Session {
     let pty = tty::new(&pty_options, window_size(columns, lines), 0)?;
     #[cfg(unix)]
     let child_id = pty.child().id();
+    #[cfg(unix)]
+    let foreground = pty.file().try_clone().ok().map(|tty| Arc::new(ForegroundActivity { tty, title_activity: Mutex::new(None) }));
+    let proxy = Proxy {
+      notify: Arc::new(notify),
+      sender: Arc::new(OnceLock::new()),
+      palette: palette.clone(),
+      #[cfg(unix)]
+      foreground: foreground.clone(),
+    };
+    let term = Arc::new(FairMutex::new(Term::new(Config::default(), &Size { columns, lines }, proxy.clone())));
     // Drain on exit: output the program wrote just before it exited still reaches the screen.
     let event_loop = EventLoop::new(term.clone(), proxy.clone(), pty, true, false)?;
     let sender = event_loop.channel();
@@ -189,10 +247,49 @@ impl Session {
       palette,
       #[cfg(unix)]
       child_id,
+      #[cfg(unix)]
+      foreground,
+      #[cfg(target_os = "macos")]
+      starts_through_login,
       notify: proxy.notify.clone(),
       #[cfg(unix)]
       directory_refresh: Arc::new(Mutex::new(DirectoryRefresh::default())),
     })
+  }
+
+  /// A background-safe check for a job that has taken control of the shell's terminal.
+  /// An idle shell owns the foreground process group itself.
+  pub fn foreground_job_probe(&self) -> Option<impl Fn() -> bool + Clone + Send + 'static> {
+    #[cfg(unix)]
+    {
+      let foreground = self.foreground.clone()?;
+      let child_id = self.child_id;
+      #[cfg(target_os = "macos")]
+      let login_shell_id = self.starts_through_login.then(|| Arc::new(OnceLock::new()));
+      Some(move || {
+        let Some(group_id) = foreground.group_id() else { return false };
+        if group_id == child_id {
+          return false;
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(shell_id) = &login_shell_id {
+          let id = shell_id.get().copied().unwrap_or_else(|| macos_shell_id(child_id));
+          if id == child_id {
+            // The real shell may not exist yet while login is starting.
+            return false;
+          }
+          let _ = shell_id.set(id);
+          if group_id == id {
+            return false;
+          }
+        }
+        foreground.is_working(group_id)
+      })
+    }
+    #[cfg(not(unix))]
+    {
+      None::<fn() -> bool>
+    }
   }
 
   /// Sends bytes to the program, as if typed.

@@ -2,6 +2,29 @@
 
 use super::*;
 
+pub(super) fn terminal_activity_spinner(cx: &App) -> Spinner {
+  Spinner::new().xsmall().color(colors(cx).text_secondary)
+}
+
+pub(super) fn project_bar_button(id: impl Into<ElementId>, selected: bool, cx: &App) -> Button {
+  let palette = colors(cx);
+  let hover = if selected { palette.project_tab_selected } else { palette.rail_hover };
+  Button::new(id)
+    .custom(
+      ButtonCustomVariant::new(cx)
+        .color(palette.rail.opacity(0.))
+        .foreground(if selected { palette.explorer_selected_text } else { palette.text })
+        .hover(hover)
+        .active(hover),
+    )
+    .when(selected, |button| button.bg(palette.project_tab_selected))
+    .cursor_pointer()
+    .border_0()
+    .h_8()
+    .max_w_56()
+    .rounded_md()
+}
+
 /// What is waiting in a project, for its row in the project menu and its tab in the title bar: commits to push (an arrow), and
 /// files with changes (a dot). `on_accent` draws them for the open project's tab, which is filled with the accent color.
 pub(super) fn project_status_marks(scope: &str, path: &Path, status: Option<&ProjectStatus>, on_accent: bool, cx: &App) -> Vec<AnyElement> {
@@ -170,21 +193,13 @@ pub(super) fn category_label(index: usize, category: &Category) -> String {
 /// A square icon button for the title bar, as tall as the repository switcher. The Kit's `Button` fixes its icon at a small
 /// size, so this draws the icon itself at `size_5`.
 /// A small blue circle with a count (99+ above that), for the files with changes.
-pub(super) fn count_badge(count: usize, cx: &App) -> Div {
+pub(super) fn status_badge(cx: &App) -> Div {
   let palette = colors(cx);
-  div()
-    .min_w_4()
-    .h_4()
-    .px_1()
-    .flex()
-    .flex_none()
-    .items_center()
-    .justify_center()
-    .rounded_full()
-    .bg(cx.theme().primary)
-    .text_color(palette.on_accent)
-    .text_size(BADGE_FONT_SIZE)
-    .child(if count > 99 { "99+".to_string() } else { count.to_string() })
+  div().min_w_4().h_4().flex().flex_none().items_center().justify_center().rounded_full().bg(cx.theme().primary).text_color(palette.on_accent)
+}
+
+pub(super) fn count_badge(count: usize, cx: &App) -> Div {
+  status_badge(cx).px_1().text_size(BADGE_FONT_SIZE).child(if count > 99 { "99+".to_string() } else { count.to_string() })
 }
 
 pub(super) fn explorer_file_icon(path: &Path, palette: &crate::theme::Colors) -> Icon {

@@ -1,4 +1,4 @@
-//! The menu bar of the application: only what is needed, with the shortcuts the actions already have.
+//! Native menus for the menu bar and Dock icon.
 
 use crate::{
   AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, NewClaude, NewCodex, NewWindow, OpenSettings, Quit, SaveFile, SwitchProfile,
@@ -6,6 +6,17 @@ use crate::{
 };
 use gpui_kit::*;
 use vekro_storage::Profile;
+
+fn profile_item(profile: &Profile) -> MenuItem {
+  MenuItem::action(profile.name.clone(), SwitchProfile { id: profile.id.clone() })
+}
+
+pub(crate) fn dock_menu(profiles: &[Profile]) -> Vec<MenuItem> {
+  [MenuItem::action("New Window", NewWindow), MenuItem::separator(), MenuItem::action("Profiles", NoAction).disabled(true)]
+    .into_iter()
+    .chain(profiles.iter().map(profile_item))
+    .collect()
+}
 
 /// The menus. `host` names the service of the open project's remote ("GitHub", "GitLab", "Azure DevOps", or a host name): the
 /// Repository menu offers to open the repository there; without a remote that item is disabled.
@@ -37,11 +48,10 @@ pub fn menus(host: Option<&str>, profiles: &[Profile], current: &str) -> Vec<Men
       MenuItem::action("New Claude Session", NewClaude),
     ]),
     Menu::new("Repository").items([MenuItem::action(view, ViewOnHost).disabled(host.is_none())]),
-    Menu::new("Profiles").items(
-      profiles
-        .iter()
-        .map(|profile| MenuItem::action(profile.name.clone(), SwitchProfile { id: profile.id.clone() }).checked(profile.id == current))
-        .chain([MenuItem::separator(), MenuItem::action("Edit…", EditProfiles), MenuItem::action("Add Profile…", AddProfile)]),
-    ),
+    Menu::new("Profiles").items(profiles.iter().map(|profile| profile_item(profile).checked(profile.id == current)).chain([
+      MenuItem::separator(),
+      MenuItem::action("Edit…", EditProfiles),
+      MenuItem::action("Add Profile…", AddProfile),
+    ])),
   ]
 }

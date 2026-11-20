@@ -102,6 +102,69 @@ fn child_program_identifies_vekro_as_its_terminal() {
   assert!(session.snapshot(&Palette::light()).text().contains("Vekro:"));
 }
 
+#[cfg(unix)]
+#[test]
+fn foreground_activity_returns_to_idle_when_the_shell_regains_control() {
+  let (sender, receiver) = mpsc::channel();
+  let options = SessionOptions { program: Some(("/bin/sh".into(), vec!["-i".into()])), ..SessionOptions::default() };
+  let session = Session::spawn(options, 80, 8, move |event| {
+    let _ = sender.send(event);
+  })
+  .unwrap();
+  let probe = session.foreground_job_probe().unwrap();
+  session.write(&b"set -m; printf 'shell-%s\\n' ready\n"[..]);
+  wait_for_screen(&session, |snapshot| snapshot.text().contains("shell-ready"));
+  assert!(session.snapshot(&Palette::light()).text().contains("shell-ready"));
+  assert!(!probe(), "the shell should be idle at its prompt");
+
+  check_foreground_activity(&session, probe);
+  session.write(&b"exit\n"[..]);
+  wait_for_exit(&receiver);
+}
+
+#[cfg(unix)]
+fn check_foreground_activity(session: &Session, probe: impl Fn() -> bool) {
+  session.write(&b"sleep 30\n"[..]);
+  let deadline = Instant::now() + Duration::from_secs(5);
+  while !probe() && Instant::now() < deadline {
+    std::thread::sleep(Duration::from_millis(20));
+  }
+  assert!(probe(), "the foreground job should be visible even when it is silent");
+
+  session.write(&b"\x03"[..]);
+  let deadline = Instant::now() + Duration::from_secs(5);
+  while probe() && Instant::now() < deadline {
+    std::thread::sleep(Duration::from_millis(20));
+  }
+  assert!(!probe(), "interrupting the job should return control to the shell");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_title_can_report_task_completion_without_releasing_the_foreground() {
+  let (session, receiver) = run(
+    r#"set -m
+/bin/sh -c 'printf "\033]0;⠋ Example | project\007"; read -r line; printf "\033]0;Example | project\007"; read -r line; printf "\033]0;⠙ Example | project\007"; read -r line; printf "\033]0;Example | project\007"; read -r line'
+/bin/sh -c 'printf "\033]0;Next command\007"; read -r line'
+printf done"#,
+  );
+  let probe = session.foreground_job_probe().unwrap();
+  for (title, busy) in
+    [("⠋ Example | project", true), ("Example | project", false), ("⠙ Example | project", true), ("Example | project", false), ("Next command", true)]
+  {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+      let event = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())).expect("the program should update its title");
+      if event == SessionEvent::Title(title.into()) {
+        break;
+      }
+    }
+    assert_eq!(probe(), busy, "wrong activity for {title}");
+    session.write(&b"next\n"[..]);
+  }
+  wait_for_exit(&receiver);
+}
+
 #[test]
 fn links_are_resolved_from_terminal_cells() {
   let (session, receiver) =
@@ -218,6 +281,9 @@ fn reads_the_directory_of_the_default_login_shell() {
   let deadline = Instant::now() + Duration::from_secs(5);
   while Instant::now() < deadline {
     if session.current_directory().and_then(|directory| directory.canonicalize().ok()) == Some(expected.clone()) {
+      let probe = session.foreground_job_probe().unwrap();
+      assert!(!probe(), "the default login shell should be idle at its prompt");
+      check_foreground_activity(&session, probe);
       return;
     }
     std::thread::sleep(Duration::from_millis(100));

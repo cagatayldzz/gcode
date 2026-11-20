@@ -8,6 +8,10 @@ impl Workspace {
     self.projects.active.as_ref().and_then(|root| self.terminal_tabs.get(root))
   }
 
+  pub(super) fn project_has_terminal_activity(&self, root: &Path, cx: &App) -> bool {
+    self.terminal_tabs.get(root).is_some_and(|tabs| tabs.panes().iter().any(|terminal| terminal.read(cx).has_foreground_job()))
+  }
+
   /// Starts a shell in the open project if it has none: a project is not left without one.
   pub(super) fn ensure_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
@@ -44,6 +48,7 @@ impl Workspace {
       this.close_pane(terminal.clone(), window, cx);
     }));
     self._terminal_subscriptions.push(cx.subscribe(&terminal, |_, _, _: &TerminalAttentionChanged, cx| cx.notify()));
+    self._terminal_subscriptions.push(cx.subscribe(&terminal, |_, _, _: &TerminalActivityChanged, cx| cx.notify()));
     Some(terminal)
   }
 

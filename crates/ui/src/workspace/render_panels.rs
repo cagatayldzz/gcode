@@ -233,10 +233,16 @@ impl Workspace {
       .collect();
     let attention = self.settings.read(cx).accounts.items.iter().any(|account| account.issue.is_some());
     let terminal_attention = self.terminal_tabs.values().any(|tabs| tabs.panes().iter().any(|terminal| terminal.read(cx).needs_attention()));
-    let terminal =
-      rail_button("terminal-toggle", Icon::empty().path("icons/terminal.svg"), "Terminal", self.terminal_open, true, &palette, |_, window, cx| {
-        window.dispatch_action(Box::new(ToggleTerminal), cx)
-      });
+    let terminal_active = self.projects.active.as_ref().is_some_and(|root| self.project_has_terminal_activity(root, cx));
+    let terminal = rail_button(
+      "terminal-toggle",
+      Icon::empty().path("icons/terminal.svg"),
+      if terminal_active { "Terminal — command running" } else { "Terminal" },
+      self.terminal_open,
+      true,
+      &palette,
+      |_, window, cx| window.dispatch_action(Box::new(ToggleTerminal), cx),
+    );
     let agents = rail_button(
       "agents-toggle",
       Icon::empty().path("icons/bot-message-square.svg"),
@@ -248,7 +254,7 @@ impl Workspace {
     );
     let settings = div()
       .relative()
-      .child(rail_button("project-settings-open", Icon::new(IconName::Settings), "Project settings", false, true, &palette, {
+      .child(rail_button("project-settings-open", Icon::empty().path("icons/folder-cog.svg"), "Project settings", false, true, &palette, {
         let workspace = workspace.clone();
         move |_, window, cx| {
           workspace.update(cx, |this, cx| {
@@ -258,7 +264,7 @@ impl Workspace {
           })
         }
       }))
-      // While an account has a permission problem, a small warning sits at the corner of the gear and opens Accounts.
+      // While an account has a permission problem, the warning badge opens Accounts.
       .when(attention, |gear| {
         gear.child(
           div()
@@ -283,6 +289,9 @@ impl Workspace {
       div()
         .relative()
         .child(terminal)
+        .when(terminal_active, |button| {
+          button.child(status_badge(cx).absolute().top_0().right(-BADGE_OVERHANG).child(terminal_activity_spinner(cx).color(palette.on_accent)))
+        })
         .when(terminal_attention, |button| {
           button.child(
             div()
@@ -313,8 +322,9 @@ impl Workspace {
       .border_r_1()
       .border_color(palette.border)
       .children(layout.visible(&activity_ids()).into_iter().filter_map(|id| buttons.remove(id)))
-      .child(div().flex_1())
       .child(settings)
+      .child(div().flex_1())
+      .child(self.render_profile_picker())
   }
 
   /// The terminals, filling the main area like a terminal window: a tab strip when there are several tabs, and the panes of the

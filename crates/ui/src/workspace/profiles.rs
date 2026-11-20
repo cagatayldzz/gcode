@@ -1,8 +1,10 @@
-//! Profiles in the window: the name beside the title bar, and creating, renaming and deleting them.
+//! The profile picker and profile management in the workspace.
 
 use super::*;
 use crate::profiles::{other_open_profiles, profile_list, show_profile, update_profiles};
 use crate::settings::release_settings;
+use crate::SwitchProfile;
+use gpui_kit::component::avatar::Avatar;
 use vekro_hosting::Accounts;
 use vekro_storage::delete_profile_files;
 
@@ -12,20 +14,27 @@ impl Workspace {
     &self.profile
   }
 
-  /// The name of the profile in the title bar, when there is more than one to tell apart. It opens the Profiles page of Settings.
-  pub(super) fn render_profile_badge(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-    if profile_list(cx).profiles.len() < 2 {
-      return None;
-    }
-    Some(
-      Button::new("title-profile")
-        .small()
-        .ghost()
-        .icon(Icon::empty().path("icons/user.svg"))
-        .label(SharedString::from(self.profile.name.clone()))
-        .tooltip("Profile: manage profiles")
-        .on_click(cx.listener(|this, _, window, cx| this.open_settings_page("Profiles", window, cx))),
-    )
+  /// The current profile's avatar and the actions from the Profiles menu.
+  pub(super) fn render_profile_picker(&self) -> impl IntoElement {
+    let current = self.profile.id.clone();
+    let focus = self.focus_handle.clone();
+    let label = SharedString::from(format!("Profile: {}", self.profile.name));
+    Button::new("profile-picker")
+      .ghost()
+      .size_8()
+      .p_0()
+      .rounded_full()
+      .accessibility_label(label.clone())
+      .tooltip(label)
+      .child(Avatar::new().name(self.profile.name.clone()).small())
+      .dropdown_menu_with_anchor(Anchor::LeftCenter, move |mut menu, _, cx| {
+        menu = menu.action_context(focus.clone());
+        for profile in profile_list(cx).profiles {
+          let checked = current == profile.id;
+          menu = menu.menu_with_check(profile.name, checked, Box::new(SwitchProfile { id: profile.id }));
+        }
+        menu.separator().menu("Edit…", Box::new(EditProfiles)).menu("Add Profile…", Box::new(AddProfile))
+      })
   }
 
   /// Profiles → Edit…: Settings on the Profiles page.

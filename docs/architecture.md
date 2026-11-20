@@ -62,7 +62,7 @@ apps/vekro ─► app ─► ui ─► terminal
 ## Window layout
 
 The `Workspace` renders the title band (right of the traffic lights: the **repository switcher**, a fixed first tab with a filterable, category-grouped menu of every project and an Add button; then the Add button), then a row of the **activity bar** (`render_activity_bar`: a 56 px strip with one button each for Explorer and
-Git, which choose `sidebar_tab`, the terminal button under them, and Settings at the bottom with the account warning badge) and the **sidebar** (the selected view, in a Kit `h_resizable` pane, 200–960 px) and, right of it, a column with the Kit **`DockArea`** and the status bar below it, so the sidebar runs down to the bottom of the window. The sidebar is plain
+Git, which choose `sidebar_tab`, buttons for terminals and agents, and a project settings button below the tool group. The current profile's avatar sits at the bottom and opens a menu to its right with the profile list and actions to edit or add profiles) and the **sidebar** (the selected view, in a Kit `h_resizable` pane, 200–960 px) and, right of it, a column with the Kit **`DockArea`** and the status bar below it, so the sidebar runs down to the bottom of the window. The sidebar is plain
 workspace content, not a dock panel, so it has no tab bar. The dock holds the main `EditorPanel`. Explorer can open a read-only preview beside it in a horizontal resizable split. The side preview closes when the active project changes. Long text files show a minimap beside the editor. It samples the buffer in the background and uses the editor’s existing scroll position. The terminals are
 not dock panels: the activity bar's terminal button (`ToggleTerminal`, `⌘J`; `terminal_open`) makes them fill everything right of the activity bar in place of the sidebar, the dock and the status bar
 (`render_terminal_area`): a tab strip when there are several tabs, and the shown tab as a tree of panes (`terminal_layout.rs`: `Node`,
@@ -118,6 +118,9 @@ milliseconds; the cost is the first time the highlighter draws a text (up to ~0.
    RGB, cursor). `Session::modes` tells the view whether a program wants mouse, alternate-screen or focus
    reports.
 4. Keys go through `encode_key` to the PTY. `⌘C`, `⌘V` and `⌘K` are handled by the view.
+5. On Unix, each login shell's activity task checks the PTY's foreground process group off the interface
+   thread. The workspace updates the project tab and Terminal button when a foreground job takes or
+   returns control of the PTY.
 
 ## Git data flow
 
@@ -169,7 +172,7 @@ A refused token marks its account: `Account.issue` (in `accounts.json`) holds wh
 is in the error of a push, pull or fetch, when a pull request is refused (`PullRequestEvent::Refused`), or when connecting finds a
 permission missing; it is cleared by `Workspace::recheck_account`, which runs `vekro_hosting::verify_permissions` (the push
 advertisement `info/refs?service=git-receive-pack` and an empty pull request, neither of which changes anything) on a background
-thread. While any account has an issue, the gear at the bottom of the activity bar shows a warning badge that opens the Accounts page.
+thread. While any account has an issue, the project settings button shows a warning badge that opens the Accounts page.
 
 ## Persistence
 
@@ -197,4 +200,4 @@ Not stored yet: window size and position, dock layout, open files, running termi
 - Language, formatting, tests, GPUI Kit conventions and checks: `AGENTS.md`.
 - A change to crate boundaries, the window layout or the state files must update this file.
 
-The activity bar opens Search below Explorer and keeps project settings at its bottom. Search owns a separate sidebar view, and its results can open as a read-only editor tab.
+The activity bar opens Search below Explorer. Search owns a separate sidebar view, and its results can open as a read-only editor tab.

@@ -23,6 +23,7 @@ use std::{
     atomic::{AtomicBool, Ordering},
     Arc,
   },
+  time::Duration,
 };
 use unicode_width::UnicodeWidthChar as _;
 use vekro_terminal::{
@@ -43,18 +44,23 @@ pub(crate) struct TerminalExited;
 /// Sent when the terminal attention indicator changes.
 pub(crate) struct TerminalAttentionChanged;
 
+/// Sent when a foreground job starts or gives the terminal back to the shell.
+pub(crate) struct TerminalActivityChanged;
+
 /// A running shell that is not yet in a view.
 pub(crate) struct Started {
   session: Session,
   receiver: futures::channel::mpsc::UnboundedReceiver<SessionEvent>,
   pending: Arc<AtomicBool>,
   directory: PathBuf,
+  is_shell: bool,
 }
 
 pub(crate) struct Terminal {
   session: Rc<Session>,
   title: SharedString,
   attention: bool,
+  has_foreground_job: bool,
   directory: Option<PathBuf>,
   focus_handle: FocusHandle,
   content_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -69,11 +75,14 @@ pub(crate) struct Terminal {
   mouse_cell: Option<(usize, usize)>,
   hovered: bool,
   _events_task: Task<()>,
+  _activity_task: Option<Task<()>>,
 }
 
 impl EventEmitter<TerminalExited> for Terminal {}
 
 impl EventEmitter<TerminalAttentionChanged> for Terminal {}
+
+impl EventEmitter<TerminalActivityChanged> for Terminal {}
 
 impl Terminal {
   /// Starts `program` (with its arguments) in `directory`, or the login shell for `None`. Kept apart from [`Terminal::new`] so a
@@ -82,6 +91,7 @@ impl Terminal {
     let (sender, receiver) = futures::channel::mpsc::unbounded::<SessionEvent>();
     let pending = Arc::new(AtomicBool::new(false));
     let notify_pending = pending.clone();
+    let is_shell = program.is_none();
     let options = SessionOptions { program, working_directory: Some(directory.clone()), palette: Some(palette(cx)) };
     let session = Session::spawn(options, 80, 24, move |event| {
       // Redraws are coalesced: one queued wakeup covers any number that follow.
@@ -90,11 +100,11 @@ impl Terminal {
       }
       let _ = sender.unbounded_send(event);
     })?;
-    Ok(Started { session, receiver, pending, directory })
+    Ok(Started { session, receiver, pending, directory, is_shell })
   }
 
   pub fn new(started: Started, cx: &mut Context<Self>) -> Self {
-    let Started { session, mut receiver, pending, directory } = started;
+    let Started { session, mut receiver, pending, directory, is_shell } = started;
     let title = std::env::var("SHELL").ok().and_then(|path| path.rsplit('/').next().map(|name| name.to_string())).unwrap_or_else(|| "shell".into());
     let events_task = cx.spawn(async move |this, cx| {
       while let Some(event) = receiver.next().await {
@@ -104,10 +114,34 @@ impl Terminal {
         }
       }
     });
+    let activity_task = is_shell.then(|| session.foreground_job_probe()).flatten().map(|probe| {
+      cx.spawn(async move |this, cx| {
+        let executor = cx.background_executor().clone();
+        let mut previous = false;
+        loop {
+          executor.timer(Duration::from_millis(250)).await;
+          let probe = probe.clone();
+          let active = executor.spawn(async move { probe() }).await;
+          if active != previous {
+            previous = active;
+            if this
+              .update(cx, |terminal, cx| {
+                terminal.has_foreground_job = active;
+                cx.emit(TerminalActivityChanged);
+              })
+              .is_err()
+            {
+              break;
+            }
+          }
+        }
+      })
+    });
     Self {
       session: Rc::new(session),
       title: title.into(),
       attention: false,
+      has_foreground_job: false,
       directory: Some(directory),
       focus_handle: cx.focus_handle(),
       content_bounds: Rc::new(Cell::new(None)),
@@ -118,6 +152,7 @@ impl Terminal {
       mouse_cell: None,
       hovered: false,
       _events_task: events_task,
+      _activity_task: activity_task,
     }
   }
 
@@ -136,6 +171,10 @@ impl Terminal {
 
   pub fn needs_attention(&self) -> bool {
     self.attention
+  }
+
+  pub fn has_foreground_job(&self) -> bool {
+    self.has_foreground_job
   }
 
   fn clear_attention(&mut self, cx: &mut Context<Self>) {

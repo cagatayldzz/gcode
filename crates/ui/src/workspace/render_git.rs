@@ -6,7 +6,6 @@ impl Workspace {
   pub(super) fn render_favorite_projects(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
     let palette = colors(cx);
     let workspace = cx.entity();
-    let primary = cx.theme().primary;
     self
       .projects
       .favorites()
@@ -15,27 +14,14 @@ impl Workspace {
         let selected = self.projects.active.as_ref() == Some(&path);
         let look = avatar_look(project, selected, cx);
         let status = self.status_of(&path);
+        let terminal_active = self.project_has_terminal_activity(&path, cx);
         let workspace = workspace.clone();
         let held = self.dragged_tab.as_ref() == Some(&path) && cx.has_active_drag();
         let picked_up = workspace.clone();
         let picked = path.clone();
         let target = path.clone();
         let swapper = workspace.clone();
-        let button = Button::new(SharedString::from(format!("favorite-project-{}", path.display())))
-          .custom(
-            ButtonCustomVariant::new(cx)
-              .color(if selected { primary } else { palette.rail })
-              .foreground(if selected { palette.on_accent } else { palette.text })
-              .hover(if selected { primary } else { palette.rail_item_hover })
-              .active(if selected { primary } else { palette.rail_item_hover }),
-          )
-          // The kit paints a custom color at 20% at rest and in full only on hover: the open project is filled in full.
-          .when(selected, |button| button.bg(primary))
-          .cursor_pointer()
-          .border_0()
-          .h_8()
-          .max_w_56()
-          .rounded_md()
+        let button = project_bar_button(SharedString::from(format!("favorite-project-{}", path.display())), selected, cx)
           .child(
             h_flex()
               .gap_2()
@@ -49,22 +35,24 @@ impl Workspace {
                     .items_center()
                     .justify_center()
                     .rounded_md()
-                    .text_color(if selected { palette.on_accent } else { look.text })
+                    .text_color(if selected { palette.explorer_selected_text } else { look.text })
                     .when_some(look.fill.filter(|_| !selected), |avatar, fill| avatar.bg(fill))
                     .child(Icon::empty().path(icon).size_4()),
                 )
               })
               .child(
                 Label::new(project.name())
-                  .when(selected, |label| label.text_color(palette.on_accent))
+                  .when(selected, |label| label.text_color(palette.explorer_selected_text))
                   .min_w_0()
                   .font_weight(FontWeight::SEMIBOLD)
                   .overflow_hidden()
                   .whitespace_nowrap()
                   .text_ellipsis(),
               )
-              .children(project_status_marks("favorite", &path, status.as_ref(), selected, cx)),
+              .children(project_status_marks("favorite", &path, status.as_ref(), false, cx))
+              .when(terminal_active, |row| row.child(terminal_activity_spinner(cx))),
           )
+          .when(terminal_active, |button| button.tooltip("Terminal command running"))
           .on_click({
             let path = path.clone();
             move |_, window, cx| workspace.update(cx, |this, cx| this.select_project(path.clone(), window, cx))
