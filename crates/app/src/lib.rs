@@ -2,8 +2,8 @@
 
 use gpui_kit::*;
 use vekro_ui::{
-  Assets, ClearBuffer, CloseTab, CopySelection, MentionProjects, NewTerminal, NewWindow, OpenSearchResults, OpenSettings, PasteClipboard, Quit,
-  SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleTerminal, ViewOnHost,
+  Assets, ClearBuffer, CloseTab, CopySelection, MentionProjects, NewTerminal, OpenSearchResults, OpenSettings, PasteClipboard, Quit, SaveFile,
+  SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleTerminal, ViewOnHost,
 };
 
 /// Starts the application and runs it until it quits.
@@ -20,7 +20,6 @@ pub fn run() {
     cx.activate(true);
     cx.bind_keys([
       KeyBinding::new("cmd-q", Quit, None),
-      KeyBinding::new("cmd-n", NewWindow, None),
       KeyBinding::new("cmd-,", OpenSettings, None),
       KeyBinding::new("cmd-t", NewTerminal, None),
       KeyBinding::new("cmd-s", SaveFile, None),
@@ -40,7 +39,7 @@ pub fn run() {
     ]);
     vekro_ui::init(cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
-    // File → New Window and the Profiles menu are handled by `vekro_ui::init`.
+    // The Profiles menu is handled by `vekro_ui::init`.
     vekro_ui::open_last_window(cx);
   });
 }

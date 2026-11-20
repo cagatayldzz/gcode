@@ -44,7 +44,6 @@ actions!(
   vekro,
   [
     Quit,
-    NewWindow,
     AddProject,
     OpenSettings,
     CheckForUpdates,

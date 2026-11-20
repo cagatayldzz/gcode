@@ -3,7 +3,7 @@
 use crate::{
   theme::{colors, FONT_SIZE_SM},
   workspace::{Workspace, TOOLBAR_HEIGHT},
-  NewWindow, SwitchProfile,
+  SwitchProfile,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -86,17 +86,8 @@ pub fn open_window(profile: Profile, cx: &mut App) {
 
 /// Opens a window with the profile that was used last (at startup, and when the Dock icon is clicked with no window open).
 pub fn open_last_window(cx: &mut App) {
-  let profile = profile_list(cx).last_used();
-  open_window(profile, cx);
-}
-
-/// File → New Window: a window with the profile of the window in front, or else the one used last.
-fn new_window(cx: &mut App) {
-  let current = cx.active_window().and_then(|handle| window_profile(handle, cx));
-  match current {
-    Some(profile) => open_window(profile, cx),
-    None => open_last_window(cx),
-  }
+  let id = profile_list(cx).last_used().id;
+  switch_profile(&id, cx);
 }
 
 /// Brings forward a window that shows the profile, or opens one.
@@ -130,7 +121,6 @@ pub(crate) fn init(cx: &mut App) {
   let list = profile_list(cx);
   cx.set_menus(crate::menus(None, &list.profiles, &list.last));
   cx.set_dock_menu(crate::menus::dock_menu(&list.profiles));
-  cx.on_action(|_: &NewWindow, cx| new_window(cx));
   cx.on_action(|action: &SwitchProfile, cx| {
     let id = action.id.clone();
     cx.defer(move |cx| switch_profile(&id, cx));

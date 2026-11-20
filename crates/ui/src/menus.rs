@@ -1,8 +1,8 @@
 //! Native menus for the menu bar and Dock icon.
 
 use crate::{
-  AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, NewClaude, NewCodex, NewWindow, OpenSettings, Quit, SaveFile, SwitchProfile,
-  ToggleAgents, ToggleTerminal, ViewOnHost,
+  AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, NewClaude, NewCodex, OpenSettings, Quit, SaveFile, SwitchProfile, ToggleAgents,
+  ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::*;
 use vekro_storage::Profile;
@@ -12,10 +12,7 @@ fn profile_item(profile: &Profile) -> MenuItem {
 }
 
 pub(crate) fn dock_menu(profiles: &[Profile]) -> Vec<MenuItem> {
-  [MenuItem::action("New Window", NewWindow), MenuItem::separator(), MenuItem::action("Profiles", NoAction).disabled(true)]
-    .into_iter()
-    .chain(profiles.iter().map(profile_item))
-    .collect()
+  [MenuItem::action("Profiles", NoAction).disabled(true)].into_iter().chain(profiles.iter().map(profile_item)).collect()
 }
 
 /// The menus. `host` names the service of the open project's remote ("GitHub", "GitLab", "Azure DevOps", or a host name): the
@@ -34,7 +31,6 @@ pub fn menus(host: Option<&str>, profiles: &[Profile], current: &str) -> Vec<Men
       MenuItem::action("Quit Vekro", Quit),
     ]),
     Menu::new("File").items([
-      MenuItem::action("New Window", NewWindow),
       MenuItem::action("Add Project…", AddProject),
       MenuItem::separator(),
       MenuItem::action("Save", SaveFile),
