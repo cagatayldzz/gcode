@@ -165,6 +165,29 @@ printf done"#,
   wait_for_exit(&receiver);
 }
 
+#[cfg(unix)]
+#[test]
+fn a_claude_code_title_reports_idle_and_working_states() {
+  let (session, receiver) = run(
+    r#"set -m
+/bin/sh -c 'printf "\033]0;✳ Claude Code\007"; read -r line; printf "\033]0;⠂ Claude Code\007"; read -r line; printf "\033]0;✳ Claude Code\007"; read -r line'
+printf done"#,
+  );
+  let probe = session.foreground_job_probe().unwrap();
+  for (title, busy) in [("✳ Claude Code", false), ("⠂ Claude Code", true), ("✳ Claude Code", false)] {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+      let event = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())).expect("the program should update its title");
+      if event == SessionEvent::Title(title.into()) {
+        break;
+      }
+    }
+    assert_eq!(probe(), busy, "wrong activity for {title}");
+    session.write(&b"next\n"[..]);
+  }
+  wait_for_exit(&receiver);
+}
+
 #[test]
 fn links_are_resolved_from_terminal_cells() {
   let (session, receiver) =

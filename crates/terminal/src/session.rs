@@ -98,16 +98,20 @@ impl ForegroundActivity {
   }
 
   fn observe_title(&self, title: &str) {
-    // Codex's activity item is a standalone Braille frame while working. It
-    // disappears when the task ends, even though Codex keeps the foreground.
-    let working = title.split_whitespace().any(|part| matches!(part, "⠋" | "⠙" | "⠹" | "⠸" | "⠼" | "⠴" | "⠦" | "⠧" | "⠇" | "⠏"));
+    // Codex and Claude Code show a standalone Braille frame while working. It disappears (Codex) or becomes
+    // a static mark such as "✳" (Claude Code) when the task ends, though the program keeps the foreground.
+    let working = title.split_whitespace().any(|part| {
+      let mut chars = part.chars();
+      matches!((chars.next(), chars.next()), (Some('\u{2800}'..='\u{28ff}'), None))
+    });
+    let idle = title.starts_with('✳');
     let waiting = title.contains("[ ! ] Action Required") || title.contains("[ . ] Action Required");
     let mut activity = self.title_activity.lock().unwrap_or_else(|error| error.into_inner());
-    if !working && !waiting && activity.is_none() {
+    if !working && !waiting && !idle && activity.is_none() {
       return;
     }
     let Some(group) = self.group_id() else { return };
-    if working || waiting || activity.is_some_and(|(tracked_group, _)| tracked_group == group) {
+    if working || waiting || idle || activity.is_some_and(|(tracked_group, _)| tracked_group == group) {
       *activity = Some((group, working));
     }
   }
