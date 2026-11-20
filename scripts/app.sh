@@ -122,6 +122,19 @@ sign() {
   output="$(codesign --force --sign - "$app_dir" 2>&1)" || fail "$output"
 }
 
+# `open` only brings an already running instance forward, so quit the running development app first: politely, then by force.
+stop_running_app() {
+  local identifier="com.cagatayldzz.vekro.dev" attempt
+  pgrep -f "$app_dir/Contents/MacOS/Vekro" >/dev/null 2>&1 || return 0
+  osascript -e "tell application id \"$identifier\" to quit" >/dev/null 2>&1 || true
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    pgrep -f "$app_dir/Contents/MacOS/Vekro" >/dev/null 2>&1 || return 0
+    sleep 0.3
+  done
+  pkill -f "$app_dir/Contents/MacOS/Vekro" >/dev/null 2>&1 || true
+  sleep 0.5
+}
+
 build_app() {
   compile
   bundle
@@ -135,7 +148,11 @@ case "$action" in
   icon) make_icon ;;
   build) build_app ;;
   dev)
-    build_app
-    open -n "$app_dir"
+    compile
+    stop_running_app
+    bundle
+    sign
+    echo "Ready: $app_dir"
+    open "$app_dir"
     ;;
 esac

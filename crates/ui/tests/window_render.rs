@@ -1,0 +1,143 @@
+//! Opens the real Vekro window headlessly and draws it, so a panic while building or drawing it (for example a style that is set
+//! twice) fails here and not only when the app is launched.
+
+use gpui_kit::test::TestWindowExt as _;
+use gpui_kit::{AppContext, TestAppContext};
+use std::{
+  fs,
+  path::Path,
+  sync::{Mutex, MutexGuard},
+};
+use vekro_storage::Profile;
+
+/// A fresh temporary data directory that the test owns until it is dropped. `VEKRO_DATA_DIR` is shared by the whole process, so
+/// the tests take turns.
+struct Scratch {
+  dir: tempfile::TempDir,
+  _turn: MutexGuard<'static, ()>,
+}
+
+impl Scratch {
+  fn path(&self) -> &Path {
+    self.dir.path()
+  }
+}
+
+/// Points the data directory at a fresh temporary folder, so that the test never reads or writes the user's own data.
+fn scratch_data_dir() -> Scratch {
+  static TURN: Mutex<()> = Mutex::new(());
+  let turn = TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+  let dir = tempfile::tempdir().expect("create a data directory");
+  std::env::set_var("VEKRO_DATA_DIR", dir.path());
+  Scratch { dir, _turn: turn }
+}
+
+fn draw_every_window(cx: &mut TestAppContext) {
+  cx.run_until_parked();
+  for handle in cx.windows() {
+    cx.update_window(handle, |_, window, cx| drop(window.draw(cx))).expect("draw the window");
+  }
+  cx.run_until_parked();
+}
+
+#[gpui_kit::test]
+fn a_new_window_draws_without_a_project(cx: &mut TestAppContext) {
+  let _data = scratch_data_dir();
+  cx.update(|cx| {
+    gpui_kit::init(cx);
+    vekro_ui::init(cx);
+    vekro_ui::open_window(Profile::default_profile(), cx);
+  });
+  draw_every_window(cx);
+  assert_eq!(cx.windows().len(), 1);
+}
+
+#[gpui_kit::test]
+fn a_window_with_a_project_draws_its_explorer(cx: &mut TestAppContext) {
+  let data = scratch_data_dir();
+  let project = data.path().join("project");
+  fs::create_dir_all(project.join("src")).expect("create the project");
+  fs::write(project.join("src/main.rs"), "fn main() {}\n").expect("write a file");
+  fs::write(project.join("README.md"), "# Project\n").expect("write a file");
+  fs::write(data.path().join("projects.json"), serde_json::json!({ "projects": [{ "path": project }], "active": project }).to_string())
+    .expect("write the project list");
+  cx.update(|cx| {
+    gpui_kit::init(cx);
+    vekro_ui::init(cx);
+    vekro_ui::open_window(Profile::default_profile(), cx);
+  });
+  draw_every_window(cx);
+  assert_eq!(cx.windows().len(), 1);
+}
+
+#[gpui_kit::test]
+fn opening_a_profile_twice_keeps_one_window(cx: &mut TestAppContext) {
+  let _data = scratch_data_dir();
+  cx.update(|cx| {
+    gpui_kit::init(cx);
+    vekro_ui::init(cx);
+    vekro_ui::open_window(Profile::default_profile(), cx);
+  });
+  draw_every_window(cx);
+  cx.update(|cx| vekro_ui::open_window(Profile::default_profile(), cx));
+  draw_every_window(cx);
+  assert_eq!(cx.windows().len(), 1);
+}
+
+#[gpui_kit::test]
+fn a_window_moved_right_before_it_closes_is_still_remembered(cx: &mut TestAppContext) {
+  let data = scratch_data_dir();
+  cx.update(|cx| {
+    gpui_kit::init(cx);
+    vekro_ui::init(cx);
+    vekro_ui::open_window(Profile::default_profile(), cx);
+  });
+  draw_every_window(cx);
+  let handle = cx.windows()[0];
+  cx.simulate_window_resize(handle, gpui_kit::size(gpui_kit::px(913.), gpui_kit::px(611.)));
+  draw_every_window(cx);
+  // Closed within the delay of the normal save: only the write on close can have stored it.
+  cx.update_window(handle, |_, window, _| window.remove_window()).expect("close the window");
+  cx.run_until_parked();
+  cx.update(|_| {});
+  let placement = vekro_storage::WindowPlacement::load(&data.path().join("window.json")).expect("the placement was written on close");
+  assert_eq!((placement.width, placement.height), (913., 611.));
+}
+
+/// Opens a window whose profile has one project, and returns it with the data directory that holds the project.
+fn open_window_with_project(cx: &mut TestAppContext) -> (Scratch, gpui_kit::AnyWindowHandle) {
+  let data = scratch_data_dir();
+  let project = data.path().join("project");
+  fs::create_dir_all(&project).expect("create the project");
+  fs::write(data.path().join("projects.json"), serde_json::json!({ "projects": [{ "path": project }], "active": project }).to_string())
+    .expect("write the project list");
+  cx.update(|cx| {
+    gpui_kit::init(cx);
+    vekro_ui::init(cx);
+    vekro_ui::open_window(Profile::default_profile(), cx);
+  });
+  draw_every_window(cx);
+  let handle = cx.windows()[0];
+  (data, handle)
+}
+
+/// Runs the action in the window the way a button or a shortcut does, then draws the result.
+fn toggle_project_settings(cx: &mut TestAppContext, handle: gpui_kit::AnyWindowHandle) {
+  cx.update_window(handle, |_, window, cx| window.dispatch_action(Box::new(vekro_ui::ToggleProjectSettings), cx)).expect("dispatch");
+  cx.run_until_parked();
+  cx.update_window(handle, |_, window, cx| window.render_frame(cx)).expect("draw");
+}
+
+fn settings_view_is_open(cx: &mut TestAppContext, handle: gpui_kit::AnyWindowHandle) -> bool {
+  cx.update_window(handle, |_, window, _| window.try_find("settings-save").is_some()).expect("look at the window")
+}
+
+#[gpui_kit::test]
+fn the_project_settings_view_opens_and_closes_from_the_activity_bar(cx: &mut TestAppContext) {
+  let (_data, handle) = open_window_with_project(cx);
+  assert!(!settings_view_is_open(cx, handle), "the settings view is not open yet");
+  toggle_project_settings(cx, handle);
+  assert!(settings_view_is_open(cx, handle), "the settings view takes the main area");
+  toggle_project_settings(cx, handle);
+  assert!(!settings_view_is_open(cx, handle), "the button closes the settings view again");
+}

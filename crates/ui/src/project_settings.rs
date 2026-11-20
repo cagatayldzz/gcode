@@ -1,5 +1,5 @@
-//! The dialog that sets how a project looks in the project menu (its name, icon and color) and where its Git remote points.
-//! Appearance and Git settings share a footer with project management controls.
+//! The project settings view: how a project is named and looks in the project menu (name, icon, color), where its Git remote
+//! points, and removing it. It takes the main area like the terminals do, as one page with a bar of actions at the bottom.
 
 use crate::{
   components::{avatar_look, display_path},
@@ -14,8 +14,8 @@ use gpui_kit::{
     h_flex,
     input::{InputEvent, InputState},
     label::Label,
-    tab::{Tab, TabBar},
-    v_flex, ActiveTheme, Icon, StyledExt as _, WindowExt as _,
+    scroll::{Scrollbar, ScrollbarAxis, ScrollbarMode},
+    v_flex, ActiveTheme, Disableable as _, Icon, StyledExt as _,
   },
   *,
 };
@@ -66,6 +66,8 @@ pub(crate) struct AppearanceChosen {
 pub(crate) enum ProjectSettingsEvent {
   Save(AppearanceChosen),
   RemoveRequested(PathBuf),
+  /// Leave the view without saving.
+  Close,
 }
 
 pub(crate) struct ProjectSettings {
@@ -76,7 +78,7 @@ pub(crate) struct ProjectSettings {
   rename_folder: bool,
   icon: Option<String>,
   color: Option<String>,
-  tab: usize,
+  scroll: ScrollHandle,
   _subscription: Subscription,
 }
 
@@ -102,7 +104,7 @@ impl ProjectSettings {
       rename_folder: false,
       icon: project.icon.clone(),
       color: project.color.clone(),
-      tab: 0,
+      scroll: ScrollHandle::new(),
       _subscription: subscription,
     }
   }
@@ -125,6 +127,17 @@ impl ProjectSettings {
   fn folder_differs(&self, cx: &Context<Self>) -> bool {
     let name = self.input.read(cx).value().trim().to_string();
     !name.is_empty() && name != self.project.folder_name()
+  }
+
+  /// Whether anything differs from what the project has now, which is what Save would change.
+  fn is_dirty(&self, cx: &Context<Self>) -> bool {
+    let name = self.input.read(cx).value().trim().to_string();
+    let remote = self.remote_input.read(cx).value().trim().to_string();
+    name != self.project.name()
+      || self.icon != self.project.icon
+      || self.color != self.project.color
+      || (remote != self.remote && !remote.is_empty())
+      || (self.rename_folder && self.folder_differs(cx))
   }
 
   fn swatch(&self, index: usize, cx: &mut Context<Self>) -> impl IntoElement {
@@ -197,25 +210,22 @@ impl ProjectSettings {
     project.color.clone_from(&self.color);
     let avatar = avatar_look(&project, true, cx);
     h_flex()
-      .gap_3()
+      .gap_4()
       .items_center()
-      .px_6()
-      .pt_5()
-      .pb_4()
       .child(
         div()
           .flex()
           .items_center()
           .justify_center()
-          .size_12()
+          .size_16()
           .flex_none()
           .rounded_lg()
-          .text_lg()
+          .text_xl()
           .font_semibold()
           .text_color(avatar.text)
           .when_some(avatar.fill, |badge, fill| badge.bg(fill))
           .map(|badge| match avatar.icon {
-            Some(path) => badge.child(Icon::empty().path(path).size_6()),
+            Some(path) => badge.child(Icon::empty().path(path).size_8()),
             None => badge.child(avatar.letter),
           }),
       )
@@ -223,15 +233,15 @@ impl ProjectSettings {
         v_flex()
           .min_w_0()
           .gap_0p5()
-          .child(div().truncate().text_lg().font_semibold().child(project.name()))
+          .child(div().truncate().text_xl().font_semibold().child(project.name()))
           .child(div().truncate().text_size(FONT_SIZE_SM).text_color(palette.text_secondary).child(display_path(&self.project.path))),
       )
   }
 
-  fn appearance(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  /// The display name, and whether the folder on disk follows it.
+  fn general(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let muted = cx.theme().muted_foreground;
-    let default_color = self.color.is_none();
     let name_field = v_flex().gap_2().child(crate::components::soft_input(&self.input, cx)).when(self.folder_differs(cx), |column| {
       column
         .child(Checkbox::new("rename-folder").label("Also rename the folder on disk").checked(self.rename_folder).on_click(cx.listener(
@@ -246,6 +256,14 @@ impl ProjectSettings {
             .text_color(palette.text_secondary),
         )
     });
+    section("General", "The name shown in the project menu and on the project's tab.", field("Display name", muted, name_field), cx)
+  }
+
+  /// The color and the icon of the project's avatar.
+  fn appearance(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let palette = colors(cx);
+    let muted = cx.theme().muted_foreground;
+    let default_color = self.color.is_none();
     let colors_row = h_flex()
       .gap_1()
       .items_center()
@@ -270,72 +288,114 @@ impl ProjectSettings {
           })),
       )
       .children((0..PROJECT_COLORS.len()).map(|index| self.swatch(index, cx)));
-    let icons = h_flex()
-      .gap_0p5()
-      .flex_wrap()
-      .p_1()
-      .rounded_md()
-      .border_1()
-      .border_color(palette.border)
-      .child(self.icon_button(None, cx))
-      .children(PROJECT_ICONS.iter().map(|name| self.icon_button(Some(name), cx)));
-    v_flex().gap_4().child(field("Display name", muted, name_field)).child(field("Color", muted, colors_row)).child(field("Icon", muted, icons))
+    let icons =
+      h_flex().gap_0p5().flex_wrap().child(self.icon_button(None, cx)).children(PROJECT_ICONS.iter().map(|name| self.icon_button(Some(name), cx)));
+    section(
+      "Appearance",
+      "The avatar of the project: a color, and an icon instead of its first letter.",
+      v_flex().gap_4().child(field("Color", muted, colors_row)).child(field("Icon", muted, icons)),
+      cx,
+    )
   }
+
+  fn git(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let muted = cx.theme().muted_foreground;
+    section(
+      "Git",
+      "Update the remote address when the repository moves.",
+      field("Git remote", muted, crate::components::soft_input(&self.remote_input, cx)),
+      cx,
+    )
+  }
+
+  /// Removing the project from Vekro; its folder stays on disk.
+  fn danger(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let palette = colors(cx);
+    let path = self.project.path.clone();
+    section(
+      "Remove project",
+      "The project leaves the list and its terminals stop. The folder and its files stay on disk.",
+      h_flex().child(
+        Button::new("settings-remove")
+          .label("Remove project")
+          .icon(Icon::empty().path("icons/trash.svg"))
+          .danger()
+          .outline()
+          .on_click(cx.listener(move |_, _, _, cx| cx.emit(ProjectSettingsEvent::RemoveRequested(path.clone())))),
+      ),
+      cx,
+    )
+    .border_color(palette.deleted.opacity(0.35))
+  }
+}
+
+/// One block of the page: a title with a line of explanation, and its controls on a bordered surface.
+fn section(title: &'static str, description: &'static str, content: impl IntoElement, cx: &App) -> Div {
+  let palette = colors(cx);
+  v_flex()
+    .gap_4()
+    .p_5()
+    .rounded_lg()
+    .border_1()
+    .border_color(palette.border)
+    .bg(palette.surface)
+    .child(
+      v_flex()
+        .gap_0p5()
+        .child(Label::new(title).font_weight(FontWeight::SEMIBOLD))
+        .child(Label::new(description).text_size(FONT_SIZE_SM).text_color(palette.text_secondary)),
+    )
+    .child(content)
 }
 
 impl Render for ProjectSettings {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
-    let muted = cx.theme().muted_foreground;
-    let tab = |label: &'static str, icon: &'static str| {
-      Tab::new().cursor_pointer().child(h_flex().gap_2().items_center().child(Icon::empty().path(icon).size_4()).child(label))
-    };
-    let tabs = TabBar::new("project-settings-tabs")
-      .segmented()
-      .selected_index(self.tab)
-      .on_click(cx.listener(|this, index: &usize, _, cx| {
-        this.tab = *index;
-        cx.notify();
-      }))
-      .child(tab("Appearance", "icons/palette.svg"))
-      .child(tab("Git", "icons/git-branch.svg"));
-    let body = if self.tab == 0 {
-      self.appearance(cx).into_any_element()
-    } else {
-      v_flex()
-        .gap_2()
-        .child(field("Git remote", muted, crate::components::soft_input(&self.remote_input, cx)))
-        .child(Label::new("Update the remote URL when the repository moves.").text_size(FONT_SIZE_SM).text_color(palette.text_secondary))
-        .into_any_element()
-    };
-    v_flex()
-      .overflow_hidden()
-      .text_size(FONT_SIZE)
+    let dirty = self.is_dirty(cx);
+    let page = v_flex()
+      .w_full()
+      .max_w(rems(44.))
+      .mx_auto()
+      .gap_5()
+      .p_6()
       .child(self.header(cx))
-      .child(div().px_6().pb_4().child(tabs))
-      .child(div().id("project-settings-body").h(rems(21.)).overflow_y_scroll().px_6().pb_5().child(body))
+      .child(self.general(cx))
+      .child(self.appearance(cx))
+      .child(self.git(cx))
+      .child(self.danger(cx));
+    v_flex()
+      .size_full()
+      .bg(palette.background)
+      .text_size(FONT_SIZE)
+      .child(
+        div()
+          .relative()
+          .flex_1()
+          .min_h_0()
+          .child(div().id("project-settings-body").size_full().overflow_y_scroll().track_scroll(&self.scroll).child(page))
+          .child(
+            div().absolute().inset_0().child(
+              Scrollbar::new(&self.scroll)
+                .id("project-settings-scrollbar")
+                .axis(ScrollbarAxis::Vertical)
+                .mode(ScrollbarMode::Always)
+                .viewport_from_layout(),
+            ),
+          ),
+      )
       .child(
         h_flex()
-          .justify_between()
-          .gap_3()
+          .justify_end()
+          .gap_2()
           .px_6()
           .py_3()
           .border_t_1()
           .border_color(palette.border)
-          .child(
-            Button::new("settings-remove")
-              .label("Remove project")
-              .icon(Icon::empty().path("icons/trash.svg"))
-              .danger()
-              .ghost()
-              .on_click(cx.listener(|this, _, _, cx| cx.emit(ProjectSettingsEvent::RemoveRequested(this.project.path.clone())))),
-          )
-          .child(
-            h_flex()
-              .gap_2()
-              .child(Button::new("settings-cancel").label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
-              .child(Button::new("settings-save").label("Save").primary().on_click(cx.listener(|this, _, _, cx| this.save(cx)))),
-          ),
+          .bg(palette.rail)
+          .child(Button::new("settings-cancel").label(if dirty { "Discard" } else { "Close" }).on_click(cx.listener(|_, _, _, cx| {
+            cx.emit(ProjectSettingsEvent::Close);
+          })))
+          .child(Button::new("settings-save").label("Save").primary().disabled(!dirty).on_click(cx.listener(|this, _, _, cx| this.save(cx)))),
       )
   }
 }

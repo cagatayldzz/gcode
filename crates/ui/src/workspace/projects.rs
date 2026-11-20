@@ -1,6 +1,7 @@
 //! The project list, project switching and refreshing.
 
 use super::*;
+use std::cell::Cell;
 
 impl Workspace {
   /// Adds the repositories directly inside the projects folder that are not listed yet, and says how many.
@@ -42,6 +43,7 @@ impl Workspace {
       height: f32::from(bounds.size.height),
       mode,
     };
+    self.placement.set(Some(placement));
     self.window_save = cx.spawn(async move |_, cx| {
       cx.background_executor().timer(WINDOW_SAVE_DELAY).await;
       cx.background_executor()
@@ -52,6 +54,13 @@ impl Workspace {
         })
         .await;
     });
+  }
+
+  /// Writes the latest placement now, without the delay, for when the app quits.
+  pub(super) fn save_placement_now(&mut self) {
+    // A pending delayed write would only repeat this one.
+    self.window_save = Task::ready(());
+    save_placement(&self.placement);
   }
 
   /// Opens the dialog that creates, clones or imports a project.
@@ -170,10 +179,6 @@ impl Workspace {
 
   /// Asks before taking a project out of Vekro: its shells stop, its folder stays on disk.
   pub(crate) fn confirm_remove_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-    self.confirm_project_removal(path, false, window, cx);
-  }
-
-  pub(super) fn confirm_project_removal(&mut self, path: PathBuf, from_settings: bool, window: &mut Window, cx: &mut Context<Self>) {
     let Some(project) = self.projects.projects.iter().find(|project| project.path == path) else { return };
     let (title, workspace) = (SharedString::from(format!("Remove {}?", project.name())), cx.entity());
     window.open_alert_dialog(cx, move |alert, _, _| {
@@ -186,18 +191,17 @@ impl Workspace {
         .ok_text("Remove")
         .ok_variant(ButtonVariant::Danger)
         .on_ok(move |_, window, cx| {
-          if from_settings {
-            window.close_dialog(cx);
-            window.close_dialog(cx);
-          }
           workspace.update(cx, |this, cx| this.remove_project(&path, window, cx));
-          !from_settings
+          true
         })
     });
   }
 
   /// Takes a project out of the list. If it is the open one, another project opens.
   pub(super) fn remove_project(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    if self.project_settings.is_some() {
+      self.hide_terminal(window, cx);
+    }
     if self.projects.active.as_deref() == Some(path) {
       let removed = path.to_path_buf();
       self.switch_project(window, cx, move |projects| projects.remove(&removed));
@@ -211,14 +215,29 @@ impl Workspace {
     cx.notify();
   }
 
-  /// Opens the dialog for a project's name, icon, color and Git remote.
+  /// The activity bar's project settings button: the settings of the open project take the main area, or give it back.
+  pub fn toggle_project_settings(&mut self, _: &ToggleProjectSettings, window: &mut Window, cx: &mut Context<Self>) {
+    if self.project_settings.is_some() {
+      self.hide_terminal(window, cx);
+    } else if let Some(path) = self.projects.active.clone() {
+      self.open_project_settings(&path, window, cx);
+    }
+  }
+
+  /// Shows the settings of a project (name, icon, color, Git remote) in the main area.
   pub(crate) fn open_project_settings(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
     let Some(project) = self.projects.projects.iter().find(|project| project.path == path).cloned() else { return };
+    // The project list dialog may be what asked.
+    window.close_all_dialogs(cx);
     let settings = cx.new(|cx| ProjectSettings::new(&project, window, cx));
-    self._dialog_subscription = Some(cx.subscribe_in(&settings, window, |this, _, event: &ProjectSettingsEvent, window, cx| {
+    self._project_settings_subscription = Some(cx.subscribe_in(&settings, window, |this, _, event: &ProjectSettingsEvent, window, cx| {
       let chosen = match event {
         ProjectSettingsEvent::RemoveRequested(path) => {
-          this.confirm_project_removal(path.clone(), true, window, cx);
+          this.confirm_remove_project(path.clone(), window, cx);
+          return;
+        }
+        ProjectSettingsEvent::Close => {
+          this.hide_terminal(window, cx);
           return;
         }
         ProjectSettingsEvent::Save(chosen) => chosen,
@@ -258,10 +277,19 @@ impl Workspace {
           }
         }
       }
-      window.close_dialog(cx);
-      cx.notify();
+      window.push_notification(Notification::info("Project settings saved."), cx);
+      this.hide_terminal(window, cx);
     }));
-    window.open_dialog(cx, move |dialog, window, _| dialog.p_0().width(window.rem_size() * 38.).child(settings.clone()));
+    self.terminal_open = false;
+    self.agent_open = false;
+    self.project_settings = Some(settings);
+    cx.notify();
+  }
+
+  /// Takes the project settings view off the main area (the caller decides what is shown instead and where the keyboard goes).
+  pub(super) fn leave_project_settings(&mut self) {
+    self.project_settings = None;
+    self._project_settings_subscription = None;
   }
 
   /// Renames a project's folder on disk and points the project at it. Returns the new path. Nothing changes when the
@@ -298,6 +326,7 @@ impl Workspace {
   /// and comes back when it is opened again; its shells keep running.
   pub(super) fn switch_project(&mut self, window: &mut Window, cx: &mut Context<Self>, change: impl FnOnce(&mut ProjectList)) {
     self.hovered_folder = None;
+    self.leave_project_settings();
     let before = self.projects.active.clone();
     if let Some(root) = &before {
       let view = ProjectView {
@@ -455,5 +484,14 @@ impl Workspace {
       });
     })
     .detach();
+  }
+}
+
+/// Writes the placement in `latest` (once) to `window.json`; a failure is logged.
+pub(super) fn save_placement(latest: &Cell<Option<WindowPlacement>>) {
+  if let Some(placement) = latest.take() {
+    if let Err(error) = placement.save(&WindowPlacement::default_path()) {
+      eprintln!("Could not save the window size: {error}");
+    }
   }
 }

@@ -55,6 +55,8 @@ actions!(
     MentionProjects,
     ToggleTerminal,
     ToggleAgents,
+    // The activity bar's project settings button: the settings of the open project take the main area, or give it back.
+    ToggleProjectSettings,
     // The AI view: a new Codex or Claude session in the open project.
     NewCodex,
     NewClaude,

@@ -82,6 +82,9 @@ Code map and data flow: [architecture](architecture.md).
 Tests live in `crates/<crate>/tests/`, never inline. Terminal session tests run real programs
 (`/bin/sh -c …`) through a PTY. Git tests create repositories in temporary directories. Tests that touch
 the data directory use temporary directories; `VEKRO_DATA_DIR` overrides the location.
+`crates/ui/tests/window_render.rs` opens and draws the real window headlessly (GPUI Kit `test-support`), so a panic while
+building or drawing the interface, which would crash the app at launch, fails `bun run check`. Add a case there when a
+change touches what the first window draws.
 
 Shell tests for the scripts and workflows live in `scripts/tests/`.
 

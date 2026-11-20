@@ -37,6 +37,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["s
 
 [dev-dependencies]
 git2.workspace = true
+gpui-kit = { workspace = true, features = ["test-support"] }
 
 [[bench]]
 name = "performance"

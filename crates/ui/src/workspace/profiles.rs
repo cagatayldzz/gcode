@@ -14,16 +14,28 @@ impl Workspace {
     &self.profile
   }
 
+  /// The handle that gives the keyboard to the window itself, where its shortcuts are handled.
+  pub(crate) fn focus_handle(&self) -> &FocusHandle {
+    &self.focus_handle
+  }
+
   /// The current profile's avatar and the actions from the Profiles menu.
-  pub(super) fn render_profile_picker(&self) -> impl IntoElement {
+  pub(super) fn render_profile_picker(&self, cx: &App) -> impl IntoElement {
+    let palette = crate::theme::colors(cx);
     let current = self.profile.id.clone();
     let focus = self.focus_handle.clone();
     let label = SharedString::from(format!("Profile: {}", self.profile.name));
     Button::new("profile-picker")
-      .ghost()
-      .size_8()
+      .custom(
+        ButtonCustomVariant::new(cx)
+          .color(gpui_kit::transparent_black())
+          .foreground(palette.rail_text)
+          .hover(palette.rail_hover)
+          .active(palette.rail_hover),
+      )
+      .size_10()
       .p_0()
-      .rounded_full()
+      .rounded_md()
       .accessibility_label(label.clone())
       .tooltip(label)
       .child(Avatar::new().name(self.profile.name.clone()).small())

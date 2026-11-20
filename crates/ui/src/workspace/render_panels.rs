@@ -26,7 +26,6 @@ impl Workspace {
       .py_0p5()
       .pl(INDENT * row.depth as f32 + rems(0.5))
       .relative()
-      .rounded_sm()
       .items_center()
       .cursor_pointer()
       .when(selected, |entry| entry.bg(palette.explorer_selected))
@@ -107,8 +106,7 @@ impl Workspace {
       cx.processor(|this, range: Range<usize>, _, cx| {
         let rows: Vec<explorer::Row> = this.rows.get(range).map(<[explorer::Row]>::to_vec).unwrap_or_default();
         let font_size = px(this.settings.read(cx).preferences.explorer_font_size as f32);
-        // Inset the rows and keep the scrollbar at the edge of the sidebar.
-        rows.iter().map(|row| div().w_full().px_1p5().child(this.explorer_row(row, font_size, cx)).into_any_element()).collect::<Vec<_>>()
+        rows.iter().map(|row| div().w_full().child(this.explorer_row(row, font_size, cx)).into_any_element()).collect::<Vec<_>>()
       }),
     )
     .track_scroll(&self.explorer_scroll)
@@ -125,10 +123,13 @@ impl Workspace {
       }))
       .child(list)
       .child(
-        div()
-          .absolute()
-          .inset_0()
-          .child(Scrollbar::new(&self.explorer_scroll).id("explorer-scrollbar").axis(ScrollbarAxis::Vertical).viewport_from_layout()),
+        div().absolute().inset_0().child(
+          Scrollbar::new(&self.explorer_scroll)
+            .id("explorer-scrollbar")
+            .axis(ScrollbarAxis::Vertical)
+            .mode(ScrollbarMode::Always)
+            .viewport_from_layout(),
+        ),
       );
     let name = self
       .projects
@@ -254,16 +255,15 @@ impl Workspace {
     );
     let settings = div()
       .relative()
-      .child(rail_button("project-settings-open", Icon::empty().path("icons/folder-cog.svg"), "Project settings", false, true, &palette, {
-        let workspace = workspace.clone();
-        move |_, window, cx| {
-          workspace.update(cx, |this, cx| {
-            if let Some(path) = this.projects.active.clone() {
-              this.open_project_settings(&path, window, cx);
-            }
-          })
-        }
-      }))
+      .child(rail_button(
+        "project-settings-open",
+        Icon::empty().path("icons/folder-cog.svg"),
+        "Project settings",
+        self.project_settings.is_some(),
+        true,
+        &palette,
+        |_, window, cx| window.dispatch_action(Box::new(ToggleProjectSettings), cx),
+      ))
       // While an account has a permission problem, the warning badge opens Accounts.
       .when(attention, |gear| {
         gear.child(
@@ -324,7 +324,7 @@ impl Workspace {
       .children(layout.visible(&activity_ids()).into_iter().filter_map(|id| buttons.remove(id)))
       .child(settings)
       .child(div().flex_1())
-      .child(self.render_profile_picker())
+      .child(self.render_profile_picker(cx))
   }
 
   /// The terminals, filling the main area like a terminal window: a tab strip when there are several tabs, and the panes of the

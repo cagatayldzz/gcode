@@ -26,7 +26,7 @@ use crate::{
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
   AddProfile, AddProject, CheckForUpdates, ClearBuffer, CloseTab, EditProfiles, MentionProjects, NewClaude, NewCodex, NewTerminal, OpenSettings,
-  SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleTerminal, ViewOnHost,
+  SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{base::Selectable as _, prelude::FluentBuilder as _};
 use gpui_kit::{
@@ -53,9 +53,11 @@ use gpui_kit::{
   *,
 };
 use std::{
+  cell::Cell,
   collections::{HashMap, HashSet},
   ops::Range,
   path::{Path, PathBuf},
+  rc::Rc,
   sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
     Arc, Mutex,
@@ -299,6 +301,9 @@ pub struct Workspace {
   focus_handle: FocusHandle,
   _setup_subscription: Option<Subscription>,
   _dialog_subscription: Option<Subscription>,
+  /// The project settings view, which takes the main area like the terminals do while it is open.
+  project_settings: Option<Entity<ProjectSettings>>,
+  _project_settings_subscription: Option<Subscription>,
   /// The scroll position of the folder tree.
   explorer_scroll: UniformListScrollHandle,
   search_open: bool,
@@ -358,6 +363,7 @@ pub struct Workspace {
   /// How many commits the History view asks for now, and its scroll position (to load more near the end).
   history_limit: usize,
   history_scroll: ScrollHandle,
+  changes_scroll: ScrollHandle,
   /// The window is the one in front, and what the Repository menu said last.
   window_active: bool,
   menu_host: Option<String>,
@@ -391,7 +397,11 @@ pub struct Workspace {
   project_filter: Entity<InputState>,
   /// Writes where the window is once it has stopped moving or resizing; a newer change replaces (cancels) the pending write.
   window_save: Task<()>,
+  /// The latest placement, written at once when the window closes or the app quits, so that a move right before a restart is not lost.
+  placement: Rc<Cell<Option<WindowPlacement>>>,
   _window_bounds: Subscription,
+  _placement_on_quit: Subscription,
+  _placement_on_close: Subscription,
   _commit_subscriptions: Vec<Subscription>,
   _settings_subscriptions: Vec<Subscription>,
   _appearance: Subscription,
@@ -420,6 +430,7 @@ impl Workspace {
       let preferences = &settings.read(cx).preferences;
       apply_theme(preferences.theme, preferences.code_font_size, window, cx);
     }
+    let placement = Rc::new(Cell::new(None));
     let (dock, _skin) = DockSkin::dock_area("workspace-dock", Some(1), window, cx);
     let editor_panel = cx.new(|cx| EditorPanel::new(window, cx));
     dock.update(cx, |area, cx| {
@@ -446,6 +457,8 @@ impl Workspace {
       focus_handle: cx.focus_handle(),
       _setup_subscription: None,
       _dialog_subscription: None,
+      project_settings: None,
+      _project_settings_subscription: None,
       explorer_scroll: UniformListScrollHandle::default(),
       search_open: false,
       search_state: cx.new(|cx| InputState::new(window, cx).placeholder("Search project files")),
@@ -501,6 +514,7 @@ impl Workspace {
       history_epoch: 0,
       history_limit: HISTORY_PAGE,
       history_scroll: ScrollHandle::new(),
+      changes_scroll: ScrollHandle::new(),
       window_active: true,
       menu_host: None,
       menu_profiles: Vec::new(),
@@ -520,7 +534,20 @@ impl Workspace {
       projects_menu_open: false,
       project_filter: project_filter.clone(),
       window_save: Task::ready(()),
+      placement: placement.clone(),
       _window_bounds: cx.observe_window_bounds(window, |this, window, cx| this.remember_window(window, cx)),
+      _placement_on_quit: cx.on_app_quit(|this, _| {
+        this.save_placement_now();
+        async {}
+      }),
+      _placement_on_close: {
+        let window_id = window.window_handle().window_id();
+        cx.on_window_closed(move |_, closed| {
+          if closed == window_id {
+            projects::save_placement(&placement);
+          }
+        })
+      },
       _commit_subscriptions: vec![
         // The commit button is enabled once there is a summary.
         cx.subscribe(&commit_summary, |_, _, _: &InputEvent, cx| cx.notify()),
@@ -718,7 +745,9 @@ impl Render for Workspace {
       self.dock.clone().into_any_element()
     };
     // The terminals take the whole main area, like a terminal window; the sidebar stays beside it.
-    let main_area = if self.terminal_open {
+    let main_area = if let Some(settings) = &self.project_settings {
+      settings.clone().into_any_element()
+    } else if self.terminal_open {
       self.render_terminal_area(window, cx).into_any_element()
     } else if self.agent_open {
       self.render_agent_area(window, cx)
@@ -747,6 +776,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::new_terminal))
       .on_action(cx.listener(Self::toggle_terminal))
       .on_action(cx.listener(Self::toggle_agents))
+      .on_action(cx.listener(Self::toggle_project_settings))
       .on_action(cx.listener(Self::new_codex))
       .on_action(cx.listener(Self::new_claude))
       .on_action(cx.listener(Self::toggle_all_changes))

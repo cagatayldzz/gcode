@@ -1,6 +1,7 @@
 //! Favorite projects, Git toolbar, history and compare views.
 
 use super::*;
+use gpui_kit::component::avatar::Avatar;
 
 impl Workspace {
   pub(super) fn render_favorite_projects(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -236,7 +237,7 @@ impl Workspace {
     let chosen = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).count();
     let workspace = cx.entity();
     let changes_list =
-      v_flex().id("git-changes").flex_1().min_h_0().overflow_y_scrollbar().children(git.changes.iter().map(|change| {
+      v_flex().id("git-changes").size_full().overflow_y_scroll().track_scroll(&self.changes_scroll).children(git.changes.iter().map(|change| {
         let file = change.path.clone();
         let selected = self.selected_change.as_ref() == Some(&change.path);
         let included = !self.excluded.contains(&change.path);
@@ -450,7 +451,17 @@ impl Workspace {
               }
             }),
         )
-        .child(div().flex_1().min_h_0().when(git.changed() > 0, |list| list.child(changes_list)))
+        .child(div().relative().flex_1().min_h_0().when(git.changed() > 0, |list| {
+          list.child(changes_list).child(
+            div().absolute().inset_0().child(
+              Scrollbar::new(&self.changes_scroll)
+                .id("changes-scrollbar")
+                .axis(ScrollbarAxis::Vertical)
+                .mode(ScrollbarMode::Always)
+                .viewport_from_layout(),
+            ),
+          )
+        }))
         .child(commit_box)
         .into_any_element(),
       GitView::History => v_flex().flex_1().min_h_0().pt_2().child(self.render_history(cx)).into_any_element(),
@@ -468,8 +479,7 @@ impl Workspace {
     } else {
       self.commit_list(&self.history, true, cx)
     };
-    // The padding on the right is inside each list row, so that the scrollbar sits at the edge of the sidebar.
-    v_flex().flex_1().min_h_0().gap_2().child(div().px_3().child(self.render_compare_field(cx))).child(v_flex().flex_1().min_h_0().pl_3().child(body))
+    v_flex().flex_1().min_h_0().gap_2().child(div().px_3().child(self.render_compare_field(cx))).child(v_flex().flex_1().min_h_0().child(body))
   }
 
   /// A list of commits: the subject, who made it and when, the tags on it, and an arrow while the remote does not have it yet.
@@ -488,14 +498,12 @@ impl Workspace {
       // Only the last commit, and only while the remote does not have it, can be undone.
       let undoable = tip.as_deref() == Some(commit.id.as_str()) && commit.unpushed;
       let (menu_workspace, menu_id) = (workspace.clone(), commit.id.clone());
-      let initial: String = commit.author.chars().take(1).flat_map(char::to_uppercase).collect();
       h_flex()
         .id(SharedString::from(format!("commit-{}", commit.id)))
         .gap_2()
-        .px_2()
+        .px_3()
         .py_1p5()
         .items_center()
-        .rounded_md()
         .cursor_pointer()
         .when(selected, |row| row.bg(palette.selected))
         .hover(|row| row.bg(palette.hover))
@@ -506,30 +514,14 @@ impl Workspace {
             .gap_0p5()
             .child(Label::new(commit.summary.clone()).font_weight(FontWeight::MEDIUM).overflow_hidden().whitespace_nowrap().text_ellipsis())
             .child(
-              h_flex()
-                .gap_1p5()
-                .items_center()
-                .child(
-                  div()
-                    .size_4()
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .justify_center()
-                    .rounded_full()
-                    .bg(palette.hover)
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child(initial),
-                )
-                .child(
-                  Label::new(format!("{} · {}", commit.author, ago_long(commit.time)))
-                    .text_size(FONT_SIZE_SM)
-                    .text_color(theme.muted_foreground)
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis(),
-                ),
+              h_flex().gap_1p5().items_center().child(Avatar::new().name(commit.author.clone()).xsmall()).child(
+                Label::new(format!("{} · {}", commit.author, ago_long(commit.time)))
+                  .text_size(FONT_SIZE_SM)
+                  .text_color(theme.muted_foreground)
+                  .overflow_hidden()
+                  .whitespace_nowrap()
+                  .text_ellipsis(),
+              ),
             ),
         )
         .children(
@@ -590,7 +582,6 @@ impl Workspace {
         v_flex()
           .id("history-list")
           .size_full()
-          .pr_3()
           .overflow_y_scroll()
           .track_scroll(&self.history_scroll)
           .on_scroll(cx.listener(move |_, _: &ScrollEvent, _, cx| {

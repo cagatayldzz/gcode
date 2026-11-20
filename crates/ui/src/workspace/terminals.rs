@@ -82,6 +82,7 @@ impl Workspace {
 
   /// Shows the terminals in the main area and puts the keyboard in the shell.
   pub(super) fn show_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.leave_project_settings();
     self.terminal_open = true;
     self.agent_open = false;
     self.ensure_terminal(window, cx);
@@ -104,6 +105,7 @@ impl Workspace {
     let Some(root) = self.projects.active.clone() else { return };
     let Some(terminal) = self.start_terminal(root.clone(), window, cx) else { return };
     self.terminal_tabs.entry(root).or_insert_with(Arrangement::new).add_tab(terminal.clone());
+    self.leave_project_settings();
     self.terminal_open = true;
     self.agent_open = false;
     self.focus_pane(&terminal, window, cx);
@@ -159,6 +161,7 @@ impl Workspace {
 
   /// Hides the terminals and the AI view; the programs keep running. The keyboard goes back to the window, so shortcuts keep working.
   pub(crate) fn hide_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.leave_project_settings();
     self.terminal_open = false;
     self.agent_open = false;
     self.focus_handle.focus(window, cx);
@@ -170,9 +173,10 @@ impl Workspace {
     self.projects.active.as_ref().and_then(|root| self.agent_tabs.get(root))
   }
 
-  /// Either full-width view is showing: the terminals or the AI view. The sidebar, the editor and the status bar are hidden then.
+  /// A full-width view is showing: the terminals, the AI view or the project settings. The sidebar, the editor and the status bar
+  /// are hidden then.
   pub(super) fn full_area_open(&self) -> bool {
-    self.terminal_open || self.agent_open
+    self.terminal_open || self.agent_open || self.project_settings.is_some()
   }
 
   /// Gives the keyboard to the shown agent session, once it is drawn.
@@ -187,6 +191,7 @@ impl Workspace {
     if self.agent_open {
       self.hide_terminal(window, cx);
     } else {
+      self.leave_project_settings();
       self.terminal_open = false;
       self.agent_open = true;
       self.focus_agent(window, cx);
@@ -210,6 +215,7 @@ impl Workspace {
     let program = (shell, vec!["-l".to_owned(), "-i".to_owned(), "-c".to_owned(), kind.shell_line()]);
     let Some(terminal) = self.start_program(root.clone(), Some(program), kind.label(), window, cx) else { return };
     self.agent_tabs.entry(root).or_insert_with(AgentTabs::new).add(kind, terminal.clone());
+    self.leave_project_settings();
     self.terminal_open = false;
     self.agent_open = true;
     self.focus_pane(&terminal, window, cx);

@@ -89,13 +89,15 @@ The **Projects** page holds the projects folder and **Add all**.
 
 ### Project settings
 
-Right-click a project and choose **Settings…** to change how it looks:
+Click the folder-gear button in the activity bar (or the sliders button of a project in the project list) to open the settings of the open project. They take the whole area, like the terminals; click the button again, or Explorer, Git or the terminal, to leave. The page has these sections:
 
 - **Name** replaces the folder's name in the project menu and the Explorer (the folder itself is not renamed);
 - **Color** tints the avatar, and fills it while the project is open;
-- **Icon** shows one of 20 icons instead of the first letter.
+- **Icon** shows one of 20 icons instead of the first letter;
+- **Git** changes the address of the remote;
+- **Remove project** takes it out of Vekro (its folder stays on disk).
 
-Press Save (or Enter in the name field). Clearing the name, choosing **Default** and **Aa** goes back to the folder's name, the theme's blue and the first letter.
+Save is available once something changed; **Discard** leaves without saving (Enter in the name field also saves). Clearing the name, choosing **Default** and **Aa** goes back to the folder's name, the theme's blue and the first letter.
 
 ## Terminals
 

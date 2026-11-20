@@ -52,8 +52,10 @@ pub(crate) fn update_profiles<T>(cx: &mut App, change: impl FnOnce(&mut ProfileL
 
 /// The profile of a window, if it is a Vekro window that can be read right now (not the one being updated).
 fn window_profile(handle: AnyWindowHandle, cx: &App) -> Option<Profile> {
-  let workspace = handle.downcast::<Workspace>()?;
-  workspace.read(cx).ok().map(|workspace| workspace.profile().clone())
+  // The window's root is the Kit's `Root`, which holds the workspace as its view.
+  let root = handle.downcast::<gpui_kit::base::Root>()?;
+  let root = root.read(cx).ok()?;
+  root.view().clone().downcast::<Workspace>().ok().map(|workspace| workspace.read(cx).profile().clone())
 }
 
 /// The window as it was when it was last closed, if it still fits on a screen that is connected; else a centered default.
@@ -71,8 +73,17 @@ fn initial_bounds(cx: &App) -> WindowBounds {
   saved.unwrap_or_else(|| WindowBounds::Windowed(Bounds::centered(None, size(px(1280.), px(800.)), cx)))
 }
 
-/// Opens a window that shows `profile`.
+/// The window that shows the profile, if one is open and can be read right now.
+fn profile_window(id: &str, cx: &App) -> Option<AnyWindowHandle> {
+  cx.windows().into_iter().find(|handle| window_profile(*handle, cx).is_some_and(|shown| shown.id == id))
+}
+
+/// Shows `profile`: brings its window forward if it has one, else opens one. A profile never has two windows.
 pub fn open_window(profile: Profile, cx: &mut App) {
+  if let Some(handle) = profile_window(&profile.id, cx) {
+    let _ = handle.update(cx, |_, window, _| window.activate_window());
+    return;
+  }
   let options = WindowOptions {
     window_bounds: Some(initial_bounds(cx)),
     window_min_size: Some(size(px(800.), px(500.))),
@@ -80,8 +91,13 @@ pub fn open_window(profile: Profile, cx: &mut App) {
     ..TitleBar::window_options()
   };
   update_profiles(cx, |list| list.set_last(&profile.id));
-  gpui_kit::open_window(options, cx, move |window, cx| cx.new(|cx| Workspace::new(profile.clone(), window, cx)))
+  let (handle, workspace) = gpui_kit::open_window(options, cx, move |window, cx| cx.new(|cx| Workspace::new(profile.clone(), window, cx)))
     .expect("Failed to open the Vekro window");
+  // The keyboard starts in the window, so its shortcuts work before anything is clicked.
+  let _ = handle.update(cx, |_, window, cx| {
+    let focus = workspace.read(cx).focus_handle().clone();
+    focus.focus(window, cx);
+  });
 }
 
 /// Opens a window with the profile that was used last (at startup, and when the Dock icon is clicked with no window open).
@@ -93,13 +109,7 @@ pub fn open_last_window(cx: &mut App) {
 /// Brings forward a window that shows the profile, or opens one.
 fn switch_profile(id: &str, cx: &mut App) {
   let Some(profile) = profile_list(cx).get(id).cloned() else { return };
-  let existing = cx.windows().into_iter().find(|handle| window_profile(*handle, cx).is_some_and(|shown| shown.id == profile.id));
-  match existing {
-    Some(handle) => {
-      let _ = handle.update(cx, |_, window, _| window.activate_window());
-    }
-    None => open_window(profile, cx),
-  }
+  open_window(profile, cx);
   cx.activate(true);
 }
 

@@ -2,7 +2,7 @@
 
 use crate::close_order::CloseOrder;
 use crate::components::{strip, strip_tab};
-use crate::minimap::{gitignore_styles, Minimap};
+use crate::minimap::{dotenv_styles, gitignore_styles, Minimap};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   base::input::{FoldRange, HighlightStyleResolver, InputEdit, InputHighlighter, Rope},
@@ -598,6 +598,8 @@ impl EditorPanel {
       let mut state = EditorState::new(window, cx).language(language).line_number(true).default_value(text);
       if language == "gitignore" {
         state.set_highlighter_factory(Rc::new(|_| Some(Box::new(GitIgnoreHighlighter::default()))), cx);
+      } else if language == "dotenv" {
+        state.set_highlighter_factory(Rc::new(|_| Some(Box::new(DotenvHighlighter::default()))), cx);
       }
       state
     });
@@ -747,6 +749,10 @@ pub(crate) fn language_for(path: &Path) -> &'static str {
   if path.file_name().is_some_and(|name| name == ".gitignore") {
     return "gitignore";
   }
+  // `.env`, `.env.local`, `.env.production` and `production.env`.
+  if path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name == ".env" || name.starts_with(".env.") || name.ends_with(".env")) {
+    return "dotenv";
+  }
   match path.extension().and_then(|extension| extension.to_str()).unwrap_or_default().to_ascii_lowercase().as_str() {
     "rs" => "rust",
     "toml" => "toml",
@@ -776,6 +782,7 @@ fn language_label(path: &Path) -> &'static str {
     "toml" => "TOML",
     "json" => "JSON",
     "gitignore" => "Git Ignore",
+    "dotenv" => "Environment",
     "markdown" => "Markdown",
     "typescript" => "TypeScript",
     "tsx" => "TypeScript JSX",
@@ -807,6 +814,29 @@ impl InputHighlighter for GitIgnoreHighlighter {
 
   fn styles(&self, range: &Range<usize>, resolver: &dyn HighlightStyleResolver) -> Vec<(Range<usize>, HighlightStyle)> {
     gitignore_styles(&self.text, range, resolver)
+  }
+
+  fn fold_ranges(&self, _: &Rope) -> Vec<FoldRange> {
+    Vec::new()
+  }
+}
+
+#[derive(Default)]
+struct DotenvHighlighter {
+  text: Rope,
+}
+
+impl InputHighlighter for DotenvHighlighter {
+  fn language(&self) -> SharedString {
+    "dotenv".into()
+  }
+
+  fn update(&mut self, _: Option<InputEdit>, text: &Rope, _: bool, _: &mut Window, _: &mut Context<EditorState>) {
+    self.text = text.clone();
+  }
+
+  fn styles(&self, range: &Range<usize>, resolver: &dyn HighlightStyleResolver) -> Vec<(Range<usize>, HighlightStyle)> {
+    dotenv_styles(&self.text, range, resolver)
   }
 
   fn fold_ranges(&self, _: &Rope) -> Vec<FoldRange> {

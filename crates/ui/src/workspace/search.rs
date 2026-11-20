@@ -14,7 +14,7 @@ use gpui_kit::{
     input::{InputEvent, InputState},
     label::Label,
     notification::Notification,
-    scroll::{Scrollbar, ScrollbarAxis},
+    scroll::{Scrollbar, ScrollbarAxis, ScrollbarMode},
     spinner::Spinner,
     v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _,
   },
@@ -428,12 +428,12 @@ impl Workspace {
     )
     .track_scroll(&self.search_scroll)
     .size_full();
-    div()
-      .relative()
-      .flex_1()
-      .min_h_0()
-      .child(list)
-      .child(div().absolute().inset_0().child(Scrollbar::new(&self.search_scroll).axis(ScrollbarAxis::Vertical).viewport_from_layout()))
+    div().relative().flex_1().min_h_0().child(list).child(
+      div()
+        .absolute()
+        .inset_0()
+        .child(Scrollbar::new(&self.search_scroll).axis(ScrollbarAxis::Vertical).mode(ScrollbarMode::Always).viewport_from_layout()),
+    )
   }
 
   fn render_search_file(&self, first: usize, count: usize, cx: &mut Context<Self>) -> AnyElement {
