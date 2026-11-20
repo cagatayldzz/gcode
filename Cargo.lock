@@ -7889,6 +7889,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vekro-index"
+version = "0.1.0"
+dependencies = [
+ "ignore",
+ "tempfile",
+]
+
+[[package]]
 name = "vekro-opencommit"
 version = "0.1.0"
 dependencies = [
@@ -7931,6 +7939,7 @@ dependencies = [
  "unicode-width",
  "vekro-git",
  "vekro-hosting",
+ "vekro-index",
  "vekro-opencommit",
  "vekro-storage",
  "vekro-terminal",

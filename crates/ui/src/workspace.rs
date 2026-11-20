@@ -364,6 +364,8 @@ pub struct Workspace {
   history_limit: usize,
   history_scroll: ScrollHandle,
   changes_scroll: ScrollHandle,
+  /// Makes the open project's index ready in the background; a newer project replaces (cancels) it.
+  index_task: Task<()>,
   /// The window is the one in front, and what the Repository menu said last.
   window_active: bool,
   menu_host: Option<String>,
@@ -515,6 +517,7 @@ impl Workspace {
       history_limit: HISTORY_PAGE,
       history_scroll: ScrollHandle::new(),
       changes_scroll: ScrollHandle::new(),
+      index_task: Task::ready(()),
       window_active: true,
       menu_host: None,
       menu_profiles: Vec::new(),

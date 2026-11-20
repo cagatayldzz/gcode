@@ -373,6 +373,7 @@ impl Workspace {
       self.load_history(cx);
     }
     self.ensure_terminal(window, cx);
+    self.warm_index(cx);
     if self.sidebar_tab == SidebarTab::Search {
       self.ensure_project_search(window, cx);
     }
@@ -384,6 +385,19 @@ impl Workspace {
       self.search_state.read(cx).focus_handle(cx).focus(window, cx);
     }
     cx.notify();
+  }
+
+  /// Makes the index of the open project ready in the background: the saved one is checked and used, or the tree is walked once and
+  /// saved. Searching the project then starts from a ready list of files.
+  pub(crate) fn warm_index(&mut self, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else {
+      self.index_task = Task::ready(());
+      return;
+    };
+    let work = cx.background_executor().spawn(async move {
+      vekro_index::ProjectIndex::open(&vekro_storage::index_dir(), &root);
+    });
+    self.index_task = cx.spawn(async move |_, _| work.await);
   }
 
   /// Reads the repository summary and the folder tree of the active project.

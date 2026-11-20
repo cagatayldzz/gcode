@@ -25,6 +25,8 @@ impl Workspace {
     let current = self.profile.id.clone();
     let focus = self.focus_handle.clone();
     let label = SharedString::from(format!("Profile: {}", self.profile.name));
+    // Only the first letter: the avatar takes two letters from a single word.
+    let initial: SharedString = self.profile.name.trim().chars().take(1).flat_map(char::to_uppercase).collect::<String>().into();
     Button::new("profile-picker")
       .custom(
         ButtonCustomVariant::new(cx)
@@ -38,7 +40,7 @@ impl Workspace {
       .rounded_md()
       .accessibility_label(label.clone())
       .tooltip(label)
-      .child(Avatar::new().name(self.profile.name.clone()).small())
+      .child(Avatar::new().name(initial))
       .dropdown_menu_with_anchor(Anchor::LeftCenter, move |mut menu, _, cx| {
         menu = menu.action_context(focus.clone());
         for profile in profile_list(cx).profiles {

@@ -89,11 +89,12 @@ impl Workspace {
       return;
     };
     let options = self.search_options.clone();
+    let index_dir = vekro_storage::index_dir();
     let cancelled = Arc::new(AtomicBool::new(false));
     self.search_cancellation = Some(SearchCancellation(cancelled.clone()));
     self.search_task = Some(cx.spawn_in(window, async move |this, cx| {
       cx.background_executor().timer(Duration::from_millis(200)).await;
-      let work = cx.background_executor().spawn(async move { project_search::search(&root, &options, &cancelled) });
+      let work = cx.background_executor().spawn(async move { project_search::search(&root, &options, &cancelled, Some(&index_dir)) });
       let result = work.await;
       let _ = this.update(cx, |this, cx| {
         if this.search_epoch != epoch {
@@ -137,10 +138,11 @@ impl Workspace {
     let options = self.search_options.clone();
     let replacement = self.search_replace.read(cx).value().to_string();
     let preserve_case = self.search_preserve_case;
+    let index_dir = vekro_storage::index_dir();
     let epoch = self.search_epoch;
     let work = cx.background_executor().spawn({
       let root = root.clone();
-      async move { project_search::replacement_plan(&root, &options, &replacement, preserve_case) }
+      async move { project_search::replacement_plan(&root, &options, &replacement, preserve_case, Some(&index_dir)) }
     });
     self.replacement_task = Some(cx.spawn_in(window, async move |this, cx| {
       let result = work.await;

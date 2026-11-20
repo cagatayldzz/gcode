@@ -30,6 +30,6 @@ jobs:
           shared-key: core
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Lint
-        run: cargo clippy --locked -p vekro-terminal -p vekro-git -p vekro-storage -p vekro-opencommit -p vekro-hosting -p vekro-version -p vekro-updater --all-targets -- -D warnings
+        run: cargo clippy --locked -p vekro-terminal -p vekro-git -p vekro-storage -p vekro-opencommit -p vekro-hosting -p vekro-version -p vekro-updater -p vekro-index --all-targets -- -D warnings
       - name: Test
-        run: cargo test --locked -p vekro-terminal -p vekro-git -p vekro-storage -p vekro-opencommit -p vekro-hosting -p vekro-version -p vekro-updater
+        run: cargo test --locked -p vekro-terminal -p vekro-git -p vekro-storage -p vekro-opencommit -p vekro-hosting -p vekro-version -p vekro-updater -p vekro-index

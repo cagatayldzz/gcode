@@ -55,22 +55,30 @@ impl Matcher {
     Ok(Self { pattern, include: globs(&options.include)?, exclude: globs(&options.exclude)? })
   }
 
-  fn files(&self, root: &Path) -> Vec<PathBuf> {
-    ignore::WalkBuilder::new(root)
-      .hidden(false)
-      .git_ignore(true)
-      .git_exclude(true)
-      .require_git(false)
-      .follow_links(false)
-      .sort_by_file_path(Path::cmp)
-      .filter_entry(|entry| entry.file_name() != ".git")
-      .build()
-      .filter_map(Result::ok)
-      .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
-      .filter_map(|entry| {
-        let path = entry.into_path();
-        let relative = path.strip_prefix(root).ok()?;
-        ((self.include.is_empty() || self.include.is_match(relative)) && !self.exclude.is_match(relative)).then_some(path)
+  /// The project's files that the include and exclude patterns let through, in path order. With `index_dir` the list comes from the
+  /// project index (the saved one when nothing changed, which needs no walk of the tree); without it the tree is walked.
+  fn files(&self, root: &Path, index_dir: Option<&Path>) -> Vec<PathBuf> {
+    let all: Vec<PathBuf> = match index_dir {
+      Some(dir) => vekro_index::ProjectIndex::open(dir, root).index.paths().collect(),
+      None => ignore::WalkBuilder::new(root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_exclude(true)
+        .require_git(false)
+        .follow_links(false)
+        .sort_by_file_path(Path::cmp)
+        .filter_entry(|entry| entry.file_name() != ".git")
+        .build()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
+        .map(ignore::DirEntry::into_path)
+        .collect(),
+    };
+    all
+      .into_iter()
+      .filter(|path| {
+        let Ok(relative) = path.strip_prefix(root) else { return false };
+        (self.include.is_empty() || self.include.is_match(relative)) && !self.exclude.is_match(relative)
       })
       .collect()
   }
@@ -139,7 +147,7 @@ fn preview_match(path: &Path, line: usize, content: &str, start: usize, end: usi
   Match { path: path.to_owned(), line, column: content[..start].encode_utf16().count(), preview, highlight: highlight_start..highlight_end }
 }
 
-pub(crate) fn search(root: &Path, options: &Options, cancelled: &AtomicBool) -> Result<Results, String> {
+pub(crate) fn search(root: &Path, options: &Options, cancelled: &AtomicBool, index_dir: Option<&Path>) -> Result<Results, String> {
   if !root.is_dir() {
     return Err("The project folder is unavailable.".into());
   }
@@ -147,7 +155,7 @@ pub(crate) fn search(root: &Path, options: &Options, cancelled: &AtomicBool) -> 
     return Ok(Results::default());
   }
   let matcher = Matcher::new(options)?;
-  let paths: Vec<PathBuf> = matcher.files(root);
+  let paths: Vec<PathBuf> = matcher.files(root, index_dir);
   let found = map_files(&paths, |path| {
     let mut file = (Vec::new(), 0);
     if cancelled.load(Ordering::Relaxed) {
@@ -218,12 +226,18 @@ fn replace_file(path: &Path, matcher: &Matcher, options: &Options, replacement: 
   Ok((updated != original).then(|| Replacement { path: path.to_owned(), original, updated }))
 }
 
-pub(crate) fn replacement_plan(root: &Path, options: &Options, replacement: &str, preserve_case: bool) -> Result<Vec<Replacement>, String> {
+pub(crate) fn replacement_plan(
+  root: &Path,
+  options: &Options,
+  replacement: &str,
+  preserve_case: bool,
+  index_dir: Option<&Path>,
+) -> Result<Vec<Replacement>, String> {
   if options.query.is_empty() {
     return Ok(Vec::new());
   }
   let matcher = Matcher::new(options)?;
-  let paths: Vec<PathBuf> = matcher.files(root);
+  let paths: Vec<PathBuf> = matcher.files(root, index_dir);
   let mut plan = Vec::new();
   let mut bytes = 0;
   for edit in map_files(&paths, |path| replace_file(path, &matcher, options, replacement, preserve_case)) {

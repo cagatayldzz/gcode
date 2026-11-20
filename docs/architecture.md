@@ -8,11 +8,12 @@ apps/vekro ─► app ─► ui ─► terminal
                 │      ├──► opencommit
                 │      ├──► hosting
                 │      ├──► updater ─► version
+                │      ├──► index
                 │      └──► storage
                 └─────────► (ui only)
 ```
 
-`terminal`, `git`, `opencommit`, `hosting`, `updater`, `version` and `storage` never depend on the interface and are tested without a window.
+`terminal`, `git`, `opencommit`, `hosting`, `updater`, `version`, `index` and `storage` never depend on the interface and are tested without a window.
 `app` depends on `ui` only.
 `visual-check` is a standalone development tool; the application does not depend on it.
 
@@ -51,6 +52,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/terminal/src/session.rs` | `Session`: PTY, `alacritty_terminal`, shell directory lookup |
 | `crates/terminal/src/{snapshot,palette,keys,mouse,search}.rs` | styled screen snapshot, colors, key and mouse encoding, scrollback search |
 | `crates/git/src/lib.rs` | `summary` (branch, changed files, and `Sync`: remote, ahead/behind, last fetch), `file_diff`, `diff_files`, `history`, `commit_detail`, `commit_file_diff`, `undo_commit`, `create_tag`, `remote_url`, `set_remote_url`, `quick_status`, `branches`, `create_branch`, `switch_branch`, `commit`, `push`, `fetch`, `pull`, `create_project`, `clone`, `repository_name`, `find_repositories` |
+| `crates/index/src/` | `highlight.rs` (`Language`, `Role`, `Highlights`: the colors of `.env` and `.gitignore` files worked out once for the whole text as runs that cover it, sliced when drawn), `index.rs` (`ProjectIndex`: every file the ignore rules let through, saved in `index/` of the data directory and checked with one `stat` per folder and ignore file; `open` uses the saved one while nothing changed, else walks the tree in parallel and saves it) |
 | `crates/updater/src/`, `crates/version/src/` | release lookup, download, verification, installer script; version comparison |
 | `crates/ui/src/updates.rs` | the update state of the shared settings model (`UpdateState`, `AppUpdate`) with its actions, and `UpdatePanel`, the Updates page of Settings |
 | `crates/hosting/src/` | `accounts.rs` (`Account`, `Accounts`, `TokenStore`: the macOS Keychain through `security`, or memory), `api.rs` (verify, repositories, pull requests per service), `remote.rs` (`RepoRef`: which repository a remote URL names) |
@@ -185,6 +187,7 @@ A **profile** (`Profile`, `ProfileList` in `crates/storage/src/profiles.rs`) is 
 | File | Type | Written |
 | --- | --- | --- |
 | `profiles.json` | `ProfileList` (id and name of each profile, the one used last) | when a profile is added, renamed or deleted, and when a window of another profile comes to the front |
+| `index/<hash>.idx` | `ProjectIndex` of one project (binary; a cache: deleting the folder only costs a new walk of each project) | in the background when a project is opened and its saved index is no longer right |
 | `window.json` | `WindowPlacement` (position, size and whether the window was maximized or full screen); shared by all profiles | half a second after the window stops moving or resizing, and at once when the window closes or the app quits |
 
 Per profile (in the data directory for `default`, else in `profiles/<id>/`):

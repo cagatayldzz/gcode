@@ -17,6 +17,7 @@ use std::{
   sync::atomic::AtomicBool,
   time::Instant,
 };
+use vekro_index::highlight::{Highlights, Language};
 use vekro_storage::Preferences;
 
 const FOLDERS: usize = 16;
@@ -126,7 +127,7 @@ fn benchmark(run: &mut Run, root: &Path, expanded: &HashSet<PathBuf>) {
     project_search::Options { query: r"benchmark_(marker)\s*=".to_owned(), regex: true, include: "module_00".to_owned(), ..Default::default() };
   let cancelled = AtomicBool::new(false);
   let replace = project_search::Options { include: "large.rs".to_owned(), ..literal.clone() };
-  let mut plan = project_search::replacement_plan(root, &replace, "replacement_marker", false).unwrap();
+  let mut plan = project_search::replacement_plan(root, &replace, "replacement_marker", false, None).unwrap();
   let edit = plan.pop().expect("large file has replacements");
   let copy = scratch.join("copy.rs");
   let metadata = fs::symlink_metadata(&source).unwrap();
@@ -138,7 +139,7 @@ fn benchmark(run: &mut Run, root: &Path, expanded: &HashSet<PathBuf>) {
   assert_eq!(sample(&rope).len(), 640);
   assert!(sample(&short_rope).iter().any(|line| line.text.contains(' ') && !line.colors.is_empty()));
   assert_eq!(explorer::rows(root, expanded).iter().filter(|row| row.depth == 1).count(), FOLDERS * (FILES_PER_FOLDER + 1));
-  let found = project_search::search(root, &regex, &cancelled).unwrap();
+  let found = project_search::search(root, &regex, &cancelled, None).unwrap();
   assert_eq!(found.files, FILES_PER_FOLDER);
   let first = &found.matches[0];
   assert!(first.path.starts_with(root.join("module_00")));
@@ -148,12 +149,19 @@ fn benchmark(run: &mut Run, root: &Path, expanded: &HashSet<PathBuf>) {
 
   run.measure("explorer/collapsed", || {}, || explorer::rows(black_box(root), &unexpanded));
   run.measure("explorer/expanded", || {}, || explorer::rows(black_box(root), expanded));
-  run.measure("search/literal", || {}, || project_search::search(root, &literal, &cancelled).unwrap());
-  run.measure("search/regex_filtered", || {}, || project_search::search(root, &regex, &cancelled).unwrap());
-  run.measure("search/replacement_plan", || {}, || project_search::replacement_plan(root, &replace, "replacement_marker", false).unwrap());
+  run.measure("search/literal", || {}, || project_search::search(root, &literal, &cancelled, None).unwrap());
+  run.measure("search/regex_filtered", || {}, || project_search::search(root, &regex, &cancelled, None).unwrap());
+  run.measure("search/replacement_plan", || {}, || project_search::replacement_plan(root, &replace, "replacement_marker", false, None).unwrap());
   run.measure("search/replacement_write", || fs::write(&source, &text).unwrap(), || project_search::apply_replacement(root, &edit).unwrap());
   fs::write(&source, &text).unwrap();
   run.measure("minimap/short_buffer", || {}, || sample(black_box(&short_rope)));
+  // A `.env` file of 8k settings and 8k comments (under the size limit): classified once when the file is read, then only sliced for each screenful that is drawn.
+  let env_text: String =
+    (0..LARGE_FILE_LINES / 3).map(|line| format!("NEXT_PUBLIC_KEY_{line}=value/{line}+abc==\n# https://example.com/{line}\n")).collect();
+  let env_highlights = Highlights::compute(Language::Dotenv, &env_text);
+  let screenful = env_text.len() / 2..env_text.len() / 2 + 3_000;
+  run.measure("highlight/dotenv_classify_16k_lines", || {}, || Highlights::compute(Language::Dotenv, black_box(&env_text)).runs().len());
+  run.measure("highlight/dotenv_draw_one_screenful", || {}, || outline::line_styles(black_box(&env_highlights), &screenful, &*syntax_theme));
   run.measure("minimap/24k_lines", || {}, || sample(black_box(&rope)));
   run.measure("git/working_tree_summary", || {}, || vekro_git::summary(root).unwrap());
   run.measure("git/file_history", || {}, || vekro_git::file_history(&root.join("timeline.rs"), 100).unwrap());

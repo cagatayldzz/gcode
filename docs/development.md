@@ -73,6 +73,7 @@ Required Actions secrets: `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWOR
 | `vekro-hosting` | lib | GitHub, GitLab and Azure DevOps accounts, repositories and pull requests |
 | `vekro-version` | lib | version comparison for update detection |
 | `vekro-updater` | lib | self-update from GitHub releases |
+| `vekro-index` | lib | project file index and precomputed highlighting (no interface dependency) |
 | `vekro-visual-check` | tool | inspect screenshot pixels and map them to window coordinates |
 
 Code map and data flow: [architecture](architecture.md).

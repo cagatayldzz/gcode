@@ -35,7 +35,7 @@ fn finds_text_with_locations_and_respects_ignore_rules() {
   fs::write(fixture.0.join("ignored.txt"), "needle").unwrap();
   fs::write(fixture.0.join("binary"), b"needle\0binary").unwrap();
   let options = project_search::Options { query: "needle".into(), ..Default::default() };
-  let results = project_search::search(&fixture.0, &options, &AtomicBool::new(false)).unwrap().matches;
+  let results = project_search::search(&fixture.0, &options, &AtomicBool::new(false), None).unwrap().matches;
   assert_eq!(results.len(), 1);
   assert_eq!(results[0].path.file_name().unwrap(), "source.rs");
   assert_eq!((results[0].line, results[0].column), (1, 8));
@@ -58,7 +58,7 @@ fn search_applies_case_word_and_glob_filters_and_counts_each_match() {
     exclude: "*.generated.rs, generated.rs".into(),
     ..Default::default()
   };
-  let result = project_search::search(&fixture.0, &options, &AtomicBool::new(false)).unwrap();
+  let result = project_search::search(&fixture.0, &options, &AtomicBool::new(false), None).unwrap();
   assert_eq!((result.occurrences, result.files), (2, 1));
   assert_eq!(result.matches.iter().map(|found| found.column).collect::<Vec<_>>(), [0, 22]);
 }
@@ -69,7 +69,7 @@ fn replacement_expands_regex_captures_preserves_line_endings_and_refuses_stale_e
   let file = fixture.0.join("code.txt");
   fs::write(&file, "name: Ada\r\nname: Grace\r\n").unwrap();
   let options = project_search::Options { query: "name: (\\w+)".into(), regex: true, ..Default::default() };
-  let plan = project_search::replacement_plan(&fixture.0, &options, "$1", false).unwrap();
+  let plan = project_search::replacement_plan(&fixture.0, &options, "$1", false, None).unwrap();
   assert_eq!(plan.len(), 1);
   assert_eq!(plan[0].path, file);
   assert_eq!(plan[0].updated, "Ada\r\nGrace\r\n");

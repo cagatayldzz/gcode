@@ -14,7 +14,7 @@ const MAX_FONT_SIZE_REMS: f32 = 0.125;
 
 mod outline;
 
-pub(crate) use outline::{dotenv_styles, gitignore_styles};
+pub(crate) use outline::line_styles;
 use outline::{sample, Line};
 
 pub(crate) struct Minimap {

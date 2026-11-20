@@ -15,6 +15,7 @@ doctest = false
 
 [dependencies]
 vekro-storage.workspace = true
+vekro-index.workspace = true
 vekro-terminal.workspace = true
 vekro-git.workspace = true
 vekro-opencommit.workspace = true
