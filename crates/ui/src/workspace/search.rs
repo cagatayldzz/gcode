@@ -39,6 +39,14 @@ impl Workspace {
     if self.full_area_open() {
       self.hide_terminal(window, cx);
     }
+    self.ensure_project_search(window, cx);
+    if self.projects.active.is_some() {
+      self.search_state.read(cx).focus_handle(cx).focus(window, cx);
+    }
+    cx.notify();
+  }
+
+  pub(super) fn ensure_project_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     if !self.search_open {
       self.search_state = cx.new(|cx| InputState::new(window, cx).placeholder("Search project files"));
       self.search_include = cx.new(|cx| InputState::new(window, cx).placeholder("e.g. src/**, *.rs"));
@@ -60,10 +68,6 @@ impl Workspace {
         .collect();
       self.search_open = true;
     }
-    if self.projects.active.is_some() {
-      self.search_state.read(cx).focus_handle(cx).focus(window, cx);
-    }
-    cx.notify();
   }
 
   fn run_project_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {

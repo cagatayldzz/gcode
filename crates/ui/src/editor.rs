@@ -2,9 +2,10 @@
 
 use crate::close_order::CloseOrder;
 use crate::components::{strip, strip_tab};
-use crate::minimap::Minimap;
+use crate::minimap::{gitignore_styles, Minimap};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
+  base::input::{FoldRange, HighlightStyleResolver, InputEdit, InputHighlighter, Rope},
   component::{
     button::{Button, ButtonVariants as _},
     dock::{BasePanel, Panel, PanelControl, PanelEvent},
@@ -19,8 +20,10 @@ use gpui_kit::{
 use std::{
   collections::{HashMap, HashSet},
   fs, io,
+  ops::Range,
   path::Path,
   path::PathBuf,
+  rc::Rc,
   sync::Arc,
   time::Duration,
 };
@@ -591,7 +594,13 @@ impl EditorPanel {
   fn install_text(&mut self, path: &Path, text: String, window: &mut Window, cx: &mut Context<Self>) {
     let language = language_for(path);
     let crlf = text.contains("\r\n");
-    let state = cx.new(|cx| EditorState::new(window, cx).language(language).line_number(true).default_value(text));
+    let state = cx.new(|cx| {
+      let mut state = EditorState::new(window, cx).language(language).line_number(true).default_value(text);
+      if language == "gitignore" {
+        state.set_highlighter_factory(Rc::new(|_| Some(Box::new(GitIgnoreHighlighter::default()))), cx);
+      }
+      state
+    });
     let owner = path.to_path_buf();
     let changes = cx.subscribe(&state, move |this, _, event: &InputEvent, cx| {
       if matches!(event, InputEvent::Change) {
@@ -603,7 +612,7 @@ impl EditorPanel {
       }
     });
     let cursor = cx.observe(&state, |_, _, cx| cx.notify());
-    let minimap = cx.new(|cx| Minimap::new(state.clone(), cx));
+    let minimap = cx.new(|cx| Minimap::new(state.clone(), language, cx));
     self.files.insert(path.to_path_buf(), ReadyFile { state, minimap, dirty: false, painted: false, crlf, _changes: changes, _cursor: cursor });
     self.touch(path);
     self.evict();
@@ -734,13 +743,17 @@ fn display_name(path: &Path) -> String {
 }
 
 /// The syntax highlighting language for a file, by its extension.
-fn language_for(path: &Path) -> &'static str {
-  match path.extension().and_then(|extension| extension.to_str()).unwrap_or_default() {
+pub(crate) fn language_for(path: &Path) -> &'static str {
+  if path.file_name().is_some_and(|name| name == ".gitignore") {
+    return "gitignore";
+  }
+  match path.extension().and_then(|extension| extension.to_str()).unwrap_or_default().to_ascii_lowercase().as_str() {
     "rs" => "rust",
     "toml" => "toml",
-    "json" => "json",
+    "json" | "jsonc" => "json",
     "md" | "markdown" => "markdown",
-    "ts" | "tsx" => "typescript",
+    "ts" => "typescript",
+    "tsx" => "tsx",
     "js" | "jsx" | "mjs" | "cjs" => "javascript",
     "html" | "htm" => "html",
     "css" => "css",
@@ -755,12 +768,17 @@ fn language_for(path: &Path) -> &'static str {
 
 /// The name of a file's language as the status bar shows it.
 fn language_label(path: &Path) -> &'static str {
+  if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("jsonc")) {
+    return "JSON with Comments";
+  }
   match language_for(path) {
     "rust" => "Rust",
     "toml" => "TOML",
     "json" => "JSON",
+    "gitignore" => "Git Ignore",
     "markdown" => "Markdown",
     "typescript" => "TypeScript",
+    "tsx" => "TypeScript JSX",
     "javascript" => "JavaScript",
     "html" => "HTML",
     "css" => "CSS",
@@ -770,6 +788,29 @@ fn language_label(path: &Path) -> &'static str {
     "swift" => "Swift",
     "go" => "Go",
     _ => "Plain Text",
+  }
+}
+
+#[derive(Default)]
+struct GitIgnoreHighlighter {
+  text: Rope,
+}
+
+impl InputHighlighter for GitIgnoreHighlighter {
+  fn language(&self) -> SharedString {
+    "gitignore".into()
+  }
+
+  fn update(&mut self, _: Option<InputEdit>, text: &Rope, _: bool, _: &mut Window, _: &mut Context<EditorState>) {
+    self.text = text.clone();
+  }
+
+  fn styles(&self, range: &Range<usize>, resolver: &dyn HighlightStyleResolver) -> Vec<(Range<usize>, HighlightStyle)> {
+    gitignore_styles(&self.text, range, resolver)
+  }
+
+  fn fold_ranges(&self, _: &Rope) -> Vec<FoldRange> {
+    Vec::new()
   }
 }
 
@@ -931,7 +972,7 @@ impl Render for EditorPanel {
                         .size_full(),
                     ),
                   )
-                  .when(file.minimap.read(cx).is_visible(cx), |area| area.child(file.minimap.clone()))
+                  .child(file.minimap.clone())
                   .into_any_element()
               },
             ),
@@ -960,7 +1001,8 @@ impl Render for EditorPanel {
         }
       }
     };
-    let hidden = self.preview.clone().or_else(|| self.warmup.clone());
+    let active_editor = self.active_file().and_then(|path| self.files.get(path)).map(|file| &file.state);
+    let hidden = self.preview.clone().filter(|state| Some(state) != active_editor).or_else(|| self.warmup.clone());
     let tabs = (!self.tabs.items.is_empty() || self.search_report.is_some()).then(|| self.render_tabs(cx));
     v_flex()
       .track_focus(&self.focus_handle)
@@ -970,7 +1012,18 @@ impl Render for EditorPanel {
       .children(tabs)
       .child(div().relative().flex_1().min_h_0().child(content))
       .when_some(hidden, |this, state| {
-        this.child(div().absolute().top_0().left_0().w(px(1.)).h(px(1.)).overflow_hidden().opacity(0.).child(Editor::new(&state)))
+        this.child(
+          div()
+            .id(("editor-preload", state.entity_id()))
+            .absolute()
+            .top_0()
+            .left_0()
+            .w(px(1.))
+            .h(px(1.))
+            .overflow_hidden()
+            .opacity(0.)
+            .child(Editor::new(&state)),
+        )
       })
   }
 }

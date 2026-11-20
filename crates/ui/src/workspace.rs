@@ -185,6 +185,10 @@ impl Drop for SearchCancellation {
 /// What the window shows for a project that is not open at the moment.
 #[derive(Default)]
 struct ProjectView {
+  sidebar_tab: SidebarTab,
+  git_view: GitView,
+  terminal_open: bool,
+  agent_open: bool,
   expanded: HashSet<PathBuf>,
   selected_entry: Option<PathBuf>,
   selected_change: Option<PathBuf>,
@@ -227,8 +231,9 @@ enum IssueKind {
 }
 
 /// The two views of the Git tab: the files to commit, and the commits already made.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum GitView {
+  #[default]
   Changes,
   History,
 }
@@ -280,7 +285,7 @@ pub struct Workspace {
   selected_entry: Option<PathBuf>,
   /// The changed file whose diff is open, relative to the repository.
   selected_change: Option<PathBuf>,
-  /// The Explorer and Git selections of the projects that are not open.
+  /// The activity and file selections of the projects that are not open.
   views: HashMap<PathBuf, ProjectView>,
   /// The view the sidebar shows.
   sidebar_tab: SidebarTab,

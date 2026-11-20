@@ -2,7 +2,7 @@
 //! The palettes use semantic colors from GitHub Primer (https://github.com/primer/primitives).
 
 use gpui_kit::{
-  component::{ActiveTheme as _, Theme, ThemeMode},
+  component::{highlighter::ThemeStyle, ActiveTheme as _, Theme, ThemeMode},
   *,
 };
 use vekro_storage::ThemeChoice;
@@ -177,6 +177,10 @@ pub(crate) fn colors(cx: &App) -> Colors {
   }
 }
 
+fn syntax_color(color: Hsla) -> Option<ThemeStyle> {
+  serde_json::from_value(serde_json::json!({ "color": color })).ok()
+}
+
 /// Applies the chosen appearance (the system's, unless the user picked one) with Vekro's colors and fonts.
 pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut Window, cx: &mut App) {
   match choice {
@@ -185,6 +189,7 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     ThemeChoice::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
   }
   let c = colors(cx);
+  let dark = cx.theme().is_dark();
   Theme::update(cx, |theme| {
     theme.font_family = SANS_FONT.into();
     theme.mono_font_family = MONO_FONT.into();
@@ -199,6 +204,31 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     style.editor_gutter_background = Some(c.background);
     style.editor_active_line = Some(c.background);
     style.editor_active_line_number = Some(c.text);
+    let (property, string, literal, keyword, type_name, function, tag) = if dark {
+      (hex(0x7ee787), hex(0xa5d6ff), hex(0x79c0ff), hex(0xff7b72), hex(0xffa657), hex(0xd2a8ff), hex(0x7ee787))
+    } else {
+      (c.link, hex(0x0a3069), hex(0x0550ae), hex(0x953800), hex(0x953800), hex(0x6639ba), hex(0x116329))
+    };
+    let syntax = &mut style.syntax;
+    syntax.property = syntax_color(property);
+    syntax.attribute = syntax.property;
+    syntax.comment = syntax_color(c.text_secondary);
+    syntax.comment_doc = syntax.comment;
+    syntax.string = syntax_color(string);
+    syntax.string_escape = syntax_color(c.link);
+    syntax.keyword = syntax_color(keyword);
+    syntax.operator = syntax.keyword;
+    syntax.type_ = syntax_color(type_name);
+    syntax.function = syntax_color(function);
+    syntax.tag = syntax_color(tag);
+    let literal = syntax_color(literal);
+    syntax.boolean = literal;
+    syntax.constant = literal;
+    syntax.number = literal;
+    syntax.punctuation = literal;
+    syntax.punctuation_bracket = literal;
+    syntax.punctuation_delimiter = syntax_color(c.text_secondary);
+
     let colors = &mut theme.colors;
     colors.background = c.background;
     colors.foreground = c.text;

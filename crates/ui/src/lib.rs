@@ -25,6 +25,7 @@ mod pull_request;
 mod repository_picker;
 mod selection;
 mod settings;
+mod syntax;
 mod terminal;
 mod terminal_layout;
 mod theme;
@@ -69,8 +70,9 @@ actions!(
   ]
 );
 
-/// Loads the bundled fonts.
+/// Loads the bundled fonts and registers editor highlighting.
 pub fn init(cx: &mut App) {
+  syntax::register_highlights();
   if let Err(error) = cx.text_system().add_fonts(vec![
     // Static weights: the text system picks a weight by font file, so a variable font would draw every weight as regular.
     std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist-Regular.ttf")),

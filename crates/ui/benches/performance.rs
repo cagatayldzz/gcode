@@ -8,7 +8,7 @@ mod outline;
 #[path = "../src/project_search.rs"]
 mod project_search;
 
-use gpui_kit::base::input::Rope;
+use gpui_kit::{base::input::Rope, component::highlighter::HighlightTheme};
 use std::{
   collections::HashSet,
   fs,
@@ -133,8 +133,10 @@ fn benchmark(run: &mut Run, root: &Path, expanded: &HashSet<PathBuf>) {
   let preferences = Preferences { explorer_font_size: 16, ..Preferences::default() };
   let config = scratch.join("preferences.json");
 
-  assert_eq!(outline::sample(&rope).len(), 640);
-  assert!(outline::sample(&short_rope).iter().any(|line| line.start < line.accent_end && line.accent_end < line.end));
+  let syntax_theme = HighlightTheme::default_light();
+  let sample = |text| outline::sample(text, "rust", &syntax_theme);
+  assert_eq!(sample(&rope).len(), 640);
+  assert!(sample(&short_rope).iter().any(|line| line.text.contains(' ') && !line.colors.is_empty()));
   assert_eq!(explorer::rows(root, expanded).iter().filter(|row| row.depth == 1).count(), FOLDERS * (FILES_PER_FOLDER + 1));
   let found = project_search::search(root, &regex, &cancelled).unwrap();
   assert_eq!(found.files, FILES_PER_FOLDER);
@@ -151,8 +153,8 @@ fn benchmark(run: &mut Run, root: &Path, expanded: &HashSet<PathBuf>) {
   run.measure("search/replacement_plan", || {}, || project_search::replacement_plan(root, &replace, "replacement_marker", false).unwrap());
   run.measure("search/replacement_write", || fs::write(&source, &text).unwrap(), || project_search::apply_replacement(root, &edit).unwrap());
   fs::write(&source, &text).unwrap();
-  run.measure("minimap/short_buffer", || {}, || outline::sample(black_box(&short_rope)));
-  run.measure("minimap/24k_lines", || {}, || outline::sample(black_box(&rope)));
+  run.measure("minimap/short_buffer", || {}, || sample(black_box(&short_rope)));
+  run.measure("minimap/24k_lines", || {}, || sample(black_box(&rope)));
   run.measure("git/working_tree_summary", || {}, || vekro_git::summary(root).unwrap());
   run.measure("git/file_history", || {}, || vekro_git::file_history(&root.join("timeline.rs"), 100).unwrap());
   run.measure("git/file_diff", || {}, || vekro_git::file_diff(root, Path::new("timeline.rs")).unwrap());

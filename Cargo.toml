@@ -17,7 +17,23 @@ vekro-storage = { path = "crates/storage" }
 vekro-app = { path = "crates/app" }
 vekro-ui = { path = "crates/ui" }
 alacritty_terminal = "0.26.0"
-gpui-kit = { version = "0.10.0", features = ["gpui-fast", "syntect"] }
+gpui-kit = { version = "0.10.0", features = [
+  "gpui-fast",
+  "tree-sitter-bash",
+  "tree-sitter-css",
+  "tree-sitter-go",
+  "tree-sitter-html",
+  "tree-sitter-javascript",
+  "tree-sitter-markdown",
+  "tree-sitter-markdown-inline",
+  "tree-sitter-python",
+  "tree-sitter-rust",
+  "tree-sitter-swift",
+  "tree-sitter-toml",
+  "tree-sitter-tsx",
+  "tree-sitter-typescript",
+  "tree-sitter-yaml",
+] }
 gpui-kit-assets = "0.10.0"
 futures = "0.3.34"
 serde_json = "1.0.154"

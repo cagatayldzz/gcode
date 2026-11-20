@@ -12,7 +12,6 @@ impl Workspace {
     let dim = if row.ignored && !selected { 0.55 } else { 1. };
     let icon_color = if selected { palette.explorer_selected_text } else { theme.muted_foreground };
     let open = self.expanded.contains(&row.path);
-    let file_icon = (!row.is_dir).then(|| explorer_file_icon(&row.path, &palette)).flatten();
     let menu = self.explorer_menu(Some(row), cx);
     let highlighted_guide = self
       .hovered_folder
@@ -36,7 +35,7 @@ impl Workspace {
         chevron.child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size_4().text_color(icon_color))
       }))
       .when(row.is_dir, |entry| entry.child(Icon::new(IconName::FolderClosed).size_4().text_color(icon_color).opacity(dim)))
-      .children(file_icon.map(|icon| icon.opacity(dim)))
+      .when(!row.is_dir, |entry| entry.child(explorer_file_icon(&row.path, &palette).opacity(dim)))
       .child(
         Label::new(row.name.clone())
           .opacity(dim)

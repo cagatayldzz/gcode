@@ -1,73 +1,55 @@
 //! An overview of the editor buffer that shares the editor's scroll position.
 
 use gpui_kit::{
-  base::input::RopeExt as _,
   component::input::{EditorState, InputEvent},
+  component::{ActiveTheme as _, Theme},
   *,
 };
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
-const MIN_LINES: usize = 80;
 const EDIT_DEBOUNCE: Duration = Duration::from_millis(90);
-const MIN_VIEWPORT_FRACTION: f32 = 0.025;
+const INDICATOR_HEIGHT_REMS: f32 = 4.;
+const MAX_LINE_STEP_REMS: f32 = 0.16;
+const MAX_FONT_SIZE_REMS: f32 = 0.125;
 
 mod outline;
 
-use outline::{sample, Line, MAX_COLUMNS};
-
-#[derive(Clone, Copy)]
-struct Viewport {
-  top: f32,
-  height: f32,
-}
-
-impl Viewport {
-  fn indicator(self) -> Self {
-    let height = (self.height * 3.).min(1.);
-    let top = (self.top + (self.height - height) / 2.).clamp(0., 1. - height);
-    Self { top, height }
-  }
-}
+pub(crate) use outline::gitignore_styles;
+use outline::{sample, Line};
 
 pub(crate) struct Minimap {
   editor: Entity<EditorState>,
   lines: Arc<[Line]>,
-  drag_anchor: Rc<Cell<Option<f32>>>,
+  language: &'static str,
+  drag_anchor: Rc<Cell<Option<Pixels>>>,
   refresh: Option<Task<()>>,
   _changes: Subscription,
+  _theme: Subscription,
 }
 
 impl Minimap {
-  pub fn new(editor: Entity<EditorState>, cx: &mut Context<Self>) -> Self {
+  pub fn new(editor: Entity<EditorState>, language: &'static str, cx: &mut Context<Self>) -> Self {
     let changes = cx.subscribe(&editor, |this: &mut Self, _, event: &InputEvent, cx| {
       if matches!(event, InputEvent::Change) {
         this.refresh(true, cx);
       }
     });
-    let mut minimap = Self { editor, lines: Arc::default(), drag_anchor: Rc::default(), refresh: None, _changes: changes };
+    let theme = cx.observe_global::<Theme>(|this, cx| this.refresh(true, cx));
+    let mut minimap = Self { editor, language, lines: Arc::default(), drag_anchor: Rc::default(), refresh: None, _changes: changes, _theme: theme };
     minimap.refresh(false, cx);
     minimap
   }
 
-  pub fn is_visible(&self, cx: &App) -> bool {
-    self.editor.read(cx).text().lines_len() >= MIN_LINES
-  }
-
   fn refresh(&mut self, debounce: bool, cx: &mut Context<Self>) {
-    let text = self.editor.read(cx).text();
-    let count = text.lines_len();
-    if count < MIN_LINES {
-      self.refresh = None;
-      self.lines = Arc::default();
-      return;
-    }
-    let text = text.clone();
+    let text = self.editor.read(cx).text().clone();
+    let language = self.language;
+    let theme = cx.theme().highlight_theme.clone();
     let background = cx.background_executor().clone();
     self.refresh = Some(cx.spawn(async move |this, cx| {
       if debounce {
         background.timer(EDIT_DEBOUNCE).await;
       }
-      let lines = background.spawn(async move { sample(&text) }).await;
+      let lines = background.spawn(async move { sample(&text, language, &theme) }).await;
       let _ = this.update(cx, |this, cx| {
         this.lines = lines;
         this.refresh = None;
@@ -77,32 +59,39 @@ impl Minimap {
   }
 }
 
-fn viewport(editor: &EditorState) -> Option<Viewport> {
-  let line_height = f32::from(editor.line_height()?);
-  let display = editor.display_map();
-  let last_row = display.display_row_count().checked_sub(1)?;
-  let first_row = f32::from(-editor.scroll_offset().y).max(0.) / line_height;
-  let viewport_rows = f32::from(editor.input_bounds().size.height) / line_height;
-  let start = display.display_row_to_buffer_line((first_row.floor() as usize).min(last_row));
-  let end = display.display_row_to_buffer_line(((first_row + viewport_rows).ceil() as usize).min(last_row)) + 1;
-  let count = editor.text().lines_len();
-  let top = start as f32 / count as f32;
-  let height = (end.min(count).saturating_sub(start) as f32 / count as f32).max(MIN_VIEWPORT_FRACTION);
-  Some(Viewport { top: top.min(1. - height), height })
+fn scroll_range(editor: &EditorState) -> Option<Pixels> {
+  let line_height = editor.line_height()?;
+  let viewport = editor.input_bounds().size.height;
+  // GPUI Kit's code editor reserves half a viewport below the last line, with a three-row minimum.
+  let bottom_padding = (viewport / 2.).max(line_height * 3.);
+  let content = line_height * editor.display_map().wrap_row_count() + bottom_padding;
+  Some((content - viewport).max(Pixels::ZERO))
 }
 
-fn fraction(bounds: Bounds<Pixels>, y: Pixels) -> f32 {
-  (f32::from(y - bounds.origin.y) / f32::from(bounds.size.height)).clamp(0., 1.)
+fn scroll_progress(editor: &EditorState, range: Pixels) -> f32 {
+  (f32::from(-editor.scroll_offset().y) / f32::from(range)).clamp(0., 1.)
 }
 
-fn scroll(editor: &Entity<EditorState>, position: f32, anchor: f32, cx: &mut App) {
+fn indicator_height(track: Bounds<Pixels>, window: &Window) -> Pixels {
+  (window.rem_size() * INDICATOR_HEIGHT_REMS).min(track.size.height)
+}
+
+fn line_step(track: Bounds<Pixels>, lines: usize, window: &Window) -> Pixels {
+  (track.size.height / lines.max(1) as f32).min(window.rem_size() * MAX_LINE_STEP_REMS)
+}
+
+fn indicator_travel(track: Bounds<Pixels>, height: Pixels, lines: usize, window: &Window) -> Pixels {
+  (track.size.height - height).min(line_step(track, lines, window) * lines)
+}
+
+fn scroll(editor: &Entity<EditorState>, position: Pixels, travel: Pixels, cx: &mut App) {
+  if travel <= Pixels::ZERO {
+    return;
+  }
   editor.update(cx, |editor, cx| {
-    let Some(line_height) = editor.line_height() else { return };
-    let count = editor.text().lines_len();
-    let top = (position - anchor).clamp(0., 1.);
-    let line = (top * count as f32).round() as usize;
-    let row = editor.display_map().buffer_line_to_display_row(line.min(count - 1));
-    editor.set_scroll_offset(point(editor.scroll_offset().x, -(line_height * row)), cx);
+    let Some(range) = scroll_range(editor) else { return };
+    let progress = (f32::from(position) / f32::from(travel)).clamp(0., 1.);
+    editor.set_scroll_offset(point(editor.scroll_offset().x, -(range * progress)), cx);
   });
 }
 
@@ -116,6 +105,7 @@ impl Render for Minimap {
     let pointer_editor = editor.clone();
     let pointer_anchor = drag_anchor.clone();
     let lines = self.lines.clone();
+    let line_count = lines.len();
 
     div()
       .id("editor-minimap")
@@ -126,18 +116,21 @@ impl Render for Minimap {
       .border_l_1()
       .border_color(palette.border)
       .bg(palette.background)
-      .cursor_pointer()
+      .cursor_default()
       .on_hover(cx.listener(|_, _: &bool, _, cx| cx.notify()))
-      .on_mouse_down(MouseButton::Left, move |event, _, cx| {
+      .on_mouse_down(MouseButton::Left, move |event, window, cx| {
         let Some(bounds) = hit_bounds.get().filter(|bounds| bounds.size.height > Pixels::ZERO) else { return };
-        let Some(viewport) = viewport(pointer_editor.read(cx)) else { return };
-        let position = fraction(bounds, event.position.y);
-        let indicator = viewport.indicator();
-        let inside = (indicator.top..=indicator.top + indicator.height).contains(&position);
-        let anchor = if inside { position - viewport.top } else { viewport.height / 2. };
+        let editor = pointer_editor.read(cx);
+        let Some(range) = scroll_range(editor).filter(|range| *range > Pixels::ZERO) else { return };
+        let height = indicator_height(bounds, window);
+        let travel = indicator_travel(bounds, height, line_count, window);
+        let top = travel * scroll_progress(editor, range);
+        let position = event.position.y - bounds.origin.y;
+        let inside = (top..=top + height).contains(&position);
+        let anchor = if inside { position - top } else { height / 2. };
         pointer_anchor.set(Some(anchor));
         if !inside {
-          scroll(&pointer_editor, position, anchor, cx);
+          scroll(&pointer_editor, position - anchor, travel, cx);
         }
         cx.stop_propagation();
       })
@@ -149,25 +142,36 @@ impl Render for Minimap {
               return;
             }
             let inset = window.rem_size() * 0.25;
-            let column_width = (area.size.width - inset * 2.) / MAX_COLUMNS as f32;
-            let line_step = area.size.height / lines.len().max(1) as f32;
-            let stroke_height = line_step.min(window.rem_size() * 0.12) * 0.8;
-            for (index, line) in lines.iter().enumerate().filter(|(_, line)| line.start < line.end) {
-              let y = area.origin.y + line_step * index;
-              let x = area.origin.x + inset + column_width * line.start;
-              let width = column_width * (line.end - line.start);
-              window.paint_quad(fill(Bounds::new(point(x, y), size(width, stroke_height)), palette.text_secondary.opacity(0.5)));
-              let accent_width = column_width * line.accent_end.saturating_sub(line.start);
-              if accent_width > Pixels::ZERO {
-                window.paint_quad(fill(Bounds::new(point(x, y), size(accent_width, stroke_height)), palette.link.opacity(0.6)));
+            let line_step = line_step(area, line_count, window);
+            let font_size = line_step.min(window.rem_size() * MAX_FONT_SIZE_REMS);
+            let mono_font = font(cx.theme().mono_font_family.clone());
+            let clip = Bounds::new(point(area.origin.x + inset, area.origin.y), size(area.size.width - inset * 2., area.size.height));
+            window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
+              let mut runs = Vec::new();
+              for (index, line) in lines.iter().enumerate().filter(|(_, line)| !line.text.is_empty()) {
+                runs.clear();
+                runs.extend(line.colors.iter().map(|(len, color)| TextRun {
+                  len: *len,
+                  font: mono_font.clone(),
+                  color: color.unwrap_or(palette.text_secondary),
+                  background_color: None,
+                  underline: None,
+                  strikethrough: None,
+                }));
+                let shaped = window.text_system().shape_line(line.text.clone(), font_size, &runs, None);
+                let origin = point(clip.origin.x, clip.origin.y + line_step * index);
+                let _ = shaped.paint(origin, line_step, TextAlign::Left, None, window, cx);
               }
-            }
+            });
 
-            let show_viewport = area.contains(&window.mouse_position()) || drag_anchor.get().is_some();
-            if let Some(viewport) = show_viewport.then(|| viewport(editor.read(cx))).flatten() {
-              let indicator = viewport.indicator();
-              let origin = point(area.origin.x + inset, area.origin.y + area.size.height * indicator.top);
-              let size = size(area.size.width - inset * 2., area.size.height * indicator.height);
+            let height = indicator_height(area, window);
+            let travel = indicator_travel(area, height, line_count, window);
+            let show_indicator = area.contains(&window.mouse_position()) || drag_anchor.get().is_some();
+            let state = editor.read(cx);
+            if let Some(range) = show_indicator.then(|| scroll_range(state)).flatten().filter(|range| *range > Pixels::ZERO) {
+              let top = travel * scroll_progress(state, range);
+              let origin = point(area.origin.x + inset, area.origin.y + top);
+              let size = size(area.size.width - inset * 2., height);
               window.paint_quad(quad(
                 Bounds::new(origin, size),
                 inset,
@@ -186,7 +190,7 @@ impl Render for Minimap {
               }
               if event.pressed_button == Some(MouseButton::Left) {
                 if let Some(anchor) = anchor.get() {
-                  scroll(&editor, fraction(area, event.position.y), anchor, cx);
+                  scroll(&editor, event.position.y - area.origin.y - anchor, travel, cx);
                 }
               } else {
                 anchor.set(None);

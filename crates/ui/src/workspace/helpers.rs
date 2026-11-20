@@ -187,29 +187,32 @@ pub(super) fn count_badge(count: usize, cx: &App) -> Div {
     .child(if count > 99 { "99+".to_string() } else { count.to_string() })
 }
 
-pub(super) fn explorer_file_icon(path: &Path, palette: &crate::theme::Colors) -> Option<Icon> {
-  let (icon, color) = match path.file_name()?.to_str()? {
-    ".editorconfig" => ("icons/settings.svg", palette.text_secondary),
-    ".gitignore" => ("icons/git-branch.svg", palette.text_secondary),
-    "README.md" => ("icons/info.svg", palette.link),
-    "bun.lock" => ("icons/braces.svg", palette.modified),
-    "Cargo.lock" => ("icons/list.svg", palette.text_secondary),
-    _ => {
-      let extension = path.extension()?;
-      if extension.eq_ignore_ascii_case("toml") {
-        ("icons/settings.svg", palette.text_secondary)
-      } else if extension.eq_ignore_ascii_case("json") {
-        ("icons/braces.svg", palette.modified)
-      } else if extension.eq_ignore_ascii_case("md") {
-        ("icons/arrow-down-to-line.svg", palette.link)
-      } else if extension.eq_ignore_ascii_case("plist") {
-        ("icons/rss.svg", palette.plist_icon)
-      } else {
-        return None;
-      }
-    }
+pub(super) fn explorer_file_icon(path: &Path, palette: &crate::theme::Colors) -> Icon {
+  let (icon, color) = match path.file_name().and_then(|name| name.to_str()) {
+    Some(".editorconfig") => ("icons/settings.svg", palette.text_secondary),
+    Some(".gitignore") => ("icons/git-branch.svg", palette.text_secondary),
+    Some("README.md") => ("icons/info.svg", palette.link),
+    Some("bun.lock") => ("icons/braces.svg", palette.modified),
+    Some("Cargo.lock") => ("icons/list.svg", palette.text_secondary),
+    _ => match crate::editor::language_for(path) {
+      "toml" => ("icons/settings.svg", palette.text_secondary),
+      "json" => ("icons/braces.svg", palette.modified),
+      "rust" => ("icons/file-code.svg", palette.plist_icon),
+      "markdown" => ("icons/arrow-down-to-line.svg", palette.link),
+      "javascript" => ("icons/code.svg", palette.modified),
+      "typescript" | "tsx" => ("icons/file-braces.svg", palette.link),
+      "bash" => ("icons/terminal.svg", palette.text_secondary),
+      "html" => ("icons/code-xml.svg", palette.plist_icon),
+      "css" => ("icons/palette.svg", palette.link),
+      "python" => ("icons/file-code-corner.svg", palette.link),
+      "swift" => ("icons/feather.svg", palette.plist_icon),
+      "go" => ("icons/file-code.svg", palette.link),
+      "yaml" => ("icons/list-tree.svg", palette.modified),
+      _ if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("plist")) => ("icons/rss.svg", palette.plist_icon),
+      _ => ("icons/file-text.svg", palette.text_secondary),
+    },
   };
-  Some(Icon::empty().path(icon).size_3().text_color(color))
+  Icon::empty().path(icon).size_3().text_color(color)
 }
 
 pub(super) fn rail_button(

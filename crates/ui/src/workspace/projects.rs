@@ -62,13 +62,11 @@ impl Workspace {
     self._setup_subscription = Some(cx.subscribe_in(&setup, window, |this, _, event: &ProjectReady, window, cx| {
       window.close_all_dialogs(cx);
       let path = event.0.clone();
-      // The new project gets a tab in the title bar, and opens in the Explorer, not in the terminal that was showing.
+      // The new project gets a tab in the title bar and starts with the default view.
       this.switch_project(window, cx, move |projects| {
         projects.add(path.clone());
         projects.set_favorite(&path, true);
       });
-      this.sidebar_tab = SidebarTab::Explorer;
-      this.hide_terminal(window, cx);
     }));
     window.open_dialog(cx, move |dialog, _, _| dialog.p_0().width(px(560.)).child(setup.clone()));
   }
@@ -299,17 +297,21 @@ impl Workspace {
   /// summary, the file or diff in the editor and the terminals. What the project being left shows is put away
   /// and comes back when it is opened again; its shells keep running.
   pub(super) fn switch_project(&mut self, window: &mut Window, cx: &mut Context<Self>, change: impl FnOnce(&mut ProjectList)) {
-    self.close_project_search(cx);
     self.hovered_folder = None;
     let before = self.projects.active.clone();
     if let Some(root) = &before {
       let view = ProjectView {
+        sidebar_tab: self.sidebar_tab,
+        git_view: self.git_view,
+        terminal_open: self.terminal_open,
+        agent_open: self.agent_open,
         expanded: std::mem::take(&mut self.expanded),
         selected_entry: self.selected_entry.take(),
         selected_change: self.selected_change.take(),
       };
       self.views.insert(root.clone(), view);
     }
+    self.close_project_search(cx);
     change(&mut self.projects);
     if let Err(error) = self.projects.save(&ProjectList::default_path()) {
       eprintln!("Could not save the project list: {error}");
@@ -325,6 +327,10 @@ impl Workspace {
     self.selected_commit = None;
     let after = self.projects.active.clone();
     let view = after.as_ref().and_then(|root| self.views.remove(root)).unwrap_or_default();
+    self.sidebar_tab = view.sidebar_tab;
+    self.git_view = view.git_view;
+    self.terminal_open = view.terminal_open;
+    self.agent_open = view.agent_open;
     self.expanded = view.expanded;
     self.selected_entry = view.selected_entry;
     self.selected_change = view.selected_change;
@@ -338,6 +344,16 @@ impl Workspace {
       self.load_history(cx);
     }
     self.ensure_terminal(window, cx);
+    if self.sidebar_tab == SidebarTab::Search {
+      self.ensure_project_search(window, cx);
+    }
+    if self.terminal_open {
+      self.focus_terminal(window, cx);
+    } else if self.agent_open {
+      self.focus_agent(window, cx);
+    } else if self.sidebar_tab == SidebarTab::Search {
+      self.search_state.read(cx).focus_handle(cx).focus(window, cx);
+    }
     cx.notify();
   }
 
