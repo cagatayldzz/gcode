@@ -41,6 +41,8 @@ pub fn run() {
       KeyBinding::new("cmd-k", ClearBuffer, Some("Terminal")),
     ]);
     cx.set_menus(vekro_ui::menus(None));
+    // The menu of the Dock icon's right click (macOS).
+    cx.set_dock_menu(vec![MenuItem::action("New Window", NewWindow)]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &NewWindow, cx| open_window(cx));
     open_window(cx);
