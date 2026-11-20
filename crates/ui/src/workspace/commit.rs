@@ -62,6 +62,7 @@ impl Workspace {
       Button::new("title-update")
         .small()
         .custom(selected_style(cx))
+        .when(!working, |button| button.bg(cx.theme().primary))
         .label(if working {
           "Updating…"
         } else if ready {
