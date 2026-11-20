@@ -13,10 +13,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Every push runs lightweight checks on Ubuntu only.
-  checks:
+  # The GPUI crates are checked by the release workflow.
+  core:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - run: rustup default stable
@@ -25,14 +25,6 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-  # The terminal, git and storage crates are plain Rust and build on Linux without waiting for a macOS runner.
-  # The GPUI crates are checked by the release workflow.
-  core:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-      - run: rustup default stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: core
