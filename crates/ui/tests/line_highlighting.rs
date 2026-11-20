@@ -55,3 +55,22 @@ fn a_gitignore_comment_takes_the_comment_color_and_a_pattern_stays_plain() {
   assert_eq!(styles[0].1.color, theme.style("comment").and_then(|style| style.color));
   assert_eq!(styles.last().unwrap().1, HighlightStyle::default());
 }
+
+#[test]
+fn dockerfile_instructions_use_the_name_color_and_variables_their_own() {
+  let text = "FROM ${IMAGE} AS base\nRUN echo hi # not a comment\n";
+  let highlights = Highlights::compute(Language::Dockerfile, text);
+  for theme in [HighlightTheme::default_light(), HighlightTheme::default_dark()] {
+    let styles = outline::line_styles(&highlights, &(0..text.len()), &*theme);
+    let at = |needle: &str| {
+      let offset = text.find(needle).unwrap();
+      styles.iter().find(|(range, _)| range.contains(&offset)).map(|(_, style)| *style).unwrap()
+    };
+    let instruction = at("FROM").color;
+    assert!(instruction.is_some(), "an instruction has a color");
+    assert_eq!(at("AS base").color, instruction, "AS is drawn like the instructions");
+    assert_eq!(at("RUN").color, instruction);
+    assert_eq!(at("echo hi").color, None, "arguments keep the text color");
+    assert_ne!(at("${IMAGE}"), at("echo hi"), "a variable is not plain text");
+  }
+}

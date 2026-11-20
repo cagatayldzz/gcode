@@ -388,8 +388,13 @@ impl Workspace {
       .selected_index(usize::from(self.git_view == GitView::History))
       .on_click(cx.listener(|this, index: &usize, _, cx| this.set_git_view(if *index == 1 { GitView::History } else { GitView::Changes }, cx)))
       .children([
-        Tab::new().cursor_pointer().label("Changes").when(git.changed() > 0, |tab| tab.suffix(count_badge(git.changed(), cx))),
-        Tab::new().cursor_pointer().label("History"),
+        Tab::new()
+          .cursor_pointer()
+          .flex_1()
+          .justify_center()
+          .label("Changes")
+          .when(git.changed() > 0, |tab| tab.suffix(count_badge(git.changed(), cx))),
+        Tab::new().cursor_pointer().flex_1().justify_center().label("History"),
       ]);
     let body = match self.git_view {
       GitView::Changes => v_flex()
@@ -401,7 +406,6 @@ impl Workspace {
             .justify_between()
             .px_3()
             .py_1()
-            .bg(palette.rail)
             .border_b_1()
             .border_color(palette.border)
             .child(
@@ -466,7 +470,7 @@ impl Workspace {
         .into_any_element(),
       GitView::History => v_flex().flex_1().min_h_0().pt_2().child(self.render_history(cx)).into_any_element(),
     };
-    Some(v_flex().size_full().child(div().px_3().bg(palette.rail).child(tabs)).child(body))
+    Some(v_flex().size_full().child(div().px_3().child(tabs)).child(body))
   }
 
   /// The commits of the open project, newest first: the subject, who made it and when, the tags on it, and an arrow while the
@@ -498,12 +502,16 @@ impl Workspace {
       // Only the last commit, and only while the remote does not have it, can be undone.
       let undoable = tip.as_deref() == Some(commit.id.as_str()) && commit.unpushed;
       let (menu_workspace, menu_id) = (workspace.clone(), commit.id.clone());
+      // Only the first letter of the author: the avatar takes two letters from a name of several words.
+      let initial: SharedString = commit.author.trim().chars().take(1).flat_map(char::to_uppercase).collect::<String>().into();
       h_flex()
         .id(SharedString::from(format!("commit-{}", commit.id)))
         .gap_2()
         .px_3()
         .py_1p5()
         .items_center()
+        .border_b_1()
+        .border_color(crate::theme::row_divider(&palette))
         .cursor_pointer()
         .when(selected, |row| row.bg(palette.selected))
         .hover(|row| row.bg(palette.hover))
@@ -514,7 +522,7 @@ impl Workspace {
             .gap_0p5()
             .child(Label::new(commit.summary.clone()).font_weight(FontWeight::MEDIUM).overflow_hidden().whitespace_nowrap().text_ellipsis())
             .child(
-              h_flex().gap_1p5().items_center().child(Avatar::new().name(commit.author.clone()).xsmall()).child(
+              h_flex().gap_1p5().items_center().child(Avatar::new().name(initial).xsmall()).child(
                 Label::new(format!("{} · {}", commit.author, ago_long(commit.time)))
                   .text_size(FONT_SIZE_SM)
                   .text_color(theme.muted_foreground)
@@ -631,7 +639,7 @@ impl Workspace {
       None => h_flex()
         .gap_1()
         .items_center()
-        .child(div().flex_1().child(crate::components::soft_input(&self.compare_filter, cx).prefix(branch_icon())))
+        .child(div().flex_1().child(crate::components::soft_input(&self.compare_filter, cx).small().prefix(branch_icon())))
         .when(self.compare_open, |row| {
           row.child(
             Button::new("compare-close")
@@ -644,7 +652,7 @@ impl Workspace {
         })
         .into_any_element(),
     };
-    div().pr_3().child(field).into_any_element()
+    div().child(field).into_any_element()
   }
 
   /// The branches under the compare field: the default one, the ones used lately and all the others, each with how many commits

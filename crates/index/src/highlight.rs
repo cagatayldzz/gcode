@@ -12,15 +12,21 @@ pub enum Language {
   Dotenv,
   /// Patterns, with `#` at the start of a line for a comment.
   Gitignore,
+  /// Instructions (`FROM`, `RUN`, ...), variables and `#` comments; a line ending in `\` continues on the next one.
+  Dockerfile,
 }
 
 impl Language {
-  /// The language of a file name, if it is one of these: `.gitignore`, `.env`, `.env.*` and `*.env`.
+  /// The language of a file name, if it is one of these: `.gitignore`, `.env`, `.env.*`, `*.env`, `Dockerfile`, `Dockerfile.*`,
+  /// `*.Dockerfile` and `Containerfile`.
   pub fn for_file_name(name: &str) -> Option<Self> {
+    let lower = name.to_ascii_lowercase();
     if name == ".gitignore" {
       Some(Self::Gitignore)
     } else if name == ".env" || name.starts_with(".env.") || name.ends_with(".env") {
       Some(Self::Dotenv)
+    } else if lower == "dockerfile" || lower == "containerfile" || lower.starts_with("dockerfile.") || lower.ends_with(".dockerfile") {
+      Some(Self::Dockerfile)
     } else {
       None
     }
@@ -31,6 +37,7 @@ impl Language {
     match self {
       Self::Dotenv => "dotenv",
       Self::Gitignore => "gitignore",
+      Self::Dockerfile => "dockerfile",
     }
   }
 
@@ -38,6 +45,7 @@ impl Language {
     match name {
       "dotenv" => Some(Self::Dotenv),
       "gitignore" => Some(Self::Gitignore),
+      "dockerfile" => Some(Self::Dockerfile),
       _ => None,
     }
   }
@@ -55,6 +63,10 @@ pub enum Role {
   Link,
   /// A web address in a comment: the comment's color, underlined.
   CommentLink,
+  /// A Dockerfile instruction (`FROM`, `RUN`, ...) and the `AS` of a build stage.
+  Instruction,
+  /// `$NAME` or `${NAME}`.
+  Variable,
 }
 
 /// A stretch of the text and what it is; `None` is plain text.
@@ -76,11 +88,13 @@ impl Highlights {
     let mut builder = Builder::default();
     if text.len() <= MAX_BYTES {
       let mut offset = 0;
+      let mut continued = false;
       for line in text.split_inclusive('\n') {
         let body = line.trim_end_matches(['\n', '\r']);
         match language {
           Language::Dotenv => dotenv_line(body, offset, &mut builder),
           Language::Gitignore => gitignore_line(body, offset, &mut builder),
+          Language::Dockerfile => continued = dockerfile_line(body, offset, continued, &mut builder),
         }
         offset += line.len();
       }
@@ -161,6 +175,111 @@ fn gitignore_line(line: &str, offset: usize, builder: &mut Builder) {
   if line.starts_with('#') {
     builder.push(offset..offset + line.len(), Role::Comment);
   }
+}
+
+/// The instructions a Dockerfile line can start with.
+const INSTRUCTIONS: [&str; 19] = [
+  "FROM",
+  "RUN",
+  "CMD",
+  "LABEL",
+  "MAINTAINER",
+  "EXPOSE",
+  "ENV",
+  "ADD",
+  "COPY",
+  "ENTRYPOINT",
+  "VOLUME",
+  "USER",
+  "WORKDIR",
+  "ARG",
+  "ONBUILD",
+  "STOPSIGNAL",
+  "HEALTHCHECK",
+  "SHELL",
+  "CHECKPOINT",
+];
+
+/// One Dockerfile line. `continued` tells that the line before ended in a backslash, so this one is the rest of an instruction and
+/// starts with no instruction of its own. Returns whether the next line continues this one.
+fn dockerfile_line(line: &str, offset: usize, continued: bool, builder: &mut Builder) -> bool {
+  let indent = line.len() - line.trim_start().len();
+  let body = &line[indent..];
+  // A comment line inside a continued instruction does not end it.
+  if body.starts_with('#') {
+    builder.push(offset + indent..offset + line.len(), Role::Comment);
+    return continued;
+  }
+  let mut spans: Vec<(Range<usize>, Role)> = Vec::new();
+  let mut from = indent;
+  if !continued {
+    // `ONBUILD` carries another instruction after it.
+    for _ in 0..2 {
+      let rest = &line[from..];
+      let skipped = rest.len() - rest.trim_start().len();
+      let word_start = from + skipped;
+      let word = line[word_start..].split(char::is_whitespace).next().unwrap_or_default();
+      if !INSTRUCTIONS.iter().any(|instruction| instruction.eq_ignore_ascii_case(word)) {
+        break;
+      }
+      spans.push((word_start..word_start + word.len(), Role::Instruction));
+      from = word_start + word.len();
+      if !word.eq_ignore_ascii_case("ONBUILD") {
+        break;
+      }
+    }
+    // The name of a build stage: `FROM image AS name`.
+    if line[indent..].split_whitespace().next().is_some_and(|word| word.eq_ignore_ascii_case("FROM")) {
+      let mut position = from;
+      for word in line[from..].split_inclusive(char::is_whitespace) {
+        let trimmed = word.trim_end();
+        if trimmed.eq_ignore_ascii_case("AS") {
+          spans.push((position..position + trimmed.len(), Role::Instruction));
+        }
+        position += word.len();
+      }
+    }
+  }
+  spans.extend(variables(line).into_iter().map(|span| (span, Role::Variable)));
+  spans.sort_by_key(|(span, _)| span.start);
+  for (span, role) in spans {
+    builder.push(offset + span.start..offset + span.end, role);
+  }
+  line.trim_end().ends_with('\\')
+}
+
+/// `$NAME` and `${NAME...}` in a line.
+fn variables(line: &str) -> Vec<Range<usize>> {
+  let bytes = line.as_bytes();
+  let mut found = Vec::new();
+  let mut at = 0;
+  while at < bytes.len() {
+    if bytes[at] == b'\\' {
+      // An escaped character is not the start of a variable.
+      at += 2;
+      continue;
+    }
+    if bytes[at] != b'$' {
+      at += 1;
+      continue;
+    }
+    let end = match bytes.get(at + 1) {
+      Some(b'{') => line[at..].find('}').map(|close| at + close + 1),
+      Some(byte) if byte.is_ascii_alphabetic() || *byte == b'_' => {
+        let length = bytes[at + 1..].iter().take_while(|byte| byte.is_ascii_alphanumeric() || **byte == b'_').count();
+        Some(at + 1 + length)
+      }
+      _ => None,
+    };
+    match end {
+      Some(end) => {
+        found.push(at..end);
+        at = end;
+      }
+      None => at += 1,
+    }
+  }
+  found
 }
 
 fn dotenv_line(line: &str, offset: usize, builder: &mut Builder) {

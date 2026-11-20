@@ -127,3 +127,48 @@ fn saving_from_several_threads_at_once_leaves_one_good_index_and_no_stray_files(
   let left: Vec<_> = fs::read_dir(cache.path()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
   assert_eq!(left.len(), 1, "only the index itself is left: {left:?}");
 }
+
+#[test]
+fn info_describes_the_saved_index_and_tells_when_it_is_stale() {
+  let project = tempfile::tempdir().unwrap();
+  let cache = tempfile::tempdir().unwrap();
+  write(project.path(), "src/a.txt", "12345");
+  write(project.path(), "b.txt", "123");
+  let missing = ProjectIndex::info(cache.path(), project.path());
+  assert!(!missing.saved && !missing.fresh);
+  assert_eq!((missing.files, missing.total_bytes, missing.saved_bytes), (0, 0, 0));
+  assert!(missing.saved_at.is_none());
+  assert_eq!(missing.path, ProjectIndex::cache_file(cache.path(), project.path()));
+
+  ProjectIndex::open(cache.path(), project.path());
+  let ready = ProjectIndex::info(cache.path(), project.path());
+  assert!(ready.saved && ready.fresh);
+  assert_eq!((ready.files, ready.total_bytes), (2, 8));
+  assert!(ready.saved_bytes > 0 && ready.saved_at.is_some());
+
+  tick();
+  write(project.path(), "new.txt", "x");
+  let stale = ProjectIndex::info(cache.path(), project.path());
+  assert!(stale.saved && !stale.fresh, "a saved index that no longer matches is stale");
+  assert_eq!(stale.files, 2, "info reads the saved index, it does not walk the tree");
+}
+
+#[test]
+fn rebuild_walks_again_and_remove_deletes_the_saved_index() {
+  let project = tempfile::tempdir().unwrap();
+  let cache = tempfile::tempdir().unwrap();
+  write(project.path(), "a.txt", "a");
+  ProjectIndex::open(cache.path(), project.path());
+  // The tree changes in a way the saved index cannot see: a file edited in place keeps its folder's time.
+  write(project.path(), "b.txt", "b");
+  let rebuilt = ProjectIndex::rebuild(cache.path(), project.path()).unwrap();
+  assert_eq!(names(&rebuilt), vec!["a.txt", "b.txt"]);
+  let info = ProjectIndex::info(cache.path(), project.path());
+  assert!(info.saved && info.fresh);
+  assert_eq!(info.files, 2);
+
+  assert!(ProjectIndex::remove(cache.path(), project.path()).unwrap());
+  assert!(!ProjectIndex::info(cache.path(), project.path()).saved);
+  assert!(!ProjectIndex::remove(cache.path(), project.path()).unwrap(), "nothing left to remove");
+  assert_eq!(names(&ProjectIndex::open(cache.path(), project.path()).index), vec!["a.txt", "b.txt"], "opening makes a new one");
+}

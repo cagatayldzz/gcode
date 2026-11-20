@@ -13,7 +13,7 @@ use std::{
     atomic::{AtomicUsize, Ordering},
     mpsc,
   },
-  time::UNIX_EPOCH,
+  time::{SystemTime, UNIX_EPOCH},
 };
 
 const MAGIC: &[u8; 4] = b"VKIX";
@@ -39,6 +39,24 @@ pub struct ProjectIndex {
   files: Vec<FileEntry>,
   /// The folders and ignore files whose change means the files may have changed, with their times of change (`-1`: absent).
   stamps: Vec<(PathBuf, i64)>,
+}
+
+/// What is known about the saved index of a project, for showing it and deciding whether to rebuild it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexInfo {
+  /// Where the index is kept.
+  pub path: PathBuf,
+  /// There is a saved index that can be read.
+  pub saved: bool,
+  /// The folders and ignore files are as they were when it was made, so it is used as it is.
+  pub fresh: bool,
+  /// How many files it lists, and how many bytes they add up to.
+  pub files: usize,
+  pub total_bytes: u64,
+  /// The size of the saved index itself.
+  pub saved_bytes: u64,
+  /// When the index was saved.
+  pub saved_at: Option<SystemTime>,
 }
 
 /// An index that was opened, and where it came from.
@@ -131,6 +149,42 @@ impl ProjectIndex {
   /// The full paths of the files, in path order.
   pub fn paths(&self) -> impl Iterator<Item = PathBuf> + '_ {
     self.files.iter().map(|file| self.root.join(&file.path))
+  }
+
+  /// What the saved index of `root` looks like now. Reads the saved file and checks it against the folders; it does not walk the tree.
+  pub fn info(cache_dir: &Path, root: &Path) -> IndexInfo {
+    let path = Self::cache_file(cache_dir, root);
+    let metadata = fs::metadata(&path).ok();
+    let saved_bytes = metadata.as_ref().map_or(0, fs::Metadata::len);
+    let saved_at = metadata.and_then(|metadata| metadata.modified().ok());
+    match Self::load(cache_dir, root) {
+      Some(index) => IndexInfo {
+        path,
+        saved: true,
+        fresh: index.is_fresh(),
+        files: index.files.len(),
+        total_bytes: index.files.iter().map(|file| file.size).sum(),
+        saved_bytes,
+        saved_at,
+      },
+      None => IndexInfo { path, saved: false, fresh: false, files: 0, total_bytes: 0, saved_bytes, saved_at },
+    }
+  }
+
+  /// Walks the project again whatever the saved index says, saves the result and returns it.
+  pub fn rebuild(cache_dir: &Path, root: &Path) -> io::Result<Self> {
+    let index = Self::scan(root);
+    index.save(cache_dir)?;
+    Ok(index)
+  }
+
+  /// Deletes the saved index of `root`. Returns whether there was one. The next time the project is opened it is walked again.
+  pub fn remove(cache_dir: &Path, root: &Path) -> io::Result<bool> {
+    match fs::remove_file(Self::cache_file(cache_dir, root)) {
+      Ok(()) => Ok(true),
+      Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+      Err(error) => Err(error),
+    }
   }
 
   /// Where the index of `root` is kept inside `cache_dir`.

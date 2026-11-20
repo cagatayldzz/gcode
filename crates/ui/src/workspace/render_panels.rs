@@ -127,7 +127,8 @@ impl Workspace {
           Scrollbar::new(&self.explorer_scroll)
             .id("explorer-scrollbar")
             .axis(ScrollbarAxis::Vertical)
-            .mode(ScrollbarMode::Always)
+            // Shown while scrolling, faded out when idle.
+            .mode(ScrollbarMode::Scrolling)
             .viewport_from_layout(),
         ),
       );
@@ -179,7 +180,7 @@ impl Workspace {
       v_flex()
         .flex_1()
         .min_h_0()
-        .when(self.sidebar_tab == SidebarTab::Explorer, |sidebar| sidebar.bg(colors(cx).explorer_background).pt_3())
+        .when(self.sidebar_tab == SidebarTab::Explorer, |sidebar| sidebar.pt_3())
         .when(self.sidebar_tab == SidebarTab::Search, |sidebar| sidebar.px_3().pt_3())
         .child(content),
     )

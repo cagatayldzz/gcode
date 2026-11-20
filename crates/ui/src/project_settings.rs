@@ -2,7 +2,7 @@
 //! points, and removing it. It takes the main area like the terminals do, as one page with a bar of actions at the bottom.
 
 use crate::{
-  components::{avatar_look, display_path},
+  components::{avatar_look, display_path, size_label, time_ago},
   project_setup::field,
   theme::{colors, project_color, FONT_SIZE, FONT_SIZE_SM, PROJECT_COLORS},
 };
@@ -19,7 +19,8 @@ use gpui_kit::{
   },
   *,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use vekro_index::{IndexInfo, ProjectIndex};
 use vekro_storage::Project;
 
 /// The icons a project can take instead of its first letter.
@@ -70,7 +71,55 @@ pub(crate) enum ProjectSettingsEvent {
   Close,
 }
 
+/// A change to the saved index, with what to say while it runs: it gets the cache folder and the project folder.
+type IndexWork = (&'static str, fn(&Path, &Path) -> std::io::Result<()>);
+
+/// The pages listed on the left; the chosen one fills the right side.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Page {
+  General,
+  Appearance,
+  Git,
+  Index,
+  Remove,
+}
+
+impl Page {
+  const ALL: [Self; 5] = [Self::General, Self::Appearance, Self::Git, Self::Index, Self::Remove];
+
+  fn label(self) -> &'static str {
+    match self {
+      Self::General => "General",
+      Self::Appearance => "Appearance",
+      Self::Git => "Git",
+      Self::Index => "Index",
+      Self::Remove => "Remove project",
+    }
+  }
+
+  fn icon(self) -> &'static str {
+    match self {
+      Self::General => "icons/sliders-horizontal.svg",
+      Self::Appearance => "icons/palette.svg",
+      Self::Git => "icons/git-branch.svg",
+      Self::Index => "icons/database.svg",
+      Self::Remove => "icons/trash.svg",
+    }
+  }
+
+  fn description(self) -> &'static str {
+    match self {
+      Self::General => "The name shown in the project menu and on the project's tab.",
+      Self::Appearance => "The avatar of the project: a color, and an icon instead of its first letter.",
+      Self::Git => "Update the remote address when the repository moves.",
+      Self::Index => "The list of the project's files, made once and kept, so that searching and opening the project start from a ready list.",
+      Self::Remove => "The project leaves the list and its terminals stop. The folder and its files stay on disk.",
+    }
+  }
+}
+
 pub(crate) struct ProjectSettings {
+  page: Page,
   project: Project,
   input: Entity<InputState>,
   remote_input: Entity<InputState>,
@@ -79,6 +128,12 @@ pub(crate) struct ProjectSettings {
   icon: Option<String>,
   color: Option<String>,
   scroll: ScrollHandle,
+  /// The saved index of the project; `None` while it is being read.
+  index: Option<IndexInfo>,
+  /// What the index is being made or deleted for, while that runs.
+  index_work: Option<&'static str>,
+  index_error: Option<SharedString>,
+  index_task: Task<()>,
   _subscription: Subscription,
 }
 
@@ -96,7 +151,8 @@ impl ProjectSettings {
       InputEvent::Change => cx.notify(),
       _ => {}
     });
-    Self {
+    let mut this = Self {
+      page: Page::General,
       project: project.clone(),
       input,
       remote_input,
@@ -105,8 +161,37 @@ impl ProjectSettings {
       icon: project.icon.clone(),
       color: project.color.clone(),
       scroll: ScrollHandle::new(),
+      index: None,
+      index_work: None,
+      index_error: None,
+      index_task: Task::ready(()),
       _subscription: subscription,
-    }
+    };
+    this.refresh_index(None, cx);
+    this
+  }
+
+  /// Runs `work` on the index of the project in the background, then reads what the saved index looks like now. `label` says what is
+  /// going on while it runs; `None` only reads.
+  fn refresh_index(&mut self, work: Option<IndexWork>, cx: &mut Context<Self>) {
+    let root = self.project.path.clone();
+    self.index_work = work.map(|(label, _)| label);
+    self.index_error = None;
+    let job = cx.background_executor().spawn(async move {
+      let cache = vekro_storage::index_dir();
+      let failure = work.and_then(|(_, run)| run(&cache, &root).err());
+      (ProjectIndex::info(&cache, &root), failure)
+    });
+    self.index_task = cx.spawn(async move |this, cx| {
+      let (info, failure) = job.await;
+      let _ = this.update(cx, |this, cx| {
+        this.index = Some(info);
+        this.index_work = None;
+        this.index_error = failure.map(|error| SharedString::from(format!("Could not change the index: {error}")));
+        cx.notify();
+      });
+    });
+    cx.notify();
   }
 
   fn save(&self, cx: &mut Context<Self>) {
@@ -210,32 +295,56 @@ impl ProjectSettings {
     project.color.clone_from(&self.color);
     let avatar = avatar_look(&project, true, cx);
     h_flex()
-      .gap_4()
+      .gap_3()
       .items_center()
+      .px_4()
+      .py_4()
+      .border_b_1()
+      .border_color(palette.border)
       .child(
         div()
           .flex()
           .items_center()
           .justify_center()
-          .size_16()
+          .size_10()
           .flex_none()
-          .rounded_lg()
-          .text_xl()
+          .rounded_md()
           .font_semibold()
           .text_color(avatar.text)
           .when_some(avatar.fill, |badge, fill| badge.bg(fill))
           .map(|badge| match avatar.icon {
-            Some(path) => badge.child(Icon::empty().path(path).size_8()),
+            Some(path) => badge.child(Icon::empty().path(path).size_5()),
             None => badge.child(avatar.letter),
           }),
       )
       .child(
         v_flex()
           .min_w_0()
-          .gap_0p5()
-          .child(div().truncate().text_xl().font_semibold().child(project.name()))
+          .child(div().truncate().font_semibold().child(project.name()))
           .child(div().truncate().text_size(FONT_SIZE_SM).text_color(palette.text_secondary).child(display_path(&self.project.path))),
       )
+  }
+
+  /// One entry of the list on the left, drawn like a row of the Explorer.
+  fn nav_item(&self, page: Page, cx: &mut Context<Self>) -> impl IntoElement {
+    let palette = colors(cx);
+    let selected = self.page == page;
+    let tint = if selected { palette.explorer_selected_text } else { cx.theme().muted_foreground };
+    h_flex()
+      .id(SharedString::from(format!("project-settings-page-{}", page.label())))
+      .gap_2()
+      .px_4()
+      .py_2()
+      .items_center()
+      .cursor_pointer()
+      .when(selected, |row| row.bg(palette.explorer_selected))
+      .when(!selected, |row| row.hover(|row| row.bg(palette.hover)))
+      .child(Icon::empty().path(page.icon()).size_4().text_color(tint))
+      .child(Label::new(page.label()).when(selected, |label| label.text_color(palette.explorer_selected_text)))
+      .on_click(cx.listener(move |this, _, _, cx| {
+        this.page = page;
+        cx.notify();
+      }))
   }
 
   /// The display name, and whether the folder on disk follows it.
@@ -256,7 +365,7 @@ impl ProjectSettings {
             .text_color(palette.text_secondary),
         )
     });
-    section("General", "The name shown in the project menu and on the project's tab.", field("Display name", muted, name_field), cx)
+    section(Page::General, field("Display name", muted, name_field), cx)
   }
 
   /// The color and the icon of the project's avatar.
@@ -290,31 +399,95 @@ impl ProjectSettings {
       .children((0..PROJECT_COLORS.len()).map(|index| self.swatch(index, cx)));
     let icons =
       h_flex().gap_0p5().flex_wrap().child(self.icon_button(None, cx)).children(PROJECT_ICONS.iter().map(|name| self.icon_button(Some(name), cx)));
-    section(
-      "Appearance",
-      "The avatar of the project: a color, and an icon instead of its first letter.",
-      v_flex().gap_4().child(field("Color", muted, colors_row)).child(field("Icon", muted, icons)),
-      cx,
-    )
+    section(Page::Appearance, v_flex().gap_4().child(field("Color", muted, colors_row)).child(field("Icon", muted, icons)), cx)
   }
 
   fn git(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let muted = cx.theme().muted_foreground;
+    section(Page::Git, field("Git remote", muted, crate::components::soft_input(&self.remote_input, cx)), cx)
+  }
+
+  /// The saved index: what it holds, how old it is, and the buttons to make it again or delete it.
+  fn index_page(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let palette = colors(cx);
+    let muted = cx.theme().muted_foreground;
+    let busy = self.index_work.is_some();
+    let status = match (&self.index, self.index_work) {
+      (_, Some(label)) => SharedString::from(label),
+      (None, None) => "Reading…".into(),
+      (Some(info), None) if !info.saved => "Not made yet".into(),
+      (Some(info), None) if info.fresh => "Ready".into(),
+      (Some(_), None) => "Out of date: the project changed since it was made".into(),
+    };
+    let row = |caption: &'static str, value: SharedString| {
+      h_flex()
+        .gap_4()
+        .px_4()
+        .py_2p5()
+        .items_center()
+        .justify_between()
+        .border_b_1()
+        .border_color(palette.border)
+        .child(Label::new(caption).text_color(muted))
+        .child(div().min_w_0().truncate().child(value))
+    };
+    let info = self.index.as_ref();
+    let number = |value: Option<String>| SharedString::from(value.unwrap_or_else(|| "–".into()));
+    let saved = info.filter(|info| info.saved);
+    let rows = v_flex()
+      .w_full()
+      .border_t_1()
+      .border_color(palette.border)
+      .child(row("Status", status))
+      .child(row("Files", number(saved.map(|info| info.files.to_string()))))
+      .child(row("Size of the files", number(saved.map(|info| size_label(info.total_bytes)))))
+      .child(row("Size of the index", number(saved.map(|info| size_label(info.saved_bytes)))))
+      .child(row("Made", number(saved.and_then(|info| info.saved_at).map(time_ago))))
+      .child(row("Location", number(info.map(|info| display_path(&info.path)))));
+    let buttons = h_flex()
+      .gap_2()
+      .child(
+        Button::new("index-rebuild")
+          .label(if saved.is_some() { "Rebuild index" } else { "Make index" })
+          .icon(Icon::empty().path("icons/refresh-cw.svg"))
+          .outline()
+          .disabled(busy)
+          .on_click(cx.listener(|this, _, _, cx| {
+            this.refresh_index(Some(("Making the index…", |cache, root| ProjectIndex::rebuild(cache, root).map(drop))), cx);
+          })),
+      )
+      .child(
+        Button::new("index-delete")
+          .label("Delete index")
+          .icon(Icon::empty().path("icons/trash.svg"))
+          .danger()
+          .outline()
+          .disabled(busy || saved.is_none())
+          .on_click(cx.listener(|this, _, _, cx| {
+            this.refresh_index(Some(("Deleting the index…", |cache, root| ProjectIndex::remove(cache, root).map(drop))), cx);
+          })),
+      );
     section(
-      "Git",
-      "Update the remote address when the repository moves.",
-      field("Git remote", muted, crate::components::soft_input(&self.remote_input, cx)),
+      Page::Index,
+      v_flex()
+        .gap_4()
+        .child(rows)
+        .when_some(self.index_error.clone(), |column, error| column.child(Label::new(error).text_color(palette.deleted)))
+        .child(buttons)
+        .child(
+          Label::new("Deleting it frees the space only; the project is indexed again the next time it is opened or searched.")
+            .text_size(FONT_SIZE_SM)
+            .text_color(palette.text_secondary),
+        ),
       cx,
     )
   }
 
   /// Removing the project from Vekro; its folder stays on disk.
   fn danger(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let palette = colors(cx);
     let path = self.project.path.clone();
     section(
-      "Remove project",
-      "The project leaves the list and its terminals stop. The folder and its files stay on disk.",
+      Page::Remove,
       h_flex().child(
         Button::new("settings-remove")
           .label("Remove project")
@@ -325,25 +498,19 @@ impl ProjectSettings {
       ),
       cx,
     )
-    .border_color(palette.deleted.opacity(0.35))
   }
 }
 
-/// One block of the page: a title with a line of explanation, and its controls on a bordered surface.
-fn section(title: &'static str, description: &'static str, content: impl IntoElement, cx: &App) -> Div {
+/// The right side of the settings: the page's title and what it is for, then its controls.
+fn section(page: Page, content: impl IntoElement, cx: &App) -> Div {
   let palette = colors(cx);
   v_flex()
-    .gap_4()
-    .p_5()
-    .rounded_lg()
-    .border_1()
-    .border_color(palette.border)
-    .bg(palette.surface)
+    .gap_5()
     .child(
       v_flex()
-        .gap_0p5()
-        .child(Label::new(title).font_weight(FontWeight::SEMIBOLD))
-        .child(Label::new(description).text_size(FONT_SIZE_SM).text_color(palette.text_secondary)),
+        .gap_1()
+        .child(div().text_lg().font_semibold().child(page.label()))
+        .child(Label::new(page.description()).text_size(FONT_SIZE_SM).text_color(palette.text_secondary)),
     )
     .child(content)
 }
@@ -352,50 +519,57 @@ impl Render for ProjectSettings {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let dirty = self.is_dirty(cx);
-    let page = v_flex()
-      .w_full()
-      .max_w(rems(44.))
-      .mx_auto()
-      .gap_5()
-      .p_6()
+    let content = match self.page {
+      Page::General => self.general(cx).into_any_element(),
+      Page::Appearance => self.appearance(cx).into_any_element(),
+      Page::Git => self.git(cx).into_any_element(),
+      Page::Index => self.index_page(cx).into_any_element(),
+      Page::Remove => self.danger(cx).into_any_element(),
+    };
+    let sidebar = v_flex()
+      .w_64()
+      .flex_none()
+      .h_full()
+      .bg(cx.theme().sidebar)
+      .border_r_1()
+      .border_color(palette.border)
       .child(self.header(cx))
-      .child(self.general(cx))
-      .child(self.appearance(cx))
-      .child(self.git(cx))
-      .child(self.danger(cx));
-    v_flex()
-      .size_full()
-      .bg(palette.background)
-      .text_size(FONT_SIZE)
+      .child(v_flex().pt_2().children(Page::ALL.map(|page| self.nav_item(page, cx))));
+    let body = div()
+      .relative()
+      .flex_1()
+      .min_w_0()
+      .h_full()
       .child(
         div()
-          .relative()
-          .flex_1()
-          .min_h_0()
-          .child(div().id("project-settings-body").size_full().overflow_y_scroll().track_scroll(&self.scroll).child(page))
-          .child(
-            div().absolute().inset_0().child(
-              Scrollbar::new(&self.scroll)
-                .id("project-settings-scrollbar")
-                .axis(ScrollbarAxis::Vertical)
-                .mode(ScrollbarMode::Always)
-                .viewport_from_layout(),
-            ),
-          ),
+          .id("project-settings-body")
+          .size_full()
+          .overflow_y_scroll()
+          .track_scroll(&self.scroll)
+          .child(v_flex().w_full().max_w(rems(40.)).px_8().py_6().child(content)),
       )
       .child(
-        h_flex()
-          .justify_end()
-          .gap_2()
-          .px_6()
-          .py_3()
-          .border_t_1()
-          .border_color(palette.border)
-          .bg(palette.rail)
-          .child(Button::new("settings-cancel").label(if dirty { "Discard" } else { "Close" }).on_click(cx.listener(|_, _, _, cx| {
-            cx.emit(ProjectSettingsEvent::Close);
-          })))
-          .child(Button::new("settings-save").label("Save").primary().disabled(!dirty).on_click(cx.listener(|this, _, _, cx| this.save(cx)))),
-      )
+        div().absolute().inset_0().child(
+          Scrollbar::new(&self.scroll)
+            .id("project-settings-scrollbar")
+            .axis(ScrollbarAxis::Vertical)
+            .mode(ScrollbarMode::Always)
+            .viewport_from_layout(),
+        ),
+      );
+    v_flex().size_full().bg(palette.background).text_size(FONT_SIZE).child(h_flex().flex_1().min_h_0().child(sidebar).child(body)).child(
+      h_flex()
+        .justify_end()
+        .gap_2()
+        .px_6()
+        .py_3()
+        .border_t_1()
+        .border_color(palette.border)
+        .bg(palette.rail)
+        .child(Button::new("settings-cancel").label(if dirty { "Discard" } else { "Close" }).on_click(cx.listener(|_, _, _, cx| {
+          cx.emit(ProjectSettingsEvent::Close);
+        })))
+        .child(Button::new("settings-save").label("Save").primary().disabled(!dirty).on_click(cx.listener(|this, _, _, cx| this.save(cx)))),
+    )
   }
 }

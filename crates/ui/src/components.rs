@@ -43,6 +43,8 @@ pub(crate) fn display_path(path: &std::path::Path) -> String {
   }
 }
 
+pub(crate) use crate::labels::{size_label, time_ago};
+
 /// How a project's avatar is drawn: the repository menu and the project list in Settings share it.
 pub(crate) struct AvatarLook {
   pub fill: Option<Hsla>,

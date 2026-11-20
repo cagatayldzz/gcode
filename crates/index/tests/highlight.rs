@@ -104,3 +104,72 @@ fn languages_are_found_by_file_name() {
   }
   assert_eq!(Language::from_name(Language::Dotenv.name()), Some(Language::Dotenv));
 }
+
+const DOCKERFILE: &str = "# syntax=docker/dockerfile:1\nARG BUN_IMAGE=oven/bun:1.4.4-alpine\n\nFROM ${BUN_IMAGE} AS base\nWORKDIR /app\nENV NEXT_TELEMETRY_DISABLED=1\n\nfrom base as builder\nCOPY --from=builder /app/public ./public\nENV NODE_ENV=production \\\n    NEXT_TELEMETRY_DISABLED=1 \\\n    # a comment inside\n    PORT=3000 HOME=$HOME_DIR\nONBUILD RUN echo \"$USER\" \\$ESCAPED\nCMD [\"bun\", \"server.js\"]";
+
+#[test]
+fn dockerfile_instructions_stages_and_variables_have_their_roles() {
+  let runs = Highlights::compute(Language::Dockerfile, DOCKERFILE).runs().to_vec();
+  covers(&runs, &(0..DOCKERFILE.len()));
+  assert_eq!(role_at(&runs, DOCKERFILE, "# syntax"), Some(Role::Comment));
+  for (needle, expected) in [
+    ("ARG", "ARG"),
+    ("FROM ${", "FROM"),
+    ("WORKDIR", "WORKDIR"),
+    ("ENV NEXT", "ENV"),
+    ("COPY", "COPY"),
+    ("CMD", "CMD"),
+    ("ONBUILD", "ONBUILD"),
+    ("RUN echo", "RUN"),
+  ] {
+    assert_eq!(role_at(&runs, DOCKERFILE, needle), Some(Role::Instruction), "{needle}");
+    assert_eq!(text_of(&runs, DOCKERFILE, needle), expected);
+  }
+  assert_eq!(role_at(&runs, DOCKERFILE, "from base"), Some(Role::Instruction), "instructions are not case sensitive");
+  assert_eq!(role_at(&runs, DOCKERFILE, "AS base"), Some(Role::Instruction));
+  assert_eq!(role_at(&runs, DOCKERFILE, "as builder"), Some(Role::Instruction));
+  assert_eq!(text_of(&runs, DOCKERFILE, "${BUN_IMAGE}"), "${BUN_IMAGE}");
+  assert_eq!(role_at(&runs, DOCKERFILE, "${BUN_IMAGE}"), Some(Role::Variable));
+  assert_eq!(text_of(&runs, DOCKERFILE, "$HOME_DIR"), "$HOME_DIR");
+  assert_eq!(text_of(&runs, DOCKERFILE, "$USER"), "$USER");
+  assert_eq!(role_at(&runs, DOCKERFILE, "$ESCAPED"), None, "an escaped dollar sign is plain text");
+  assert_eq!(role_at(&runs, DOCKERFILE, "--from=builder"), None, "flags and values are plain text");
+  assert_eq!(role_at(&runs, DOCKERFILE, "oven/bun"), None);
+  assert_eq!(role_at(&runs, DOCKERFILE, "base\nWORKDIR"), None, "`base` after FROM is a name, not AS");
+}
+
+#[test]
+fn a_continued_dockerfile_line_does_not_start_a_new_instruction() {
+  let text = "ENV A=1 \\\n    RUN=2 \\\n    # note\n    COPY=3\nRUN ls\n";
+  let runs = Highlights::compute(Language::Dockerfile, text).runs().to_vec();
+  assert_eq!(role_at(&runs, text, "ENV"), Some(Role::Instruction));
+  assert_eq!(role_at(&runs, text, "RUN=2"), None, "the rest of ENV is not an instruction even when it looks like one");
+  assert_eq!(role_at(&runs, text, "COPY=3"), None);
+  assert_eq!(role_at(&runs, text, "# note"), Some(Role::Comment), "a comment inside the continuation");
+  assert_eq!(role_at(&runs, text, "RUN ls"), Some(Role::Instruction), "after the last line of the instruction a new one starts");
+}
+
+#[test]
+fn a_word_that_only_starts_like_an_instruction_is_plain() {
+  let text = "RUNNER x\nFROMAGE y\nCOPYRIGHT\n";
+  let runs = Highlights::compute(Language::Dockerfile, text).runs().to_vec();
+  assert_eq!(runs, vec![(0..text.len(), None)]);
+}
+
+#[test]
+fn dockerfiles_are_found_by_file_name() {
+  for name in ["Dockerfile", "dockerfile", "Dockerfile.dev", "Dockerfile.prod", "web.Dockerfile", "Containerfile"] {
+    assert_eq!(Language::for_file_name(name), Some(Language::Dockerfile), "{name}");
+  }
+  for name in ["docker-compose.yml", ".dockerignore", "Dockerfiles", "dockerfile-notes.md", "my-Dockerfile"] {
+    assert_eq!(Language::for_file_name(name), None, "{name}");
+  }
+  assert_eq!(Language::from_name(Language::Dockerfile.name()), Some(Language::Dockerfile));
+}
+
+#[test]
+fn dockerfile_runs_cover_any_text_even_without_a_final_newline_or_with_carriage_returns() {
+  for text in ["", "FROM x", "FROM x\r\nRUN y \\\r\n  z\r\n", "\\", "$", "${", "${A", "$$A", "FROM \\\n"] {
+    covers(Highlights::compute(Language::Dockerfile, text).runs(), &(0..text.len()));
+  }
+}

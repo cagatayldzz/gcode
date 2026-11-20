@@ -780,6 +780,7 @@ fn language_label(path: &Path) -> &'static str {
     "json" => "JSON",
     "gitignore" => "Git Ignore",
     "dotenv" => "Environment",
+    "dockerfile" => "Dockerfile",
     "markdown" => "Markdown",
     "typescript" => "TypeScript",
     "tsx" => "TypeScript JSX",

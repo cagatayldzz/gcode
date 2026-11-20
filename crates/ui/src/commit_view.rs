@@ -3,13 +3,20 @@
 use crate::{
   diff_view::ShownDiff,
   settings::{code_font_size, SettingsModel},
-  theme::{colors, FONT_SIZE_SM},
+  theme::{colors, row_divider, FONT_SIZE_SM},
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
-    clipboard::Clipboard, diff::DiffFile, h_flex, label::Label, scroll::ScrollableElement as _, spinner::Spinner, v_flex, ActiveTheme as _, Icon,
-    Sizable as _,
+    avatar::Avatar,
+    button::{Button, ButtonVariants as _},
+    clipboard::Clipboard,
+    diff::DiffFile,
+    h_flex,
+    label::Label,
+    scroll::{ScrollableElement as _, Scrollbar, ScrollbarAxis},
+    spinner::Spinner,
+    v_flex, ActiveTheme as _, Icon, Sizable as _,
   },
   *,
 };
@@ -18,6 +25,10 @@ use vekro_git::{ChangeKind, CommitDetail};
 
 /// The width of the list of changed files.
 const FILES_WIDTH: Pixels = px(280.);
+
+/// The tallest the commit message grows to: a few lines when folded, most of the window when unfolded; longer messages scroll.
+const MESSAGE_FOLDED_HEIGHT: Rems = rems(6.5);
+const MESSAGE_UNFOLDED_HEIGHT: Rems = rems(28.);
 
 pub(crate) enum Load<T> {
   Loading,
@@ -35,11 +46,24 @@ pub(crate) struct CommitView {
   diff: Load<ShownDiff>,
   /// Which commit and file the answers being awaited belong to, so a late one for another is ignored.
   epoch: u64,
+  /// The message box is unfolded to show more of the message, and the details of the commit are written out.
+  message_unfolded: bool,
+  message_scroll: ScrollHandle,
 }
 
 impl CommitView {
   pub fn new(settings: Entity<SettingsModel>) -> Self {
-    Self { settings, root: PathBuf::new(), id: String::new(), detail: Load::Loading, selected: None, diff: Load::Loading, epoch: 0 }
+    Self {
+      settings,
+      root: PathBuf::new(),
+      id: String::new(),
+      detail: Load::Loading,
+      selected: None,
+      diff: Load::Loading,
+      epoch: 0,
+      message_unfolded: false,
+      message_scroll: ScrollHandle::new(),
+    }
   }
 
   /// Shows another commit of the repository at `root`, the first of its files selected.
@@ -52,6 +76,7 @@ impl CommitView {
     self.detail = Load::Loading;
     self.selected = None;
     self.diff = Load::Loading;
+    self.message_scroll.set_offset(point(px(0.), px(0.)));
     self.epoch += 1;
     let epoch = self.epoch;
     cx.notify();
@@ -123,6 +148,8 @@ impl CommitView {
       .px_3()
       .py_1()
       .items_center()
+      .border_b_1()
+      .border_color(row_divider(&palette))
       .cursor_pointer()
       .when(selected, |row| row.bg(palette.selected))
       .hover(|row| row.bg(palette.hover))
@@ -166,46 +193,134 @@ impl Render for CommitView {
       Load::Ready(detail) => detail,
     };
     let id = detail.info.id.clone();
+    let initial: SharedString = detail.info.author.trim().chars().take(1).flat_map(char::to_uppercase).collect::<String>().into();
+    let unfolded = self.message_unfolded;
+    let copy = |id: String| {
+      Clipboard::new(SharedString::from(format!("copy-commit-id-{id}")))
+        .value(id)
+        .accessibility_label("Copy the full commit id")
+        .tooltip("Copy the full commit id")
+    };
+    let muted = theme.muted_foreground;
+    // A long subject goes down onto further lines; the button stays at the top right, so the message can always be folded.
+    let title = h_flex()
+      .w_full()
+      .gap_2()
+      .px_4()
+      .py_2()
+      .items_start()
+      .child(div().flex_1().min_w_0().font_weight(FontWeight::SEMIBOLD).whitespace_normal().child(detail.info.summary.clone()))
+      .child(
+        div().flex_none().child(
+          Button::new("commit-message-toggle")
+            .ghost()
+            .xsmall()
+            .icon(Icon::empty().path(if unfolded { "icons/fold-vertical.svg" } else { "icons/unfold-vertical.svg" }))
+            .tooltip(if unfolded { "Fold the message" } else { "Unfold the message" })
+            .on_click(cx.listener(|this, _, _, cx| {
+              this.message_unfolded = !this.message_unfolded;
+              cx.notify();
+            })),
+        ),
+      );
+    // The message as it was written (a fixed-width font keeps lists and wrapped lines as typed), in a box that scrolls.
+    let body_box = (!detail.body.is_empty()).then(|| {
+      let height = if unfolded { MESSAGE_UNFOLDED_HEIGHT } else { MESSAGE_FOLDED_HEIGHT };
+      div()
+        .relative()
+        .w_full()
+        .min_w_0()
+        .max_h(height)
+        .overflow_hidden()
+        .border_y_1()
+        .border_color(palette.border)
+        .bg(palette.surface)
+        .child(
+          div().id("commit-message").w_full().max_h(height).overflow_y_scroll().track_scroll(&self.message_scroll).child(
+            div()
+              .w_full()
+              .min_w_0()
+              .px_4()
+              .py_2()
+              .font_family(theme.mono_font_family.clone())
+              .text_size(FONT_SIZE_SM)
+              .whitespace_normal()
+              .child(detail.body.clone()),
+          ),
+        )
+        .child(
+          div()
+            .absolute()
+            .inset_0()
+            .child(Scrollbar::new(&self.message_scroll).id("commit-message-scrollbar").axis(ScrollbarAxis::Vertical).viewport_from_layout()),
+        )
+    });
+    let author = |text: String| {
+      h_flex()
+        .gap_2()
+        .items_center()
+        .child(Avatar::new().name(initial.clone()).xsmall())
+        .child(Label::new(text).text_size(FONT_SIZE_SM).text_color(muted))
+    };
+    let stats = h_flex()
+      .gap_3()
+      .items_center()
+      .child(Label::new(format!("+{}", detail.additions)).text_size(FONT_SIZE_SM).text_color(palette.new))
+      .child(Label::new(format!("-{}", detail.deletions)).text_size(FONT_SIZE_SM).text_color(palette.deleted));
+    let footer = if unfolded {
+      let name =
+        if detail.author_email.is_empty() { detail.info.author.clone() } else { format!("{} <{}>", detail.info.author, detail.author_email) };
+      v_flex()
+        .gap_1()
+        .px_4()
+        .py_2()
+        .child(author(name))
+        .child(
+          h_flex()
+            .gap_2()
+            .items_center()
+            .child(Icon::empty().path("icons/git-commit-horizontal.svg").size_4().text_color(muted))
+            .child(Label::new(detail.info.id.clone()).text_size(FONT_SIZE_SM).text_color(muted))
+            .child(copy(id.clone())),
+        )
+        .child(
+          h_flex()
+            .gap_2()
+            .items_center()
+            .child(Icon::empty().path("icons/diff.svg").size_4().text_color(muted))
+            .child(Label::new(format!("{} added lines", detail.additions)).text_size(FONT_SIZE_SM).text_color(palette.new))
+            .child(Label::new(format!("{} removed lines", detail.deletions)).text_size(FONT_SIZE_SM).text_color(palette.deleted)),
+        )
+        .into_any_element()
+    } else {
+      h_flex()
+        .gap_3()
+        .px_4()
+        .py_1p5()
+        .items_center()
+        .justify_between()
+        .child(
+          h_flex()
+            .gap_2()
+            .items_center()
+            .child(author(detail.info.author.clone()))
+            .child(Icon::empty().path("icons/git-commit-horizontal.svg").size_4().text_color(muted))
+            .child(Label::new(detail.info.short.clone()).text_size(FONT_SIZE_SM).text_color(muted))
+            .child(copy(id.clone())),
+        )
+        .child(stats)
+        .into_any_element()
+    };
     let header = v_flex()
       .flex_none()
-      .gap_1()
-      .px_4()
-      .py_2p5()
+      .w_full()
+      .min_w_0()
+      .overflow_hidden()
       .border_b_1()
       .border_color(palette.border)
-      .child(
-        h_flex()
-          .gap_3()
-          .items_center()
-          .child(
-            Label::new(detail.info.summary.clone())
-              .font_weight(FontWeight::SEMIBOLD)
-              .flex_1()
-              .min_w_0()
-              .overflow_hidden()
-              .whitespace_nowrap()
-              .text_ellipsis(),
-          )
-          .child(Label::new(format!("+{}", detail.additions)).text_size(FONT_SIZE_SM).text_color(palette.new))
-          .child(Label::new(format!("-{}", detail.deletions)).text_size(FONT_SIZE_SM).text_color(palette.deleted)),
-      )
-      .child(
-        h_flex()
-          .gap_2()
-          .items_center()
-          .child(Label::new(detail.info.author.clone()).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground))
-          .child(Icon::empty().path("icons/git-commit-horizontal.svg").size_4().text_color(theme.muted_foreground))
-          .child(Label::new(detail.info.short.clone()).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground))
-          .child(
-            Clipboard::new(SharedString::from(format!("copy-commit-id-{id}")))
-              .value(id)
-              .accessibility_label("Copy the full commit id")
-              .tooltip("Copy the full commit id"),
-          ),
-      )
-      .when(!detail.body.is_empty(), |column| {
-        column.child(Label::new(detail.body.clone()).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground))
-      });
+      .child(title)
+      .children(body_box)
+      .child(footer);
     let count = detail.files.len();
     let files = v_flex()
       .w(FILES_WIDTH)
@@ -234,6 +349,7 @@ impl Render for CommitView {
     };
     v_flex()
       .size_full()
+      .min_w_0()
       .bg(theme.background)
       .child(header)
       .child(h_flex().flex_1().min_h_0().child(files).child(div().flex_1().min_w_0().h_full().child(diff)))

@@ -170,16 +170,7 @@ pub(super) fn ago_long(seconds_since_epoch: i64) -> String {
   }
 }
 
-/// How long ago `time` was, for a label: "just now", "5m ago", "3h ago", "2d ago".
-pub(super) fn time_ago(time: std::time::SystemTime) -> String {
-  let seconds = time.elapsed().map_or(0, |elapsed| elapsed.as_secs());
-  match seconds {
-    0..=59 => "just now".to_string(),
-    60..=3599 => format!("{}m ago", seconds / 60),
-    3600..=86399 => format!("{}h ago", seconds / 3600),
-    _ => format!("{}d ago", seconds / 86400),
-  }
-}
+pub(super) use crate::components::time_ago;
 
 /// What a category is called in a menu or a tooltip: its name, or its number while it has none.
 pub(super) fn category_label(index: usize, category: &Category) -> String {

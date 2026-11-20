@@ -13,6 +13,7 @@ mod connections;
 mod diff_view;
 mod editor;
 mod explorer;
+mod labels;
 mod mention_picker;
 mod menus;
 mod merge_dialog;

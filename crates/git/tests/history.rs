@@ -87,6 +87,7 @@ fn a_commit_lists_its_files_with_kinds_and_line_totals() {
   let detail = commit_detail(&dir, &second.to_string()).unwrap();
   assert_eq!(detail.info.summary, "second line");
   assert_eq!(detail.body, "The body\nof it.");
+  assert_eq!(detail.author_email, "ada@example.com");
   let files: Vec<_> = detail.files.iter().map(|file| (file.path.to_str().unwrap(), file.kind)).collect();
   assert_eq!(files, [("gone.txt", ChangeKind::Deleted), ("keep.txt", ChangeKind::Modified), ("new.txt", ChangeKind::New)]);
   assert_eq!((detail.additions, detail.deletions), (3, 2));

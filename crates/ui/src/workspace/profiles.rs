@@ -8,6 +8,10 @@ use gpui_kit::component::avatar::Avatar;
 use vekro_hosting::Accounts;
 use vekro_storage::delete_profile_files;
 
+/// The avatar of the profile in the activity bar: between the Kit's small (24 px) and medium (48 px, wider than the button). It is the
+/// small avatar stretched to this size: a custom `Size` makes the Kit put the letter in a box half that size, off the center.
+const PROFILE_AVATAR_SIZE: Pixels = px(28.);
+
 impl Workspace {
   /// The profile this window shows.
   pub(crate) fn profile(&self) -> &Profile {
@@ -40,7 +44,7 @@ impl Workspace {
       .rounded_md()
       .accessibility_label(label.clone())
       .tooltip(label)
-      .child(Avatar::new().name(initial))
+      .child(Avatar::new().name(initial).small().size(PROFILE_AVATAR_SIZE))
       .dropdown_menu_with_anchor(Anchor::LeftCenter, move |mut menu, _, cx| {
         menu = menu.action_context(focus.clone());
         for profile in profile_list(cx).profiles {

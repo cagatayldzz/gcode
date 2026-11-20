@@ -36,7 +36,6 @@ pub(crate) struct Colors {
   pub control_border: Hsla,
   /// The row that is chosen.
   pub selected: Hsla,
-  pub explorer_background: Hsla,
   pub explorer_selected: Hsla,
   pub explorer_selected_text: Hsla,
   pub plist_icon: Hsla,
@@ -67,6 +66,12 @@ pub(crate) struct Colors {
   /// The whole-line backgrounds of added and removed lines in a diff.
   pub diff_added: Hsla,
   pub diff_removed: Hsla,
+}
+
+/// The line between the rows of a list: the theme's border, half as strong, so that it separates without drawing the eye. It follows
+/// the palette, so it is a light line on the dark theme and a dark one on the light theme.
+pub(crate) fn row_divider(palette: &Colors) -> Hsla {
+  palette.border.opacity(0.5)
 }
 
 fn hex(value: u32) -> Hsla {
@@ -102,7 +107,6 @@ impl Colors {
       border: hex(0x252c35),
       control_border: hex(0x3d444d),
       selected: hex(0x172b45),
-      explorer_background: hex(0x010409),
       explorer_selected: hex(0x2f353d),
       explorer_selected_text: hex(0xf0f6fc),
       plist_icon: hex(0xf0883e),
@@ -142,7 +146,6 @@ impl Colors {
       border: hex(0xe2e7ec),
       control_border: hex(0x818b98),
       selected: hex(0xddf4ff),
-      explorer_background: hex(0xffffff),
       explorer_selected: rail_hover,
       explorer_selected_text: text,
       plist_icon: hex(0xbc4c00),

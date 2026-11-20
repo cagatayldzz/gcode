@@ -9,4 +9,4 @@
 pub mod highlight;
 mod index;
 
-pub use index::{FileEntry, Opened, ProjectIndex};
+pub use index::{FileEntry, IndexInfo, Opened, ProjectIndex};

@@ -89,12 +89,13 @@ The **Projects** page holds the projects folder and **Add all**.
 
 ### Project settings
 
-Click the folder-gear button in the activity bar (or the sliders button of a project in the project list) to open the settings of the open project. They take the whole area, like the terminals; click the button again, or Explorer, Git or the terminal, to leave. The page has these sections:
+Click the folder-gear button in the activity bar (or the sliders button of a project in the project list) to open the settings of the open project. They take the whole area, like the terminals; click the button again, or Explorer, Git or the terminal, to leave. A list on the left chooses what the right side shows:
 
 - **Name** replaces the folder's name in the project menu and the Explorer (the folder itself is not renamed);
 - **Color** tints the avatar, and fills it while the project is open;
 - **Icon** shows one of 20 icons instead of the first letter;
 - **Git** changes the address of the remote;
+- **Index** shows the saved list of the project's files that searching starts from: its status (ready, out of date, not made yet), how many files, their size, the size of the index, when it was made and where it is kept. **Rebuild index** walks the project again; **Delete index** removes the saved one (the project is indexed again the next time it is opened or searched);
 - **Remove project** takes it out of Vekro (its folder stays on disk).
 
 Save is available once something changed; **Discard** leaves without saving (Enter in the name field also saves). Clearing the name, choosing **Default** and **Aa** goes back to the folder's name, the theme's blue and the first letter.
@@ -149,7 +150,7 @@ or drag the highlighted region to scroll through the file.
 ## Git
 
 The Git tab has two views, **Changes** and **History**. **History** lists the commits of the current branch, newest first, 50 at a time (scroll to the end of the list, or press **Load 50 more commits**, for the next 50; the list has a scroll bar): the subject, who made it and when, any tags, and an arrow while the remote does not have the commit yet. Choose one to see it
-in the main area, in place of the editor: its message, the files it changed (with `+`/`-` totals) and the diff of the chosen file;
+in the main area, in place of the editor: its subject, its message in a fixed-width scrolling box (the button beside the subject unfolds it to most of the window and writes out the author's e-mail, the full id and the added and removed lines), the author, short id and `+`/`-` totals, the files it changed and the diff of the chosen file;
 right-click a commit for **Undo Commit…** (only the last commit, and only while the remote does not have it: it goes back like `git reset --soft`, its changes return to Changes and its message to the commit box), **Create Tag…** (a lightweight tag on that commit, local until you push it) and **Copy SHA**; the first commit is shown when you open the view, and the editor tabs come back when you return to Changes or another sidebar tab.
 
 Above the History list, **Select Branch to Compare…** lists the other branches (the default branch, the ones you used lately, then all

@@ -67,6 +67,7 @@ pub(crate) fn line_styles(
   let underline = Some(UnderlineStyle { thickness: px(1.), color: None, wavy: false });
   let name = orange_style(resolver);
   let keyword = resolver.style("keyword").unwrap_or_default();
+  let variable = resolver.style("variable").or_else(|| resolver.style("property")).unwrap_or_default();
   highlights
     .slice(range)
     .into_iter()
@@ -74,8 +75,9 @@ pub(crate) fn line_styles(
       let style = match role {
         None => HighlightStyle::default(),
         Some(Role::Comment) => comment,
-        Some(Role::Name) => name,
+        Some(Role::Name | Role::Instruction) => name,
         Some(Role::Keyword) => keyword,
+        Some(Role::Variable) => variable,
         Some(Role::Link) => HighlightStyle { underline, ..HighlightStyle::default() },
         Some(Role::CommentLink) => HighlightStyle { underline, ..comment },
       };

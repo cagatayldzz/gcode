@@ -764,6 +764,8 @@ pub struct CommitDetail {
   pub info: CommitInfo,
   /// The message after its first line.
   pub body: String,
+  /// The author's e-mail address, empty when the commit has none.
+  pub author_email: String,
   /// The files it changed, sorted by path (against its first parent; a first commit against nothing).
   pub files: Vec<Change>,
   pub additions: usize,
@@ -908,9 +910,12 @@ pub fn commit_detail(path: &Path, id: &str) -> Result<CommitDetail, String> {
   let stats = diff.stats().map_err(|error| error.message().to_string())?;
   let message = commit.message().unwrap_or("");
   let body = message.split_once('\n').map(|(_, rest)| rest.trim().to_string()).unwrap_or_default();
+  let author = commit.author();
+  let author_email = author.email().unwrap_or_default().to_string();
   Ok(CommitDetail {
     info: commit_info(&commit, &std::collections::HashSet::new(), &std::collections::HashMap::new()),
     body,
+    author_email,
     files,
     additions: stats.insertions(),
     deletions: stats.deletions(),
