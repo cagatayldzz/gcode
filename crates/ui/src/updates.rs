@@ -1,7 +1,7 @@
 //! Vekro's own updates: the state every window shares, and the panel in Settings that shows it.
 
 use crate::{
-  settings::{SettingsGlobal, SettingsModel},
+  settings::SettingsModel,
   theme::{colors, FONT_SIZE_SM},
 };
 use futures::{channel::mpsc, StreamExt};
@@ -187,18 +187,15 @@ impl SettingsModel {
   }
 }
 
-fn model(cx: &App) -> Entity<SettingsModel> {
-  cx.global::<SettingsGlobal>().0.clone()
-}
-
 /// The update status in Settings, with its actions.
 pub(crate) struct UpdatePanel {
+  model: Entity<SettingsModel>,
   _observe: Subscription,
 }
 
 impl UpdatePanel {
-  pub fn new(cx: &mut Context<Self>) -> Self {
-    Self { _observe: cx.observe(&model(cx), |_, _, cx| cx.notify()) }
+  pub fn new(model: Entity<SettingsModel>, cx: &mut Context<Self>) -> Self {
+    Self { _observe: cx.observe(&model, |_, _, cx| cx.notify()), model }
   }
 }
 
@@ -216,7 +213,7 @@ impl Render for UpdatePanel {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
-    let shared = model(cx);
+    let shared = self.model.clone();
     let (update, checked) = {
       let state = &shared.read(cx).updates;
       (state.update.clone(), state.checked)

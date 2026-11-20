@@ -130,7 +130,7 @@ impl ProjectSetup {
 
   /// Shows the list of the connected accounts' repositories.
   fn open_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    let picker = cx.new(|cx| RepositoryPicker::new(self.accounts.items.clone(), window, cx));
+    let picker = cx.new(|cx| RepositoryPicker::new(self.accounts.items.clone(), self.accounts.keychain(), window, cx));
     let subscription = cx.subscribe_in(&picker, window, |this, _, chosen: &RepositoryChosen, window, cx| {
       this.input.update(cx, |input, cx| input.set_value(chosen.0.clone(), window, cx));
       cx.notify();

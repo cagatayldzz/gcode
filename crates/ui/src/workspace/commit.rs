@@ -89,7 +89,10 @@ impl Workspace {
 
   /// Opens the dialog that connects a GitHub, GitLab or Azure DevOps account.
   pub(crate) fn open_connect_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    let form = cx.new(|cx| ConnectAccount::new(window, cx));
+    let form = {
+      let keychain = self.settings.read(cx).accounts.keychain();
+      cx.new(|cx| ConnectAccount::new(keychain, window, cx))
+    };
     self._dialog_subscription = Some(cx.subscribe_in(&form, window, |this, _, connected: &AccountConnected, window, cx| {
       let (mut account, warnings, unchecked) = (connected.0.clone(), connected.1.clone(), connected.2.clone());
       // A permission the token certainly lacks stays on the account until a check finds it fixed.
@@ -97,7 +100,7 @@ impl Workspace {
       let described = describe(&account);
       this.settings.update(cx, |model, cx| {
         model.accounts.add(account);
-        if let Err(error) = model.accounts.save(&accounts_path()) {
+        if let Err(error) = model.accounts.save(&model.profile.accounts_path()) {
           eprintln!("Could not save the accounts: {error}");
         }
         cx.notify();
@@ -117,13 +120,14 @@ impl Workspace {
   /// Disconnects an account: it leaves the list and its token leaves the Keychain.
   pub(super) fn remove_account(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
     let described = self.settings.read(cx).accounts.items.iter().find(|account| account.key() == key).map(describe);
+    let keychain = self.settings.read(cx).accounts.keychain();
     let work = cx.background_executor().spawn({
       let key = key.clone();
-      async move { vekro_hosting::TokenStore::delete(&vekro_hosting::KeychainStore, &key) }
+      async move { vekro_hosting::TokenStore::delete(&keychain, &key) }
     });
     self.settings.update(cx, |model, cx| {
       model.accounts.items.retain(|account| account.key() != key);
-      if let Err(error) = model.accounts.save(&accounts_path()) {
+      if let Err(error) = model.accounts.save(&model.profile.accounts_path()) {
         eprintln!("Could not save the accounts: {error}");
       }
       cx.notify();

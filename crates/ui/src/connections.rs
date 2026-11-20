@@ -1,7 +1,7 @@
 //! Connected accounts (GitHub, GitLab, Azure DevOps): the helpers every part of the interface shares, and the list in Settings.
 
 use crate::{
-  settings::{AccountRecheckRequested, AccountRemoveRequested, ConnectAccountRequested, SettingsGlobal, SettingsModel},
+  settings::{AccountRecheckRequested, AccountRemoveRequested, ConnectAccountRequested, SettingsModel},
   theme::{colors, FONT_SIZE_SM},
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -14,13 +14,8 @@ use gpui_kit::{
   },
   *,
 };
-use std::path::{Path, PathBuf};
-use vekro_hosting::{Account, Accounts, KeychainStore, Provider};
-
-/// `accounts.json` in the data directory: where the accounts are listed. Their tokens are in the Keychain.
-pub(crate) fn accounts_path() -> PathBuf {
-  vekro_storage::data_dir().join("accounts.json")
-}
+use std::path::Path;
+use vekro_hosting::{Account, Accounts, Provider};
 
 /// The icon of a hosting service.
 pub(crate) fn provider_icon(provider: Provider) -> &'static str {
@@ -37,7 +32,7 @@ pub(crate) fn credentials_for_url(accounts: &Accounts, url: &str) -> Option<vekr
   if !url.starts_with("http") {
     return None;
   }
-  let (connection, _) = accounts.for_remote(url, &KeychainStore)?;
+  let (connection, _) = accounts.for_remote(url, &accounts.keychain())?;
   let (username, password) = connection.git_login();
   Some(vekro_git::Credentials { username, password })
 }
@@ -47,21 +42,17 @@ pub(crate) fn credentials_for_repository(accounts: &Accounts, root: &Path) -> Op
   credentials_for_url(accounts, &vekro_git::remote_url(root)?)
 }
 
-/// The shared model of the settings, for the parts that only get an `App`.
-fn model(cx: &App) -> Entity<SettingsModel> {
-  cx.global::<SettingsGlobal>().0.clone()
-}
-
 /// The accounts in Settings: one row each with a button to disconnect it, and a button to connect another.
 pub(crate) struct AccountsList {
+  model: Entity<SettingsModel>,
   _observe: Subscription,
 }
 
 impl AccountsList {
-  pub fn new(cx: &mut Context<Self>) -> Self {
-    // The list changes when an account is connected or removed in any window.
-    let observe = cx.observe(&model(cx), |_, _, cx| cx.notify());
-    Self { _observe: observe }
+  pub fn new(model: Entity<SettingsModel>, cx: &mut Context<Self>) -> Self {
+    // The list changes when an account is connected or removed in any window of the profile.
+    let observe = cx.observe(&model, |_, _, cx| cx.notify());
+    Self { model, _observe: observe }
   }
 }
 
@@ -70,7 +61,7 @@ impl Render for AccountsList {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     let (accounts, rechecking) = {
-      let shared = model(cx).read(cx);
+      let shared = self.model.read(cx);
       (shared.accounts.items.clone(), shared.rechecking.clone())
     };
     let rows = accounts.iter().map(|account| {
@@ -94,14 +85,16 @@ impl Render for AccountsList {
         )
         .child(Button::new(SharedString::from(format!("account-remove-{key}"))).label("Disconnect").small().outline().on_click({
           let key = key.clone();
+          let model = self.model.clone();
           move |_, _, cx| {
             let key = key.clone();
-            model(cx).update(cx, |_, cx| cx.emit(AccountRemoveRequested(key)));
+            model.update(cx, |_, cx| cx.emit(AccountRemoveRequested(key)));
           }
         }));
       // While a permission is missing, an alert stays under the account until a check finds it fixed.
       let alert = account.issue.clone().map(|issue| {
         let key = key.clone();
+        let model = self.model.clone();
         let tokens_url = account.tokens_url();
         let guide = account.provider.token_guide();
         let needed = guide.permissions.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(", ");
@@ -135,7 +128,7 @@ impl Render for AccountsList {
                 .disabled(checking)
                 .on_click(move |_, _, cx| {
                   let key = key.clone();
-                  model(cx).update(cx, |_, cx| cx.emit(AccountRecheckRequested(key)));
+                  model.update(cx, |_, cx| cx.emit(AccountRecheckRequested(key)));
                 }),
             ).child(
               Button::new(SharedString::from(format!("account-tokens-{}", account.key())))
@@ -155,16 +148,12 @@ impl Render for AccountsList {
       .when(accounts.is_empty(), |list| {
         list.child(Label::new("No account is connected yet.").text_size(FONT_SIZE_SM).text_color(theme.muted_foreground))
       })
-      .child(
-        h_flex().child(
-          Button::new("connect-account")
-            .label("Connect an account…")
-            .icon(Icon::empty().path("icons/plus.svg"))
-            .small()
-            .outline()
-            .on_click(|_, _, cx| model(cx).update(cx, |_, cx| cx.emit(ConnectAccountRequested))),
-        ),
-      )
+      .child(h_flex().child(
+        Button::new("connect-account").label("Connect an account…").icon(Icon::empty().path("icons/plus.svg")).small().outline().on_click({
+          let model = self.model.clone();
+          move |_, _, cx| model.update(cx, |_, cx| cx.emit(ConnectAccountRequested))
+        }),
+      ))
   }
 }
 

@@ -100,3 +100,20 @@ fn each_service_has_a_page_where_the_token_is_edited() {
   assert_eq!(account(Provider::GitLab, "gitlab.com", None).tokens_url(), "https://gitlab.com/-/user_settings/personal_access_tokens");
   assert_eq!(account(Provider::AzureDevOps, "dev.azure.com", Some("contoso")).tokens_url(), "https://dev.azure.com/contoso/_usersSettings/tokens");
 }
+
+#[test]
+fn accounts_loaded_for_a_profile_keep_its_keychain_namespace() {
+  let dir = std::env::temp_dir().join(format!("vekro-hosting-namespace-{}", std::process::id()));
+  fs::create_dir_all(&dir).unwrap();
+  let file = dir.join("accounts.json");
+  let mut accounts = Accounts::default();
+  accounts.add(github("octo"));
+  accounts.save(&file).unwrap();
+  let scoped = Accounts::load_in(&file, Some("work".into()));
+  assert_eq!(scoped.items, accounts.items);
+  assert_eq!(scoped.keychain(), vekro_hosting::KeychainStore::new(Some("work".into())));
+  assert_ne!(scoped.keychain(), Accounts::load(&file).keychain());
+  // A profile that does not exist yet still has its namespace.
+  assert_eq!(Accounts::load_in(&dir.join("missing.json"), Some("work".into())).namespace.as_deref(), Some("work"));
+  fs::remove_dir_all(dir).unwrap();
+}

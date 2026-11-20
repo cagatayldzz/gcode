@@ -24,6 +24,8 @@ pub(crate) struct AccountConnected(pub Account, pub Vec<String>, pub Option<Stri
 impl EventEmitter<AccountConnected> for ConnectAccount {}
 
 pub(crate) struct ConnectAccount {
+  /// Where the token goes: the Keychain entries of the profile.
+  keychain: KeychainStore,
   provider: Provider,
   host: Entity<InputState>,
   organization: Entity<InputState>,
@@ -34,7 +36,7 @@ pub(crate) struct ConnectAccount {
 }
 
 impl ConnectAccount {
-  pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+  pub fn new(keychain: KeychainStore, window: &mut Window, cx: &mut Context<Self>) -> Self {
     let host = cx.new(|cx| InputState::new(window, cx).placeholder(Provider::GitHub.default_host()));
     let organization = cx.new(|cx| InputState::new(window, cx).placeholder("your-organization"));
     let token = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("Paste the token"));
@@ -43,7 +45,7 @@ impl ConnectAccount {
         this.connect(cx);
       }
     });
-    Self { provider: Provider::GitHub, host, organization, token, busy: false, error: None, _subscription: subscription }
+    Self { keychain, provider: Provider::GitHub, host, organization, token, busy: false, error: None, _subscription: subscription }
   }
 
   fn choose(&mut self, provider: Provider, window: &mut Window, cx: &mut Context<Self>) {
@@ -87,10 +89,11 @@ impl ConnectAccount {
     self.busy = true;
     self.error = None;
     cx.notify();
+    let keychain = self.keychain.clone();
     let work = cx.background_executor().spawn(async move {
       let username = vekro_hosting::verify(&Connection { account: account.clone(), token: token.clone() })?;
       let verified = Account { username, ..account };
-      KeychainStore.set(&verified.key(), &token)?;
+      keychain.set(&verified.key(), &token)?;
       let access = vekro_hosting::check_access(&Connection { account: verified.clone(), token });
       Ok::<_, String>((verified, access.warnings(provider), access.unchecked(provider)))
     });

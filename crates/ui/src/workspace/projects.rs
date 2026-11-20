@@ -15,7 +15,7 @@ impl Workspace {
       (count, _) => format!("Added {count} projects."),
     };
     if added > 0 {
-      if let Err(error) = self.projects.save(&ProjectList::default_path()) {
+      if let Err(error) = self.projects.save(&self.profile.projects_path()) {
         eprintln!("Could not save the project list: {error}");
       }
       // With no project open before, the first one just opened.
@@ -73,7 +73,7 @@ impl Workspace {
 
   /// Writes the project list; a failure is logged, the window keeps working.
   pub(super) fn persist_projects(&self) {
-    if let Err(error) = self.projects.save(&ProjectList::default_path()) {
+    if let Err(error) = self.projects.save(&self.profile.projects_path()) {
       eprintln!("Could not save the project list: {error}");
     }
   }
@@ -313,7 +313,7 @@ impl Workspace {
     }
     self.close_project_search(cx);
     change(&mut self.projects);
-    if let Err(error) = self.projects.save(&ProjectList::default_path()) {
+    if let Err(error) = self.projects.save(&self.profile.projects_path()) {
       eprintln!("Could not save the project list: {error}");
     }
     self.all_changes_open = false;

@@ -17,6 +17,7 @@ mod mention_picker;
 mod menus;
 mod merge_dialog;
 mod minimap;
+mod profiles;
 mod project_manager;
 mod project_search;
 mod project_settings;
@@ -36,6 +37,7 @@ use gpui_kit::*;
 
 pub use assets::Assets;
 pub use menus::menus;
+pub use profiles::{open_last_window, open_window};
 pub use workspace::{Workspace, TOOLBAR_HEIGHT};
 
 actions!(
@@ -66,13 +68,24 @@ actions!(
     PasteClipboard,
     ClearBuffer,
     // Repository menu: open the repository on the service that hosts it.
-    ViewOnHost
+    ViewOnHost,
+    // Profiles menu: ask for a name and open a window with a new profile; open Settings on the Profiles page.
+    AddProfile,
+    EditProfiles
   ]
 );
+
+/// Profiles menu: show the window of the profile with this id, or open one.
+#[derive(Clone, Debug, PartialEq, Action)]
+#[action(namespace = vekro, no_json)]
+pub struct SwitchProfile {
+  pub id: String,
+}
 
 /// Loads the bundled fonts and registers editor highlighting.
 pub fn init(cx: &mut App) {
   syntax::register_highlights();
+  profiles::init(cx);
   if let Err(error) = cx.text_system().add_fonts(vec![
     // Static weights: the text system picks a weight by font file, so a variable font would draw every weight as regular.
     std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist-Regular.ttf")),

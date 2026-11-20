@@ -1,4 +1,3 @@
-use crate::data_dir;
 use serde_json::{json, Value};
 use std::{
   fs, io,
@@ -125,10 +124,6 @@ impl Default for Preferences {
 }
 
 impl Preferences {
-  pub fn default_path() -> PathBuf {
-    data_dir().join("preferences.json")
-  }
-
   /// Reads the settings; a missing or damaged file gives the defaults.
   pub fn load(path: &Path) -> Self {
     let Some(Value::Object(root)) = fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()) else {

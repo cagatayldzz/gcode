@@ -36,6 +36,8 @@ enum Listing {
 
 pub(crate) struct RepositoryPicker {
   accounts: Vec<Account>,
+  /// Where the accounts' tokens are.
+  keychain: KeychainStore,
   selected: usize,
   /// The address last chosen, marked in the list.
   current: Option<String>,
@@ -47,10 +49,10 @@ pub(crate) struct RepositoryPicker {
 }
 
 impl RepositoryPicker {
-  pub fn new(accounts: Vec<Account>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+  pub fn new(accounts: Vec<Account>, keychain: KeychainStore, window: &mut Window, cx: &mut Context<Self>) -> Self {
     let filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter repositories"));
     let subscription = cx.subscribe(&filter, |_, _, _: &InputEvent, cx| cx.notify());
-    let mut this = Self { accounts, selected: 0, current: None, listing: Listing::Loading, filter, epoch: 0, _subscription: subscription };
+    let mut this = Self { accounts, keychain, selected: 0, current: None, listing: Listing::Loading, filter, epoch: 0, _subscription: subscription };
     this.load(cx);
     this
   }
@@ -61,8 +63,9 @@ impl RepositoryPicker {
     self.epoch += 1;
     let epoch = self.epoch;
     cx.notify();
+    let keychain = self.keychain.clone();
     let work = cx.background_executor().spawn(async move {
-      let token = KeychainStore
+      let token = keychain
         .get(&account.key())
         .ok_or_else(|| "The token is not in the Keychain any more. Disconnect the account in Settings and connect it again.".to_string())?;
       vekro_hosting::repositories(&vekro_hosting::Connection { account, token })

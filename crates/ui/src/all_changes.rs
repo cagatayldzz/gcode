@@ -2,7 +2,7 @@
 
 use crate::{
   diff_view::{visit_patch_lines, ShownDiff},
-  settings::code_font_size,
+  settings::{code_font_size, SettingsModel},
   theme::{colors, FONT_SIZE_SM},
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -37,8 +37,9 @@ struct FileHeaderLayout {
 #[action(namespace = vekro, no_json)]
 pub(crate) struct OpenChangedFile(pub SharedString);
 
-#[derive(Default)]
 pub(crate) struct AllChanges {
+  /// The settings of the profile, for the size of code.
+  settings: Entity<SettingsModel>,
   diff: Option<ShownDiff>,
   patch: Option<Arc<str>>,
   viewed: HashSet<SharedString>,
@@ -49,8 +50,12 @@ pub(crate) struct AllChanges {
 }
 
 impl AllChanges {
+  pub fn new(settings: Entity<SettingsModel>) -> Self {
+    Self { settings, diff: None, patch: None, viewed: HashSet::new(), error: None, task: None, current_file: Rc::default(), line_probes: Vec::new() }
+  }
+
   pub fn reset(&mut self, cx: &mut Context<Self>) {
-    *self = Self::default();
+    *self = Self::new(self.settings.clone());
     cx.notify();
   }
 
@@ -233,7 +238,7 @@ impl Render for AllChanges {
     let diff = diff
       .view(cx)
       .soft_wrap(true)
-      .text_size(code_font_size(cx))
+      .text_size(code_font_size(&self.settings, cx))
       .border_0()
       .size_full()
       .gutter_markers(self.line_probes.iter().cloned())

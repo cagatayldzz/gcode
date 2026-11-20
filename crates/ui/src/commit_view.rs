@@ -2,7 +2,7 @@
 
 use crate::{
   diff_view::ShownDiff,
-  settings::code_font_size,
+  settings::{code_font_size, SettingsModel},
   theme::{colors, FONT_SIZE_SM},
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -26,6 +26,8 @@ pub(crate) enum Load<T> {
 }
 
 pub(crate) struct CommitView {
+  /// The settings of the profile, for the size of code.
+  settings: Entity<SettingsModel>,
   root: PathBuf,
   id: String,
   detail: Load<CommitDetail>,
@@ -36,8 +38,8 @@ pub(crate) struct CommitView {
 }
 
 impl CommitView {
-  pub fn new() -> Self {
-    Self { root: PathBuf::new(), id: String::new(), detail: Load::Loading, selected: None, diff: Load::Loading, epoch: 0 }
+  pub fn new(settings: Entity<SettingsModel>) -> Self {
+    Self { settings, root: PathBuf::new(), id: String::new(), detail: Load::Loading, selected: None, diff: Load::Loading, epoch: 0 }
   }
 
   /// Shows another commit of the repository at `root`, the first of its files selected.
@@ -224,9 +226,11 @@ impl Render for CommitView {
     let diff = match &self.diff {
       Load::Loading => spinner(),
       Load::Failed(error) => message(error.clone(), false),
-      Load::Ready(state) => {
-        div().size_full().cursor_text().child(state.view(cx).soft_wrap(true).border_0().text_size(code_font_size(cx)).size_full()).into_any_element()
-      }
+      Load::Ready(state) => div()
+        .size_full()
+        .cursor_text()
+        .child(state.view(cx).soft_wrap(true).border_0().text_size(code_font_size(&self.settings, cx)).size_full())
+        .into_any_element(),
     };
     v_flex()
       .size_full()

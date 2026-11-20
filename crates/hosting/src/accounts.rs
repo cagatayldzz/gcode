@@ -179,17 +179,38 @@ pub trait TokenStore: Send + Sync {
 ///
 /// `security` takes the password as an argument, so it is visible to other processes of the same user for the moment the
 /// command runs; it is never written to a file or a log.
-pub struct KeychainStore;
+///
+/// A namespace (a profile's) prefixes every key, so the same account connected in two profiles has two tokens.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct KeychainStore {
+  namespace: Option<String>,
+}
 
 const SERVICE: &str = "Vekro";
 
+impl KeychainStore {
+  /// A store whose entries belong to `namespace`; `None` is the unprefixed set that existed before namespaces.
+  pub fn new(namespace: Option<String>) -> Self {
+    Self { namespace }
+  }
+
+  fn entry(&self, key: &str) -> String {
+    match &self.namespace {
+      Some(namespace) => format!("{namespace}:{key}"),
+      None => key.to_string(),
+    }
+  }
+}
+
 impl TokenStore for KeychainStore {
   fn get(&self, key: &str) -> Option<String> {
+    let key = &self.entry(key);
     let output = Command::new("security").args(["find-generic-password", "-s", SERVICE, "-a", key, "-w"]).stderr(Stdio::null()).output().ok()?;
     output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim_end_matches('\n').to_string()).filter(|token| !token.is_empty())
   }
 
   fn set(&self, key: &str, token: &str) -> Result<(), String> {
+    let key = &self.entry(key);
     let output = Command::new("security")
       .args(["add-generic-password", "-U", "-s", SERVICE, "-a", key, "-w", token])
       .output()
@@ -202,6 +223,7 @@ impl TokenStore for KeychainStore {
   }
 
   fn delete(&self, key: &str) {
+    let key = &self.entry(key);
     let _ = Command::new("security").args(["delete-generic-password", "-s", SERVICE, "-a", key]).stdout(Stdio::null()).stderr(Stdio::null()).status();
   }
 }
@@ -257,13 +279,25 @@ impl Connection {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Accounts {
   pub items: Vec<Account>,
+  /// The Keychain namespace of the profile these accounts belong to (see [`KeychainStore`]).
+  pub namespace: Option<String>,
 }
 
 impl Accounts {
+  /// The Keychain that holds these accounts' tokens.
+  pub fn keychain(&self) -> KeychainStore {
+    KeychainStore::new(self.namespace.clone())
+  }
+
   /// Reads the list; a missing or damaged file gives an empty one.
   pub fn load(path: &Path) -> Self {
+    Self::load_in(path, None)
+  }
+
+  /// Reads the list of the profile with this Keychain namespace.
+  pub fn load_in(path: &Path, namespace: Option<String>) -> Self {
     let Some(Value::Object(root)) = fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()) else {
-      return Self::default();
+      return Self { items: Vec::new(), namespace };
     };
     let items = root
       .get("accounts")
@@ -281,7 +315,7 @@ impl Accounts {
         })
       })
       .collect();
-    Self { items }
+    Self { items, namespace }
   }
 
   pub fn save(&self, path: &Path) -> io::Result<()> {

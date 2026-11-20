@@ -16,9 +16,11 @@ impl Workspace {
       return;
     }
     let host = self.web_repository(cx).map(|found| found.service);
-    if always || host != self.menu_host {
-      cx.set_menus(crate::menus(host.as_deref()));
+    let profiles = crate::profiles::profile_list(cx).profiles;
+    if always || host != self.menu_host || profiles != self.menu_profiles {
+      cx.set_menus(crate::menus(host.as_deref(), &profiles, &self.profile.id));
       self.menu_host = host;
+      self.menu_profiles = profiles;
     }
   }
 
@@ -54,7 +56,7 @@ impl Workspace {
         }
       };
       account.issue = Some(format!("{action} was refused with this token. It needs {permission}."));
-      if let Err(error) = model.accounts.save(&accounts_path()) {
+      if let Err(error) = model.accounts.save(&model.profile.accounts_path()) {
         eprintln!("Could not save the accounts: {error}");
       }
       cx.notify();
@@ -67,7 +69,7 @@ impl Workspace {
       if let Some(account) = model.accounts.items.iter_mut().find(|account| account.key() == key) {
         account.issue = issue;
       }
-      if let Err(error) = model.accounts.save(&accounts_path()) {
+      if let Err(error) = model.accounts.save(&model.profile.accounts_path()) {
         eprintln!("Could not save the accounts: {error}");
       }
       cx.notify();
@@ -86,10 +88,11 @@ impl Workspace {
       cx.notify();
     });
     let remote = self.projects.active.as_ref().and_then(|root| vekro_git::remote_url(root));
+    let keychain = self.settings.read(cx).accounts.keychain();
     let work = cx.background_executor().spawn({
       let account = account.clone();
       async move {
-        let token = KeychainStore
+        let token = keychain
           .get(&account.key())
           .ok_or("The token is not in the Keychain any more. Disconnect the account and connect it again.".to_string())?;
         let connection = Connection { account: account.clone(), token };
@@ -142,9 +145,20 @@ impl Workspace {
   pub(crate) fn open_settings_page(&mut self, page: &'static str, window: &mut Window, cx: &mut Context<Self>) {
     let fallback = self.new_project_dir(cx);
     let workspace = cx.entity();
-    let projects = cx.new(|cx| ProjectManager::new(workspace, cx));
-    let accounts = cx.new(AccountsList::new);
-    let updates = cx.new(UpdatePanel::new);
+    let projects = cx.new({
+      let workspace = workspace.clone();
+      |cx| ProjectManager::new(workspace, cx)
+    });
+    let profiles = cx.new(|cx| ProfileManager::new(workspace, cx));
+    let accounts = cx.new({
+      let settings = self.settings.clone();
+      |cx| AccountsList::new(settings, cx)
+    });
+    let updates = cx.new({
+      let settings = self.settings.clone();
+      |cx| UpdatePanel::new(settings, cx)
+    });
+    let settings = self.settings.clone();
     window.open_dialog(cx, move |dialog, _, cx| {
       // Read on every draw, so that a theme change while the dialog is open recolors it.
       let palette = colors(cx);
@@ -157,8 +171,10 @@ impl Workspace {
             div().border_b_1().border_color(palette.border).child(Label::new("Settings").text_base().font_weight(FontWeight::SEMIBOLD).px_6().py_4()),
           )
           .child(div().h(px(486.)).child(settings_view(
+            settings.clone(),
             fallback.clone(),
             projects.clone(),
+            profiles.clone(),
             accounts.clone(),
             updates.clone(),
             page,

@@ -467,7 +467,7 @@ impl Workspace {
     let epoch = self.pr_epoch;
     let work = cx.background_executor().spawn(async move {
       let (connection, repository) = accounts
-        .for_remote(&url, &KeychainStore)
+        .for_remote(&url, &accounts.keychain())
         .ok_or("The token for this account is not in the Keychain. Connect the account again in Settings → Accounts.")?;
       vekro_hosting::pull_requests(&connection, &repository)
     });

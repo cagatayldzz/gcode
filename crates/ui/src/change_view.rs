@@ -4,7 +4,7 @@
 use crate::{
   commit_view::Load,
   diff_view::ShownDiff,
-  settings::code_font_size,
+  settings::{code_font_size, SettingsModel},
   theme::{colors, FONT_SIZE_SM},
 };
 use gpui_kit::{
@@ -69,6 +69,8 @@ impl ImageChanges {
 }
 
 pub(crate) struct ChangeView {
+  /// The settings of the profile, for the size of code.
+  settings: Entity<SettingsModel>,
   root: PathBuf,
   file: PathBuf,
   diff: Load<ChangeDiff>,
@@ -80,8 +82,8 @@ pub(crate) struct ChangeView {
 }
 
 impl ChangeView {
-  pub fn new() -> Self {
-    Self { root: PathBuf::new(), file: PathBuf::new(), diff: Load::Loading, task: None, patch: String::new(), epoch: 0 }
+  pub fn new(settings: Entity<SettingsModel>) -> Self {
+    Self { settings, root: PathBuf::new(), file: PathBuf::new(), diff: Load::Loading, task: None, patch: String::new(), epoch: 0 }
   }
 
   /// Shows the changes of another file of the repository at `root`.
@@ -176,7 +178,7 @@ impl Render for ChangeView {
         div()
           .size_full()
           .cursor_text()
-          .child(state.view(cx).header_visible(false).soft_wrap(true).border_0().text_size(code_font_size(cx)).size_full())
+          .child(state.view(cx).header_visible(false).soft_wrap(true).border_0().text_size(code_font_size(&self.settings, cx)).size_full())
           .into_any_element()
       }
     };

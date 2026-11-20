@@ -22,7 +22,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | --- | --- |
 | `apps/vekro/src/main.rs` | executable entry point only; calls `vekro_app::run` |
 | `crates/visual-check/` | offline screenshot pixel inspection and coordinate conversion |
-| `crates/app/src/lib.rs` | startup: key bindings, quit, opening and closing windows |
+| `crates/app/src/lib.rs` | startup: key bindings, quit, Dock menu, the first window |
 | `crates/ui/src/workspace.rs` | `Workspace` (one per window): projects, the title bar (repository switcher, tabs), the sidebar, the status bar, the dock and the terminals of every project |
 | `crates/ui/src/workspace/search.rs` | project search and replacement actions, search sidebar rendering |
 | `crates/ui/src/workspace/{terminals,accounts,projects,entries,changes,commit,git}.rs` | `impl Workspace` methods by topic: terminal and agent panes, menus and accounts, the project list, explorer entries, changed files, updates and commit messages, Git state |
@@ -56,7 +56,8 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/hosting/src/` | `accounts.rs` (`Account`, `Accounts`, `TokenStore`: the macOS Keychain through `security`, or memory), `api.rs` (verify, repositories, pull requests per service), `remote.rs` (`RepoRef`: which repository a remote URL names) |
 | `crates/ui/src/{connections,connect_account,repository_picker,pull_request}.rs` | the accounts list in Settings and the helpers that find the login for a remote; the Connect dialog; the repository list of the Clone tab; the Create pull request dialog |
 | `crates/opencommit/src/` | `config.rs` (`Config`, the `~/.opencommit` file), `prompt.rs` (rules, diff splitting, parsing the answer), `client.rs` (`generate`, the chat API request), `apple.rs` (on-device helper client) |
-| `crates/storage/src/` | `paths.rs` (data directory), `projects.rs` (`ProjectList`), `preferences.rs` (`Preferences`) |
+| `crates/storage/src/` | `paths.rs` (data directory), `profiles.rs` (`Profile`, `ProfileList`), `projects.rs` (`ProjectList`), `preferences.rs` (`Preferences`) |
+| `crates/ui/src/profiles.rs`, `crates/ui/src/workspace/profiles.rs` | the profile list shared by the app, opening a window for a profile (`open_window`), New Window and Profiles menu actions, the Profiles page of Settings; adding, renaming and deleting profiles from a window |
 
 ## Window layout
 
@@ -174,11 +175,19 @@ thread. While any account has an issue, the gear at the bottom of the activity b
 
 Data directory `~/Library/Application Support/Vekro` (override with `VEKRO_DATA_DIR`).
 
+A **profile** (`Profile`, `ProfileList` in `crates/storage/src/profiles.rs`) is a separate set of projects, settings and connected accounts, like a browser profile. Each window shows one profile (`Workspace.profile`); windows of the same profile share one `SettingsModel` (`SettingsRegistry` in `settings.rs`), windows of different profiles do not. The Profiles menu (`menus.rs`) lists the profiles with a check by the one the window in front shows; choosing one brings its window forward or opens one (`profiles.rs`: `switch_profile`, `open_window`). File → New Window and the Dock menu's New Window open the profile of the window in front. Add Profile… and the Profiles page of Settings (`ProfileManager`) create, rename and delete profiles; a profile with an open window is not deleted. The default profile (`default`) keeps its files directly in the data directory, so nothing moved when profiles were added; the others live in `profiles/<id>/`. Keychain entries of a non-default profile are prefixed with its id (`KeychainStore::new(namespace)`, `Accounts::keychain`).
+
+| File | Type | Written |
+| --- | --- | --- |
+| `profiles.json` | `ProfileList` (id and name of each profile, the one used last) | when a profile is added, renamed or deleted, and when a window of another profile comes to the front |
+| `window.json` | `WindowPlacement` (position, size and whether the window was maximized or full screen); shared by all profiles | half a second after the window stops moving or resizing |
+
+Per profile (in the data directory for `default`, else in `profiles/<id>/`):
+
 | File | Type | Written |
 | --- | --- | --- |
 | `projects.json` | `ProjectList` (project paths with their name, icon, color and category; the categories and whether each is folded; the active project) | when a project is added or selected, or a category changes |
 | `accounts.json` | `Accounts` (service, host, organization and user name of each connected account; tokens are in the Keychain) | when an account is connected or disconnected |
-| `window.json` | `WindowPlacement` (position, size and whether the window was maximized or full screen) | half a second after the window stops moving or resizing |
 | `preferences.json` | `Preferences` (theme, projects folder, code font size, commit instructions) | on each settings change |
 
 Not stored yet: window size and position, dock layout, open files, running terminals.

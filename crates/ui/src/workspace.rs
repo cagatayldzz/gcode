@@ -6,26 +6,27 @@ use crate::{
   commit_view::CommitView,
   components::{avatar_look, display_path, selected_style, strip, strip_tab},
   connect_account::{AccountConnected, ConnectAccount},
-  connections::{accounts_path, credentials_for_repository, describe, AccountsList},
+  connections::{credentials_for_repository, describe, AccountsList},
   editor::{ActiveTab, EditorPanel, FileLocation, FileLocationCommand},
   explorer,
   mention_picker::{MentionChoice, MentionPicker, ProjectsChosen},
   merge_dialog::{MergeDialog, MergeEvent},
+  profiles::ProfileManager,
   project_manager::ProjectManager,
   project_search,
   project_settings::{ProjectSettings, ProjectSettingsEvent},
   project_setup::{ProjectReady, ProjectSetup},
   pull_request::{PullRequestEvent, PullRequestForm, PullRequestTarget},
   settings::{
-    activity_ids, init_settings, settings_view, AccountRecheckRequested, AccountRemoveRequested, AddAllProjectsRequested, CommitSettingsRequested,
-    ConnectAccountRequested, SettingsGlobal, SettingsModel,
+    activity_ids, settings_for, settings_view, AccountRecheckRequested, AccountRemoveRequested, AddAllProjectsRequested, CommitSettingsRequested,
+    ConnectAccountRequested, SettingsModel,
   },
   terminal::{Terminal, TerminalAttentionChanged, TerminalExited},
   terminal_layout::{Arrangement, Direction, Node},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
-  AddProject, CheckForUpdates, ClearBuffer, CloseTab, MentionProjects, NewClaude, NewCodex, NewTerminal, OpenSettings, SaveFile, SearchProject,
-  SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleTerminal, ViewOnHost,
+  AddProfile, AddProject, CheckForUpdates, ClearBuffer, CloseTab, EditProfiles, MentionProjects, NewClaude, NewCodex, NewTerminal, OpenSettings,
+  SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{base::Selectable as _, prelude::FluentBuilder as _};
 use gpui_kit::{
@@ -62,9 +63,9 @@ use std::{
   time::{Duration, Instant},
 };
 use vekro_git::{BranchChoices, BranchRef, CommitInfo, Comparison, Summary};
-use vekro_hosting::{Connection, KeychainStore, PullRequest, RepoRef, TokenStore as _};
+use vekro_hosting::{Connection, PullRequest, RepoRef, TokenStore as _};
 use vekro_opencommit::DEFAULT_INSTRUCTIONS;
-use vekro_storage::{Category, Preferences, Project, ProjectList, WindowMode, WindowPlacement};
+use vekro_storage::{Category, Profile, Project, ProjectList, WindowMode, WindowPlacement};
 
 mod accounts;
 mod changes;
@@ -73,6 +74,7 @@ mod entries;
 mod file_actions;
 mod git;
 mod helpers;
+mod profiles;
 mod projects;
 mod render_git;
 mod render_menus;
@@ -276,8 +278,10 @@ enum BranchTab {
 
 /// One window: the title bar, the sidebar on the left and the open project on the right.
 pub struct Workspace {
+  /// The profile this window shows: its projects, settings and accounts.
+  profile: Profile,
   projects: ProjectList,
-  /// The settings every window shares.
+  /// The settings of the profile, shared by its windows.
   settings: Entity<SettingsModel>,
   git: Option<Summary>,
   expanded: HashSet<PathBuf>,
@@ -357,6 +361,8 @@ pub struct Workspace {
   /// The window is the one in front, and what the Repository menu said last.
   window_active: bool,
   menu_host: Option<String>,
+  /// The profiles the Profiles menu lists now.
+  menu_profiles: Vec<Profile>,
   /// The terminals fill the main area (the right part of the window) in place of the editor.
   terminal_open: bool,
   /// The AI view (Codex, Claude) fills the main area, like the terminals do; the two never show together.
@@ -406,12 +412,10 @@ pub struct Workspace {
 }
 
 impl Workspace {
-  pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-    // The first window loads the settings; later windows share them.
-    let settings = match cx.try_global::<SettingsGlobal>() {
-      Some(global) => global.0.clone(),
-      None => init_settings(cx),
-    };
+  pub fn new(profile: Profile, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    // The first window of a profile loads its settings; later windows of it share them.
+    let settings = settings_for(&profile, cx);
+    window.set_window_title(&format!("Vekro — {}", profile.name));
     {
       let preferences = &settings.read(cx).preferences;
       apply_theme(preferences.theme, preferences.code_font_size, window, cx);
@@ -427,7 +431,8 @@ impl Workspace {
     let project_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find a project"));
     let compare_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Select Branch to Compare…"));
     let mut this = Self {
-      projects: ProjectList::load(&ProjectList::default_path()),
+      projects: ProjectList::load(&profile.projects_path()),
+      profile,
       settings: settings.clone(),
       git: None,
       expanded: HashSet::new(),
@@ -478,9 +483,18 @@ impl Workspace {
       merge_task: None,
       merge_dialog: None,
       selected_commit: None,
-      commit_view: cx.new(|_| CommitView::new()),
-      change_view: cx.new(|_| ChangeView::new()),
-      all_changes: cx.new(|_| AllChanges::default()),
+      commit_view: cx.new({
+        let settings = settings.clone();
+        |_| CommitView::new(settings)
+      }),
+      change_view: cx.new({
+        let settings = settings.clone();
+        |_| ChangeView::new(settings)
+      }),
+      all_changes: cx.new({
+        let settings = settings.clone();
+        |_| AllChanges::new(settings)
+      }),
       all_changes_open: false,
       pull_requests: PullRequests::Idle,
       pr_epoch: 0,
@@ -489,6 +503,7 @@ impl Workspace {
       history_scroll: ScrollHandle::new(),
       window_active: true,
       menu_host: None,
+      menu_profiles: Vec::new(),
       terminal_open: false,
       agent_open: false,
       dragged_tab: None,
@@ -525,7 +540,7 @@ impl Workspace {
           this.announce_update(window, cx);
           this.continue_update(window, cx);
           let preferences = settings.read(cx).preferences.clone();
-          if let Err(error) = preferences.save(&Preferences::default_path()) {
+          if let Err(error) = preferences.save(&settings.read(cx).profile.preferences_path()) {
             eprintln!("Could not save the settings: {error}");
           }
           apply_theme(preferences.theme, preferences.code_font_size, window, cx);
@@ -589,6 +604,8 @@ impl Workspace {
       _activation: cx.observe_window_activation(window, |this, window, cx| {
         this.window_active = window.is_window_active();
         if window.is_window_active() {
+          let id = this.profile.id.clone();
+          crate::profiles::update_profiles(cx, |list| list.set_last(&id));
           this.sync_menus(true, cx);
           this.announce_update(window, cx);
           this.refresh_in_background(cx);
@@ -722,6 +739,8 @@ impl Render for Workspace {
       })
       .on_action(cx.listener(Self::add_project))
       .on_action(cx.listener(Self::open_settings))
+      .on_action(cx.listener(Self::add_profile))
+      .on_action(cx.listener(Self::edit_profiles))
       .on_action(cx.listener(Self::check_for_updates))
       .on_action(cx.listener(Self::search_project))
       .on_action(cx.listener(Self::open_search_results))
@@ -758,6 +777,7 @@ impl Render for Workspace {
               window.dispatch_action(Box::new(AddProject), cx)
             }))
             .child(div().flex_1())
+            .children(self.render_profile_badge(cx))
             .children(self.render_update_button(cx)),
         ),
       )
