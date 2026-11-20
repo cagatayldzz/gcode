@@ -7,8 +7,16 @@ use crate::{
   settings::{code_font_size, SettingsModel},
   theme::{colors, FONT_SIZE_SM},
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  component::{diff::DiffFile, h_flex, label::Label, spinner::Spinner, v_flex, ActiveTheme as _, Sizable as _},
+  component::{
+    button::{Button, ButtonVariants as _},
+    diff::DiffFile,
+    h_flex,
+    label::Label,
+    spinner::Spinner,
+    v_flex, ActiveTheme as _, Sizable as _,
+  },
   *,
 };
 use std::{
@@ -40,27 +48,30 @@ impl ImageChanges {
     }
   }
 
-  fn load(root: &Path, file: &Path, format: ImageFormat, renderer: SvgRenderer) -> Result<Self, String> {
+  fn load(root: &Path, file: &Path, decode: impl Fn(Vec<u8>) -> Result<Arc<RenderImage>, String>) -> Result<Self, String> {
     let versions = vekro_git::file_versions(root, file, MAX_IMAGE_BYTES)?;
-    let decode = |bytes| Image::from_bytes(format, bytes).to_image_data(renderer.clone()).map_err(|error| error.to_string());
-    Ok(Self { original: versions.original.map(decode).transpose()?, current: versions.current.map(decode).transpose()? })
+    Ok(Self { original: versions.original.map(&decode).transpose()?, current: versions.current.map(decode).transpose()? })
   }
 
   fn view(&self, cx: &App) -> impl IntoElement {
     let palette = colors(cx);
     let pane = |id, title, image: &Arc<RenderImage>, color| {
-      v_flex().id(id).flex_1().min_w_0().h_full().gap_2().items_center().child(Label::new(title).text_color(color)).child(
+      v_flex().id(id).flex_1().min_w_0().min_h_0().gap_2().items_center().child(Label::new(title).text_color(color)).child(
         div()
           .flex_1()
           .min_h_0()
           .w_full()
           .relative()
-          .child(div().absolute().inset_0().child(img(image.clone()).size_full().object_fit(ObjectFit::Contain))),
+          .overflow_hidden()
+          .child(img(image.clone()).absolute().top_0().left_0().size_full().object_fit(ObjectFit::ScaleDown)),
       )
     };
     let modified = self.original.is_some() && self.current.is_some();
     h_flex()
-      .size_full()
+      .flex_1()
+      .min_h_0()
+      .w_full()
+      .items_stretch()
       .gap_4()
       .p_4()
       .children(self.original.as_ref().map(|image| pane("original-image", if modified { "Before" } else { "Deleted" }, image, palette.deleted)))
@@ -75,6 +86,9 @@ pub(crate) struct ChangeView {
   file: PathBuf,
   diff: Load<ChangeDiff>,
   task: Option<Task<()>>,
+  show_preview: bool,
+  svg_preview: Option<Load<ImageChanges>>,
+  preview_task: Option<Task<()>>,
   /// The patch the shown diff was made from, to leave the diff (and its scroll position) alone while nothing changed.
   patch: String,
   /// Which read the answer being awaited belongs to.
@@ -83,7 +97,18 @@ pub(crate) struct ChangeView {
 
 impl ChangeView {
   pub fn new(settings: Entity<SettingsModel>) -> Self {
-    Self { settings, root: PathBuf::new(), file: PathBuf::new(), diff: Load::Loading, task: None, patch: String::new(), epoch: 0 }
+    Self {
+      settings,
+      root: PathBuf::new(),
+      file: PathBuf::new(),
+      diff: Load::Loading,
+      task: None,
+      show_preview: false,
+      svg_preview: None,
+      preview_task: None,
+      patch: String::new(),
+      epoch: 0,
+    }
   }
 
   /// Shows the changes of another file of the repository at `root`.
@@ -94,6 +119,9 @@ impl ChangeView {
     self.root = root;
     self.file = file;
     self.diff = Load::Loading;
+    self.show_preview = false;
+    self.svg_preview = None;
+    self.preview_task = None;
     self.patch.clear();
     self.reload(cx);
     cx.notify();
@@ -112,7 +140,11 @@ impl ChangeView {
       }
       let image = ImageChanges::format(&file)
         .filter(|_| patch.lines().any(|line| line.starts_with("Binary files ")))
-        .map(|format| ImageChanges::load(&root, &file, format, renderer))
+        .map(|format| {
+          ImageChanges::load(&root, &file, |bytes| {
+            Image::from_bytes(format, bytes).to_image_data(renderer.clone()).map_err(|error| error.to_string())
+          })
+        })
         .transpose();
       Ok::<_, String>(Some((patch, image)))
     });
@@ -136,9 +168,35 @@ impl ChangeView {
               },
             };
             this.patch = patch;
+            this.preview_task = None;
+            this.svg_preview = None;
+            if this.show_preview && matches!(this.diff, Load::Ready(ChangeDiff::Text(_))) {
+              this.load_svg_preview(cx);
+            }
           }
           Err(message) => this.diff = Load::Failed(message.into()),
         }
+        cx.notify();
+      });
+    }));
+  }
+
+  fn load_svg_preview(&mut self, cx: &mut Context<Self>) {
+    let (root, file) = (self.root.clone(), self.file.clone());
+    let renderer = cx.svg_renderer();
+    self.svg_preview = Some(Load::Loading);
+    let work = cx
+      .background_executor()
+      .spawn(async move { ImageChanges::load(&root, &file, |bytes| renderer.render_single_frame(&bytes, 1.0).map_err(|error| error.to_string())) });
+    self.preview_task = Some(cx.spawn(async move |this, cx| {
+      let result = work.await;
+      let _ = this.update(cx, |this, cx| {
+        this.preview_task = None;
+        this.svg_preview = Some(match result {
+          Ok(images) if images.original.is_some() || images.current.is_some() => Load::Ready(images),
+          Ok(_) => Load::Failed("No SVG versions are available to preview.".into()),
+          Err(error) => Load::Failed(format!("Could not preview the SVG: {error}").into()),
+        });
         cx.notify();
       });
     }));
@@ -151,6 +209,8 @@ impl Render for ChangeView {
     let palette = colors(cx);
     let name = self.file.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     let folder = self.file.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
+    let can_preview =
+      self.file.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("svg")) && matches!(self.diff, Load::Ready(ChangeDiff::Text(_)));
     let header = h_flex()
       .flex_none()
       .px_4()
@@ -161,17 +221,39 @@ impl Render for ChangeView {
         Some(folder) => Label::new(format!("{folder}/")).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).into_any_element(),
         None => div().into_any_element(),
       })
-      .child(Label::new(name).text_size(FONT_SIZE_SM).font_weight(FontWeight::SEMIBOLD));
-    let body = match &self.diff {
-      Load::Loading => h_flex()
+      .child(Label::new(name).text_size(FONT_SIZE_SM).font_weight(FontWeight::SEMIBOLD))
+      .when(can_preview, |header| {
+        header.child(div().flex_1()).child(
+          Button::new("toggle-svg-change-preview").ghost().small().label(if self.show_preview { "Source" } else { "Preview" }).on_click(cx.listener(
+            |this, _, _, cx| {
+              this.show_preview = !this.show_preview;
+              if this.show_preview && this.svg_preview.is_none() {
+                this.load_svg_preview(cx);
+              }
+              cx.notify();
+            },
+          )),
+        )
+      });
+    let loading = || {
+      h_flex()
         .gap_2()
         .p_4()
         .items_center()
         .child(Spinner::new().small())
         .child(Label::new("Loading…").text_color(theme.muted_foreground))
-        .into_any_element(),
-      Load::Failed(message) => Label::new(message.clone()).p_4().text_color(theme.muted_foreground).into_any_element(),
+        .into_any_element()
+    };
+    let failed = |message: &SharedString| Label::new(message.clone()).p_4().text_color(theme.muted_foreground).into_any_element();
+    let body = match &self.diff {
+      Load::Loading => loading(),
+      Load::Failed(message) => failed(message),
       Load::Ready(ChangeDiff::Image(images)) => images.view(cx).into_any_element(),
+      Load::Ready(ChangeDiff::Text(_)) if self.show_preview => match &self.svg_preview {
+        Some(Load::Ready(images)) => images.view(cx).into_any_element(),
+        Some(Load::Failed(message)) => failed(message),
+        _ => loading(),
+      },
       Load::Ready(ChangeDiff::Text(state)) =>
       // The path is in the header above: the diff does not repeat it.
       {
@@ -182,6 +264,6 @@ impl Render for ChangeView {
           .into_any_element()
       }
     };
-    v_flex().size_full().bg(theme.background).child(header).child(div().flex_1().min_h_0().child(body))
+    v_flex().size_full().bg(theme.background).child(header).child(v_flex().flex_1().min_h_0().child(body))
   }
 }

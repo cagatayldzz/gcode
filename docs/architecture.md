@@ -128,6 +128,8 @@ milliseconds; the cost is the first time the highlighter draws a text (up to ~0.
 it, with the folder tree read, on a background thread when the window is activated and every 2 seconds
 (`REFRESH_INTERVAL`), and applies the result only if the project and the expanded folders are unchanged and
 the data differs. `file_diff` produces a unified patch that `ChangeView` hands to the Kit `Diff`.
+For an SVG in Changes, Preview renders the HEAD and working-tree versions side by side on demand.
+Source returns to the same text diff.
 `clone`, `push`, `fetch` and `pull` (`--ff-only`) run the `git` program (not libgit2) so the user's credentials apply. In the Git tab a toolbar above the editor (`render_git_toolbar`) holds the current branch, whose menu has two tabs: the local branches, and the open pull requests when a connected account serves the remote (`branches`, filtered by typing) with a way to create one, and one button that publishes, pushes, pulls or fetches, whichever the branch needs (`sync_remote`); `switch_branch` uses a safe checkout, so
 changes it would overwrite stop the switch instead of being lost.
 
