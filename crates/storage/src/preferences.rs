@@ -40,7 +40,7 @@ pub const FONT_SIZES: std::ops::RangeInclusive<u32> = 9..=24;
 pub const DEFAULT_CODE_FONT_SIZE: u32 = 13;
 
 /// The default font size of file and folder names in Explorer.
-pub const DEFAULT_EXPLORER_FONT_SIZE: u32 = 12;
+pub const DEFAULT_EXPLORER_FONT_SIZE: u32 = 14;
 
 /// How the activity bar (the column of buttons at the left edge) is arranged: the order of its buttons and the ones the user
 /// hid. Buttons are named by id; ids the bar does not know are ignored and new ones come after the saved ones, so a version that

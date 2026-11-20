@@ -35,13 +35,13 @@ fn font_sizes_default_and_stay_within_their_range() {
   std::fs::create_dir_all(&dir).unwrap();
   let file = dir.join("preferences.json");
   assert_eq!(Preferences::default().code_font_size, 13);
-  assert_eq!(Preferences::default().explorer_font_size, 12);
+  assert_eq!(Preferences::default().explorer_font_size, 14);
 
   std::fs::write(&file, r#"{"theme": "dark"}"#).unwrap();
   assert_eq!(Preferences::load(&file).code_font_size, 13);
   std::fs::write(&file, r#"{"code_font_size": 400}"#).unwrap();
   assert_eq!(Preferences::load(&file).code_font_size, 24);
-  assert_eq!(Preferences::load(&file).explorer_font_size, 12);
+  assert_eq!(Preferences::load(&file).explorer_font_size, 14);
   std::fs::write(&file, r#"{"code_font_size": 2, "explorer_font_size": 400}"#).unwrap();
   assert_eq!(Preferences::load(&file).code_font_size, 9);
   assert_eq!(Preferences::load(&file).explorer_font_size, 24);
