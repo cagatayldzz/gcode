@@ -107,6 +107,28 @@ impl Summary {
 }
 
 /// Reads the repository containing `path`; `None` when it is not inside one.
+/// The ignore rules (`.gitignore`, `.git/info/exclude`, global excludes) of the repository around a folder.
+pub struct IgnoreRules {
+  repository: Repository,
+  root: PathBuf,
+  /// Where `root` lies inside the working tree.
+  base: PathBuf,
+}
+
+impl IgnoreRules {
+  /// `None` outside a repository.
+  pub fn open(root: &Path) -> Option<Self> {
+    let repository = Repository::discover(root).ok()?;
+    let base = root.canonicalize().ok()?.strip_prefix(repository.workdir()?.canonicalize().ok()?).ok()?.to_path_buf();
+    Some(Self { repository, root: root.to_path_buf(), base })
+  }
+
+  /// Whether Git ignores `path`, which lies inside the folder given to `open`.
+  pub fn is_ignored(&self, path: &Path) -> bool {
+    path.strip_prefix(&self.root).is_ok_and(|relative| self.repository.is_path_ignored(self.base.join(relative)).unwrap_or(false))
+  }
+}
+
 pub fn summary(path: &Path) -> Option<Summary> {
   let repository = Repository::discover(path).ok()?;
   let branch = match repository.head() {
@@ -119,7 +141,7 @@ pub fn summary(path: &Path) -> Option<Summary> {
       .and_then(|head| head.symbolic_target().ok().flatten().map(|name| name.trim_start_matches("refs/heads/").to_string()))?,
   };
   let mut options = StatusOptions::new();
-  options.include_untracked(true).recurse_untracked_dirs(true);
+  options.include_untracked(true).recurse_untracked_dirs(true).include_ignored(false);
   let mut changes: Vec<Change> = repository
     .statuses(Some(&mut options))
     .map(|statuses| {
@@ -831,18 +853,21 @@ pub fn file_history(path: &Path, limit: usize) -> Result<Vec<CommitInfo>, String
   let mut walk = repository.revwalk().map_err(result)?;
   walk.set_sorting(git2::Sort::TIME).map_err(result)?;
   walk.push_head().map_err(result)?;
-  let mut options = DiffOptions::new();
-  options.pathspec(&relative).disable_pathspec_match(true);
+  let entry = |commit: &git2::Commit| -> Result<Option<(git2::Oid, i32)>, String> {
+    let tree = commit.tree().map_err(result)?;
+    Ok(tree.get_path(&relative).ok().map(|entry| (entry.id(), entry.filemode())))
+  };
   let mut history = Vec::new();
   for id in walk {
     if history.len() == limit {
       break;
     }
     let commit = repository.find_commit(id.map_err(result)?).map_err(result)?;
-    let tree = commit.tree().map_err(result)?;
-    let parent = commit.parent(0).ok().and_then(|parent| parent.tree().ok());
-    let diff = repository.diff_tree_to_tree(parent.as_ref(), Some(&tree), Some(&mut options)).map_err(result)?;
-    if diff.deltas().len() != 0 {
+    let previous = match commit.parent(0) {
+      Ok(parent) => entry(&parent)?,
+      Err(_) => None,
+    };
+    if entry(&commit)? != previous {
       history.push(commit_info(&commit, &Default::default(), &Default::default()));
     }
   }

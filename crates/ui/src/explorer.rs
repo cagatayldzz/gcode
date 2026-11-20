@@ -13,6 +13,8 @@ pub(crate) struct Row {
   pub name: String,
   pub depth: usize,
   pub is_dir: bool,
+  /// Git ignores the entry (or a folder around it).
+  pub ignored: bool,
 }
 
 /// Names that are never shown.
@@ -22,26 +24,37 @@ const HIDDEN: [&str; 2] = [".git", ".DS_Store"];
 /// folders before files, each group sorted by name.
 pub(crate) fn rows(root: &Path, expanded: &HashSet<PathBuf>) -> Vec<Row> {
   let mut out = Vec::new();
-  collect(root, 0, expanded, &mut out);
+  let rules = vekro_git::IgnoreRules::open(root);
+  collect(root, 0, false, rules.as_ref(), expanded, &mut out);
   out
 }
 
-fn collect(dir: &Path, depth: usize, expanded: &HashSet<PathBuf>, out: &mut Vec<Row>) {
+fn collect(dir: &Path, depth: usize, inherited: bool, rules: Option<&vekro_git::IgnoreRules>, expanded: &HashSet<PathBuf>, out: &mut Vec<Row>) {
   let Ok(entries) = fs::read_dir(dir) else { return };
-  let mut children: Vec<Row> = entries
+  let mut children: Vec<(bool, String, Row)> = entries
     .filter_map(Result::ok)
     .filter_map(|entry| {
       let name = entry.file_name().to_string_lossy().into_owned();
-      (!HIDDEN.contains(&name.as_str())).then(|| Row { is_dir: entry.path().is_dir(), path: entry.path(), name, depth })
+      if HIDDEN.contains(&name.as_str()) {
+        return None;
+      }
+      let path = entry.path();
+      let is_dir = match entry.file_type() {
+        Ok(kind) if !kind.is_symlink() => kind.is_dir(),
+        _ => path.is_dir(),
+      };
+      let ignored = inherited || rules.is_some_and(|rules| rules.is_ignored(&path));
+      Some((!is_dir, name.to_lowercase(), Row { is_dir, path, name, depth, ignored }))
     })
     .collect();
-  children.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
-  for row in children {
-    let open = row.is_dir && expanded.contains(&row.path);
-    let path = row.path.clone();
-    out.push(row);
-    if open {
-      collect(&path, depth + 1, expanded, out);
+  children.sort_unstable_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+  for (_, _, row) in children {
+    if row.is_dir && expanded.contains(&row.path) {
+      let (path, ignored) = (row.path.clone(), row.ignored);
+      out.push(row);
+      collect(&path, depth + 1, ignored, rules, expanded, out);
+    } else {
+      out.push(row);
     }
   }
 }

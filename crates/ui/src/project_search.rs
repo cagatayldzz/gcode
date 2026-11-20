@@ -4,10 +4,11 @@ use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use regex::{Captures, Regex, RegexBuilder};
 use std::{
   fs,
-  io::Write,
+  io::{Read as _, Write},
   ops::Range,
   path::{Path, PathBuf},
-  sync::atomic::{AtomicBool, Ordering},
+  sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+  thread,
 };
 
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -54,7 +55,7 @@ impl Matcher {
     Ok(Self { pattern, include: globs(&options.include)?, exclude: globs(&options.exclude)? })
   }
 
-  fn files<'a>(&'a self, root: &'a Path) -> impl Iterator<Item = PathBuf> + 'a {
+  fn files(&self, root: &Path) -> Vec<PathBuf> {
     ignore::WalkBuilder::new(root)
       .hidden(false)
       .git_ignore(true)
@@ -65,12 +66,13 @@ impl Matcher {
       .filter_entry(|entry| entry.file_name() != ".git")
       .build()
       .filter_map(Result::ok)
-      .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()) && entry.metadata().is_ok_and(|metadata| metadata.len() <= MAX_FILE_BYTES))
-      .filter_map(move |entry| {
+      .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
+      .filter_map(|entry| {
         let path = entry.into_path();
         let relative = path.strip_prefix(root).ok()?;
         ((self.include.is_empty() || self.include.is_match(relative)) && !self.exclude.is_match(relative)).then_some(path)
       })
+      .collect()
   }
 }
 
@@ -87,8 +89,54 @@ fn globs(value: &str) -> Result<GlobSet, String> {
 }
 
 fn text_file(path: &Path) -> Option<String> {
-  let text = fs::read_to_string(path).ok()?;
+  let mut file = fs::File::open(path).ok()?;
+  let length = file.metadata().ok()?.len();
+  if length > MAX_FILE_BYTES {
+    return None;
+  }
+  let mut text = String::with_capacity(length as usize);
+  file.read_to_string(&mut text).ok()?;
   (!text.contains('\0')).then_some(text)
+}
+
+/// Runs `work` on every path across worker threads and returns the results in path order.
+fn map_files<T: Send>(paths: &[PathBuf], work: impl Fn(&Path) -> T + Sync) -> Vec<T> {
+  let workers = thread::available_parallelism().map_or(1, usize::from).min(paths.len());
+  if workers <= 1 {
+    return paths.iter().map(|path| work(path)).collect();
+  }
+  let next = AtomicUsize::new(0);
+  let mut done: Vec<(usize, T)> = thread::scope(|scope| {
+    let handles: Vec<_> = (0..workers)
+      .map(|_| {
+        scope.spawn(|| {
+          let mut local = Vec::new();
+          loop {
+            let index = next.fetch_add(1, Ordering::Relaxed);
+            let Some(path) = paths.get(index) else { break local };
+            local.push((index, work(path)));
+          }
+        })
+      })
+      .collect();
+    handles.into_iter().flat_map(|handle| handle.join().expect("search worker panicked")).collect()
+  });
+  done.sort_unstable_by_key(|(index, _)| *index);
+  done.into_iter().map(|(_, value)| value).collect()
+}
+
+fn preview_match(path: &Path, line: usize, content: &str, start: usize, end: usize) -> Match {
+  let context_start = content[..start].char_indices().rev().nth(12).map_or(0, |(offset, _)| offset);
+  let context = content[context_start..start].trim_start();
+  let prefix = if context_start > 0 { "…" } else { "" };
+  let mut preview = String::with_capacity(prefix.len() + context.len() + 240);
+  preview.push_str(prefix);
+  preview.push_str(context);
+  let highlight_start = preview.len();
+  preview.extend(content[start..end].chars().take(160));
+  let highlight_end = preview.len();
+  preview.extend(content[end..].chars().take(70));
+  Match { path: path.to_owned(), line, column: content[..start].encode_utf16().count(), preview, highlight: highlight_start..highlight_end }
 }
 
 pub(crate) fn search(root: &Path, options: &Options, cancelled: &AtomicBool) -> Result<Results, String> {
@@ -99,41 +147,29 @@ pub(crate) fn search(root: &Path, options: &Options, cancelled: &AtomicBool) -> 
     return Ok(Results::default());
   }
   let matcher = Matcher::new(options)?;
-  let mut results = Results::default();
-  for path in matcher.files(root) {
-    let Some(text) = text_file(&path) else { continue };
-    let before = results.occurrences;
+  let paths: Vec<PathBuf> = matcher.files(root);
+  let found = map_files(&paths, |path| {
+    let mut file = (Vec::new(), 0);
+    if cancelled.load(Ordering::Relaxed) {
+      return file;
+    }
+    let Some(text) = text_file(path) else { return file };
     for (line, content) in text.lines().enumerate() {
-      if cancelled.load(Ordering::Relaxed) {
-        return Ok(results);
-      }
       for found in matcher.pattern.find_iter(content) {
-        results.occurrences += 1;
-        if results.matches.len() == MAX_RESULTS {
-          continue;
+        file.1 += 1;
+        if file.0.len() < MAX_RESULTS {
+          file.0.push(preview_match(path, line, content, found.start(), found.end()));
         }
-        let start = found.start();
-        let end = found.end();
-        let context_start = content[..start].char_indices().rev().nth(12).map_or(0, |(offset, _)| offset);
-        let context = content[context_start..start].trim_start();
-        let prefix = if context_start > 0 { "…" } else { "" };
-        let mut preview = format!("{prefix}{context}");
-        let highlight_start = preview.len();
-        preview.extend(content[start..end].chars().take(160));
-        let highlight_end = preview.len();
-        preview.extend(content[end..].chars().take(70));
-        results.matches.push(Match {
-          path: path.clone(),
-          line,
-          column: content[..start].encode_utf16().count(),
-          preview,
-          highlight: highlight_start..highlight_end,
-        });
       }
     }
-    if results.occurrences > before {
-      results.files += 1;
-    }
+    file
+  });
+  let mut results = Results::default();
+  for (mut matches, occurrences) in found {
+    results.occurrences += occurrences;
+    results.files += usize::from(occurrences > 0);
+    matches.truncate(MAX_RESULTS - results.matches.len());
+    results.matches.append(&mut matches);
   }
   Ok(results)
 }
@@ -144,50 +180,59 @@ pub(crate) struct Replacement {
   pub updated: String,
 }
 
+const TOO_LARGE: &str = "The replacement is too large. Limit the search to fewer files.";
+
+fn replace_file(path: &Path, matcher: &Matcher, options: &Options, replacement: &str, preserve_case: bool) -> Result<Option<Replacement>, String> {
+  let Some(original) = text_file(path) else { return Ok(None) };
+  if !matcher.pattern.is_match(&original) {
+    return Ok(None);
+  }
+  let mut updated = String::with_capacity(original.len());
+  for line in original.split_inclusive('\n') {
+    let content = line.trim_end_matches('\n');
+    let content = if line.ends_with("\r\n") { content.strip_suffix('\r').unwrap_or(content) } else { content };
+    let replaced = matcher.pattern.replace_all(content, |captures: &Captures<'_>| {
+      let mut value = String::new();
+      if options.regex {
+        captures.expand(replacement, &mut value);
+      } else {
+        value.push_str(replacement);
+      }
+      if preserve_case {
+        let matched = &captures[0];
+        if matched.chars().any(char::is_alphabetic) && !matched.chars().any(char::is_lowercase) {
+          return value.to_uppercase();
+        }
+        if matched.chars().any(char::is_alphabetic) && !matched.chars().any(char::is_uppercase) {
+          return value.to_lowercase();
+        }
+      }
+      value
+    });
+    updated.push_str(&replaced);
+    updated.push_str(&line[content.len()..]);
+    if updated.len() > MAX_REPLACEMENT_BYTES {
+      return Err(TOO_LARGE.into());
+    }
+  }
+  Ok((updated != original).then(|| Replacement { path: path.to_owned(), original, updated }))
+}
+
 pub(crate) fn replacement_plan(root: &Path, options: &Options, replacement: &str, preserve_case: bool) -> Result<Vec<Replacement>, String> {
   if options.query.is_empty() {
     return Ok(Vec::new());
   }
   let matcher = Matcher::new(options)?;
+  let paths: Vec<PathBuf> = matcher.files(root);
   let mut plan = Vec::new();
   let mut bytes = 0;
-  for path in matcher.files(root) {
-    let Some(original) = text_file(&path) else { continue };
-    let mut updated = String::with_capacity(original.len());
-    for line in original.split_inclusive('\n') {
-      let content = line.trim_end_matches('\n');
-      let content = if line.ends_with("\r\n") { content.strip_suffix('\r').unwrap_or(content) } else { content };
-      let replaced = matcher.pattern.replace_all(content, |captures: &Captures<'_>| {
-        let mut value = String::new();
-        if options.regex {
-          captures.expand(replacement, &mut value);
-        } else {
-          value.push_str(replacement);
-        }
-        if preserve_case {
-          let matched = &captures[0];
-          if matched.chars().any(char::is_alphabetic) && !matched.chars().any(char::is_lowercase) {
-            return value.to_uppercase();
-          }
-          if matched.chars().any(char::is_alphabetic) && !matched.chars().any(char::is_uppercase) {
-            return value.to_lowercase();
-          }
-        }
-        value
-      });
-      updated.push_str(&replaced);
-      updated.push_str(&line[content.len()..]);
-      if updated.len() > MAX_REPLACEMENT_BYTES {
-        return Err("The replacement is too large. Limit the search to fewer files.".into());
-      }
+  for edit in map_files(&paths, |path| replace_file(path, &matcher, options, replacement, preserve_case)) {
+    let Some(edit) = edit? else { continue };
+    bytes += edit.original.len() + edit.updated.len();
+    if bytes > MAX_REPLACEMENT_BYTES {
+      return Err(TOO_LARGE.into());
     }
-    if updated != original {
-      bytes += original.len() + updated.len();
-      if bytes > MAX_REPLACEMENT_BYTES {
-        return Err("The replacement is too large. Limit the search to fewer files.".into());
-      }
-      plan.push(Replacement { path, original, updated });
-    }
+    plan.push(edit);
   }
   Ok(plan)
 }

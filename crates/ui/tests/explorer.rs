@@ -60,3 +60,26 @@ fn copying_and_moving_files_preserve_existing_destinations() {
   assert!(!source.exists());
   assert_eq!(fs::read_to_string(moved).unwrap(), "original");
 }
+
+#[test]
+fn entries_ignored_by_git_are_marked_and_their_children_inherit_it() {
+  let root = tempfile::tempdir().unwrap();
+  git2::Repository::init(root.path()).unwrap();
+  fs::create_dir_all(root.path().join("target/debug")).unwrap();
+  fs::create_dir_all(root.path().join("src")).unwrap();
+  fs::write(root.path().join(".gitignore"), "/target/\n").unwrap();
+  fs::write(root.path().join("src/main.rs"), "").unwrap();
+
+  let expanded: HashSet<_> = [root.path().join("target"), root.path().join("src")].into();
+  let rows: Vec<_> = explorer::rows(root.path(), &expanded).into_iter().map(|row| (row.name, row.ignored)).collect();
+  assert_eq!(
+    rows,
+    [
+      ("src".to_string(), false),
+      ("main.rs".to_string(), false),
+      ("target".to_string(), true),
+      ("debug".to_string(), true),
+      (".gitignore".to_string(), false)
+    ]
+  );
+}
