@@ -16,6 +16,7 @@ mod explorer;
 mod mention_picker;
 mod menus;
 mod merge_dialog;
+mod minimap;
 mod project_manager;
 mod project_search;
 mod project_settings;
@@ -73,6 +74,7 @@ pub fn init(cx: &mut App) {
   if let Err(error) = cx.text_system().add_fonts(vec![
     // Static weights: the text system picks a weight by font file, so a variable font would draw every weight as regular.
     std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist-Regular.ttf")),
+    std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist-Italic.ttf")),
     std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist-Medium.ttf")),
     std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist-SemiBold.ttf")),
     std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist-Bold.ttf")),

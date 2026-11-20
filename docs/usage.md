@@ -64,10 +64,12 @@ managed:
 A category that loses its last project goes away. Projects without a
 category come first, then the categories in the order they were created.
 
-### Code size
+### Font sizes
 
 **Settings → Editor → Font size** sets the size of code in the editor and in a file's changes, from 9 to 24 pixels
 (13 by default). It applies at once. The terminal keeps its own size.
+
+**Settings → Editor → Explorer font size** sets the size of file and folder names in Explorer. It defaults to 12 pixels.
 
 ### Managing the project bar in Settings
 
@@ -138,6 +140,9 @@ a tab to show its file, **×** on it closes it (a click on a file that is alread
 the file of the shown tab. `⌘S` writes the shown file; a `•` after the name means unsaved changes. Closing a tab keeps
 its unsaved text in memory, and opening the file again brings it back, so nothing is lost silently; the text is only
 written by saving. Each project keeps its own tabs.
+
+Files with at least 80 lines show a minimap at the right edge of the editor. Click anywhere in the minimap to jump there,
+or drag the highlighted region to scroll through the file.
 
 ## Git
 

@@ -33,11 +33,14 @@ impl ThemeChoice {
   }
 }
 
-/// The smallest and the largest size of code, in pixels.
-pub const CODE_FONT_SIZES: std::ops::RangeInclusive<u32> = 9..=24;
+/// The smallest and largest configurable font sizes, in pixels.
+pub const FONT_SIZES: std::ops::RangeInclusive<u32> = 9..=24;
 
 /// The size of code when the user has not chosen one.
 pub const DEFAULT_CODE_FONT_SIZE: u32 = 13;
+
+/// The default font size of file and folder names in Explorer.
+pub const DEFAULT_EXPLORER_FONT_SIZE: u32 = 12;
 
 /// How the activity bar (the column of buttons at the left edge) is arranged: the order of its buttons and the ones the user
 /// hid. Buttons are named by id; ids the bar does not know are ignored and new ones come after the saved ones, so a version that
@@ -95,8 +98,10 @@ pub struct Preferences {
   pub theme: ThemeChoice,
   /// The folder new and cloned projects go into; `None` is the folder of the open project, else home.
   pub projects_dir: Option<PathBuf>,
-  /// The size of the code in the editor and in changes, in pixels, within [`CODE_FONT_SIZES`].
+  /// The size of the code in the editor and in changes, in pixels, within [`FONT_SIZES`].
   pub code_font_size: u32,
+  /// The size of file and folder names in Explorer, in pixels.
+  pub explorer_font_size: u32,
   /// The instructions the commit message generator follows besides its rules; `None` is the built-in text, `Some("")` none at all.
   pub commit_instructions: Option<String>,
   /// Ask GitHub for a newer Vekro release when the app starts.
@@ -111,6 +116,7 @@ impl Default for Preferences {
       theme: ThemeChoice::default(),
       projects_dir: None,
       code_font_size: DEFAULT_CODE_FONT_SIZE,
+      explorer_font_size: DEFAULT_EXPLORER_FONT_SIZE,
       commit_instructions: None,
       check_updates: true,
       activity_bar: ActivityBarLayout::default(),
@@ -131,10 +137,8 @@ impl Preferences {
     Self {
       theme: root.get("theme").and_then(Value::as_str).map(ThemeChoice::from_name).unwrap_or_default(),
       projects_dir: root.get("projects_dir").and_then(Value::as_str).map(PathBuf::from),
-      code_font_size: root
-        .get("code_font_size")
-        .and_then(Value::as_u64)
-        .map_or(DEFAULT_CODE_FONT_SIZE, |size| size.clamp(*CODE_FONT_SIZES.start() as u64, *CODE_FONT_SIZES.end() as u64) as u32),
+      code_font_size: font_size(root.get("code_font_size"), DEFAULT_CODE_FONT_SIZE),
+      explorer_font_size: font_size(root.get("explorer_font_size"), DEFAULT_EXPLORER_FONT_SIZE),
       commit_instructions: root.get("commit_instructions").and_then(Value::as_str).map(str::to_owned),
       check_updates: root.get("check_updates").and_then(Value::as_bool).unwrap_or(true),
       activity_bar: ActivityBarLayout { order: strings(root.get("activity_order")), hidden: strings(root.get("activity_hidden")) },
@@ -149,6 +153,7 @@ impl Preferences {
       "theme": self.theme.name(),
       "projects_dir": self.projects_dir.as_ref().map(|path| path.to_string_lossy()),
       "code_font_size": self.code_font_size,
+      "explorer_font_size": self.explorer_font_size,
       "commit_instructions": self.commit_instructions,
       "check_updates": self.check_updates,
       "activity_order": self.activity_bar.order,
@@ -156,6 +161,10 @@ impl Preferences {
     });
     fs::write(path, serde_json::to_string_pretty(&value)?)
   }
+}
+
+fn font_size(value: Option<&Value>, default: u32) -> u32 {
+  value.and_then(Value::as_u64).map_or(default, |size| size.clamp(*FONT_SIZES.start() as u64, *FONT_SIZES.end() as u64) as u32)
 }
 
 /// The strings of a JSON array; anything else gives none.

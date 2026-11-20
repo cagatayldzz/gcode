@@ -2,6 +2,7 @@
 
 use crate::close_order::CloseOrder;
 use crate::components::{strip, strip_tab};
+use crate::minimap::Minimap;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
@@ -9,12 +10,20 @@ use gpui_kit::{
     dock::{BasePanel, Panel, PanelControl, PanelEvent},
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     input::{Editor, EditorState, InputEvent},
+    menu::{ContextMenuExt as _, PopupMenuItem},
     notification::Notification,
     v_flex, ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _,
   },
   *,
 };
-use std::{collections::HashMap, fs, io, path::Path, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+  collections::{HashMap, HashSet},
+  fs, io,
+  path::Path,
+  path::PathBuf,
+  sync::Arc,
+  time::Duration,
+};
 
 /// Files larger than this are not opened: the editor reads the whole text.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -54,6 +63,7 @@ const WARMUP_SAMPLES: [(&str, &str); 13] = [
 /// A file whose editor is ready.
 struct ReadyFile {
   state: Entity<EditorState>,
+  minimap: Entity<Minimap>,
   dirty: bool,
   /// The editor has been drawn at least once, so its text is already highlighted.
   painted: bool,
@@ -128,8 +138,9 @@ enum ImagePreview {
 struct Tabs {
   /// The files in the tabs, in tab order.
   items: Vec<PathBuf>,
-  /// The tab opened with a single click: the next single click replaces it, until it is pinned (double click, or an edit).
+  /// The tab opened with a single click. The next preview replaces it until it becomes a regular tab.
   preview: Option<PathBuf>,
+  pinned: HashSet<PathBuf>,
   active: usize,
   /// Which tab the close shortcut takes next.
   close_order: CloseOrder,
@@ -143,7 +154,7 @@ impl Tabs {
   /// Shows the tab for which `same` is true, or adds `tab` and shows it.
   fn show(&mut self, tab: PathBuf, same: impl Fn(&PathBuf) -> bool) {
     self.close_order.reset();
-    self.pin(&tab);
+    self.keep_open(&tab);
     match self.items.iter().position(same) {
       Some(index) => {
         self.items[index] = tab;
@@ -180,7 +191,7 @@ impl Tabs {
   }
 
   /// Makes the preview tab of `path` a regular tab.
-  fn pin(&mut self, path: &Path) {
+  fn keep_open(&mut self, path: &Path) {
     if self.preview.as_deref() == Some(path) {
       self.preview = None;
     }
@@ -192,12 +203,41 @@ impl Tabs {
       return;
     }
     let removed = self.items.remove(index);
-    self.pin(&removed);
+    self.keep_open(&removed);
+    self.pinned.remove(&removed);
     if self.active > index || self.active >= self.items.len() {
       self.active = self.active.saturating_sub(1);
     }
   }
 }
+
+#[derive(Clone, Copy, PartialEq)]
+enum TabCommand {
+  Close,
+  CloseOthers,
+  CloseToRight,
+  CloseSaved,
+  CloseAll,
+  KeepOpen,
+  Pin,
+  Unpin,
+}
+
+#[derive(Action, Clone, PartialEq)]
+#[action(namespace = vekro, no_json)]
+struct EditorTabAction(TabCommand, PathBuf);
+
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum FileLocationCommand {
+  CopyPath,
+  CopyRelativePath,
+  RevealInFinder,
+  RevealInExplorer,
+}
+
+#[derive(Action, Clone, PartialEq)]
+#[action(namespace = vekro, no_json)]
+pub(crate) struct FileLocation(pub FileLocationCommand, pub PathBuf);
 
 /// What the editor area shows now, sent when it changes so the sidebar can select the same file.
 pub(crate) enum ActiveTab {
@@ -316,10 +356,14 @@ impl EditorPanel {
     self.announce(cx);
   }
 
+  pub fn active_file(&self) -> Option<&Path> {
+    self.tabs.current().filter(|_| !self.report_active).map(PathBuf::as_path)
+  }
+
   /// Tells the others what is shown and redraws.
   fn announce(&mut self, cx: &mut Context<Self>) {
-    let shown = match self.tabs.current().filter(|_| !self.report_active) {
-      Some(path) => ActiveTab::File(path.clone()),
+    let shown = match self.active_file() {
+      Some(path) => ActiveTab::File(path.to_path_buf()),
       None => ActiveTab::Nothing,
     };
     cx.emit(shown);
@@ -352,11 +396,70 @@ impl EditorPanel {
 
   /// Closes a tab. A file with unsaved text keeps it in memory: opening the file again brings it back.
   fn close_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+    self.remove_tab(index);
+    self.announce(cx);
+  }
+
+  fn remove_tab(&mut self, index: usize) {
     if let Some(path) = self.tabs.items.get(index) {
       self.images.remove(path);
       self.svg_source.remove(path);
     }
     self.tabs.remove(index);
+  }
+
+  fn matching_tabs(&self, command: TabCommand, target: usize) -> impl DoubleEndedIterator<Item = usize> + '_ {
+    self.tabs.items.iter().enumerate().filter_map(move |(index, path)| {
+      if command == TabCommand::Close {
+        return (index == target).then_some(index);
+      }
+      if self.tabs.pinned.contains(path) {
+        return None;
+      }
+      let close = match command {
+        TabCommand::CloseOthers => index != target,
+        TabCommand::CloseToRight => index > target,
+        TabCommand::CloseSaved => !self.is_dirty(path),
+        TabCommand::CloseAll => true,
+        _ => false,
+      };
+      close.then_some(index)
+    })
+  }
+
+  fn closes_search_report(&self, command: TabCommand) -> bool {
+    self.search_report.is_some() && matches!(command, TabCommand::CloseOthers | TabCommand::CloseToRight | TabCommand::CloseAll)
+  }
+
+  fn run_tab_action(&mut self, action: &EditorTabAction, _: &mut Window, cx: &mut Context<Self>) {
+    let EditorTabAction(command, path) = action;
+    let Some(index) = self.tabs.items.iter().position(|open| open == path) else { return };
+    match command {
+      TabCommand::KeepOpen => self.tabs.keep_open(path),
+      TabCommand::Pin => {
+        self.tabs.keep_open(path);
+        self.tabs.pinned.insert(path.clone());
+      }
+      TabCommand::Unpin => {
+        self.tabs.pinned.remove(path);
+      }
+      _ => {
+        let closing: Vec<_> = self.matching_tabs(*command, index).rev().collect();
+        for index in closing {
+          self.remove_tab(index);
+        }
+        if self.closes_search_report(*command) {
+          self.search_report = None;
+          self.report_active = false;
+        }
+        self.tabs.close_order.reset();
+        if *command == TabCommand::CloseOthers {
+          if let Some(index) = self.tabs.items.iter().position(|open| open == path) {
+            self.tabs.active = index;
+          }
+        }
+      }
+    }
     self.announce(cx);
   }
 
@@ -371,9 +474,9 @@ impl EditorPanel {
   }
 
   /// Keeps the tab of `index` (a double click on it).
-  fn pin_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+  fn keep_tab_open(&mut self, index: usize, cx: &mut Context<Self>) {
     if let Some(path) = self.tabs.items.get(index).cloned() {
-      self.tabs.pin(&path);
+      self.tabs.keep_open(&path);
       cx.notify();
     }
   }
@@ -494,13 +597,14 @@ impl EditorPanel {
       if matches!(event, InputEvent::Change) {
         if let Some(file) = this.files.get_mut(&owner) {
           file.dirty = true;
-          this.tabs.pin(&owner);
+          this.tabs.keep_open(&owner);
           cx.notify();
         }
       }
     });
     let cursor = cx.observe(&state, |_, _, cx| cx.notify());
-    self.files.insert(path.to_path_buf(), ReadyFile { state, dirty: false, painted: false, crlf, _changes: changes, _cursor: cursor });
+    let minimap = cx.new(|cx| Minimap::new(state.clone(), cx));
+    self.files.insert(path.to_path_buf(), ReadyFile { state, minimap, dirty: false, painted: false, crlf, _changes: changes, _cursor: cursor });
     self.touch(path);
     self.evict();
   }
@@ -571,11 +675,9 @@ impl EditorPanel {
       }
     }
     self.recent.retain(|recent| recent != path);
-    self.tabs.pin(path);
-    let kept: Vec<PathBuf> = self.tabs.items.iter().filter(|open| open.as_path() != path).cloned().collect();
-    if kept.len() != self.tabs.items.len() {
-      self.tabs.active = self.tabs.active.min(kept.len().saturating_sub(1));
-      self.tabs.items = kept;
+    if let Some(index) = self.tabs.items.iter().position(|open| open == path) {
+      self.tabs.remove(index);
+      self.tabs.close_order.reset();
     }
     self.announce(cx);
   }
@@ -693,25 +795,64 @@ impl EditorPanel {
   /// The tab bar, drawn by the panel itself so the first tab sits at the edge of the pane.
   fn render_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let tabs = self.tabs.items.iter().enumerate().map(|(index, path)| {
+      let panel = cx.entity().downgrade();
+      let target = path.clone();
+      let close_target = path.clone();
+      let close_focus = self.focus_handle.clone();
+      let focus = self.focus_handle.clone();
       let name = format!("{}{}", display_name(path), if self.is_dirty(path) { " •" } else { "" });
-      let label = div().italic().when(self.tabs.preview.as_ref() != Some(path), |label| label.not_italic()).child(name);
+      let label = gpui_kit::component::h_flex()
+        .gap_1()
+        .when(self.tabs.preview.as_ref() == Some(path), |label| label.italic())
+        .when(self.tabs.pinned.contains(path), |label| label.child(Icon::empty().path("icons/pin.svg").size_3()))
+        .child(name);
       let close = Button::new(SharedString::from(format!("close-tab:{}", path.display())))
         .ghost()
         .xsmall()
         .icon(Icon::empty().path("icons/x.svg").size_4())
         .tooltip("Close")
-        .on_click(cx.listener(move |this, _, _, cx| {
-          // The click must not also reach the tab and select it.
+        .on_click(move |_, window, cx| {
           cx.stop_propagation();
-          this.close_tab(index, cx);
-        }));
+          close_focus.dispatch_action(&EditorTabAction(TabCommand::Close, close_target.clone()), window, cx);
+        });
       strip_tab(SharedString::from(format!("editor-tab:{}", path.display())), label, !self.report_active && index == self.tabs.active, close, cx)
         .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
           this.activate(index, cx);
           if event.click_count() >= 2 {
-            this.pin_tab(index, cx);
+            this.keep_tab_open(index, cx);
           }
         }))
+        .context_menu(move |menu, _, cx| {
+          let Some(panel) = panel.upgrade() else { return menu };
+          let panel = panel.read(cx);
+          let Some(index) = panel.tabs.items.iter().position(|path| *path == target) else { return menu };
+          let close = |label, command| {
+            PopupMenuItem::new(label)
+              .action(Box::new(EditorTabAction(command, target.clone())))
+              .disabled(panel.matching_tabs(command, index).next().is_none() && !panel.closes_search_report(command))
+          };
+          let location = |label, command| PopupMenuItem::new(label).action(Box::new(FileLocation(command, target.clone())));
+          let keep_open = PopupMenuItem::new("Keep Open")
+            .action(Box::new(EditorTabAction(TabCommand::KeepOpen, target.clone())))
+            .disabled(panel.tabs.preview.as_ref() != Some(&target));
+          let (pin_label, pin_command) = if panel.tabs.pinned.contains(&target) { ("Unpin", TabCommand::Unpin) } else { ("Pin", TabCommand::Pin) };
+          menu
+            .action_context(focus.clone())
+            .item(close("Close", TabCommand::Close))
+            .item(close("Close Others", TabCommand::CloseOthers))
+            .item(close("Close to the Right", TabCommand::CloseToRight))
+            .item(close("Close Saved", TabCommand::CloseSaved))
+            .item(close("Close All", TabCommand::CloseAll))
+            .separator()
+            .item(location("Copy Path", FileLocationCommand::CopyPath))
+            .item(location("Copy Relative Path", FileLocationCommand::CopyRelativePath))
+            .separator()
+            .item(location("Reveal in Finder", FileLocationCommand::RevealInFinder))
+            .item(location("Reveal in Explorer View", FileLocationCommand::RevealInExplorer))
+            .separator()
+            .item(keep_open)
+            .item(PopupMenuItem::new(pin_label).action(Box::new(EditorTabAction(pin_command, target.clone()))))
+        })
     });
     strip(cx).children(tabs).children(self.search_report.as_ref().map(|(title, _)| {
       let close = Button::new("close-search-report").ghost().xsmall().icon(IconName::Close).tooltip("Close search results").on_click(cx.listener(
@@ -779,15 +920,18 @@ impl Render for EditorPanel {
               || div().into_any_element(),
               |file| {
                 div()
+                  .flex()
                   .size_full()
-                  .cursor_text()
                   .child(
-                    Editor::new(&file.state)
-                      .readonly(self.read_only || self.replacement_files.contains(path))
-                      .appearance(false)
-                      .bordered(false)
-                      .size_full(),
+                    div().flex_1().min_w_0().h_full().cursor_text().child(
+                      Editor::new(&file.state)
+                        .readonly(self.read_only || self.replacement_files.contains(path))
+                        .appearance(false)
+                        .bordered(false)
+                        .size_full(),
+                    ),
                   )
+                  .when(file.minimap.read(cx).is_visible(cx), |area| area.child(file.minimap.clone()))
                   .into_any_element()
               },
             ),
@@ -818,8 +962,15 @@ impl Render for EditorPanel {
     };
     let hidden = self.preview.clone().or_else(|| self.warmup.clone());
     let tabs = (!self.tabs.items.is_empty() || self.search_report.is_some()).then(|| self.render_tabs(cx));
-    v_flex().relative().size_full().children(tabs).child(div().relative().flex_1().min_h_0().child(content)).when_some(hidden, |this, state| {
-      this.child(div().absolute().top_0().left_0().w(px(1.)).h(px(1.)).overflow_hidden().opacity(0.).child(Editor::new(&state)))
-    })
+    v_flex()
+      .track_focus(&self.focus_handle)
+      .on_action(cx.listener(Self::run_tab_action))
+      .relative()
+      .size_full()
+      .children(tabs)
+      .child(div().relative().flex_1().min_h_0().child(content))
+      .when_some(hidden, |this, state| {
+        this.child(div().absolute().top_0().left_0().w(px(1.)).h(px(1.)).overflow_hidden().opacity(0.).child(Editor::new(&state)))
+      })
   }
 }

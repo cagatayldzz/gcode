@@ -7,7 +7,7 @@ use crate::{
   components::{avatar_look, display_path, selected_style, strip, strip_tab},
   connect_account::{AccountConnected, ConnectAccount},
   connections::{accounts_path, credentials_for_repository, describe, AccountsList},
-  editor::{ActiveTab, EditorPanel},
+  editor::{ActiveTab, EditorPanel, FileLocation, FileLocationCommand},
   explorer,
   mention_picker::{MentionChoice, MentionPicker, ProjectsChosen},
   merge_dialog::{MergeDialog, MergeEvent},
@@ -113,7 +113,7 @@ const SIDEBAR_MIN_WIDTH: Pixels = px(200.);
 const SIDEBAR_MAX_WIDTH: Pixels = px(960.);
 
 /// Indentation of each tree level.
-const INDENT: Pixels = px(16.);
+const INDENT: Rems = rems(1.);
 
 /// The views of the sidebar, in activity-bar order.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -274,6 +274,7 @@ pub struct Workspace {
   sidebar_tab: SidebarTab,
   /// The file in the Explorer the pointer is on.
   hovered_file: Option<PathBuf>,
+  hovered_folder: Option<(PathBuf, usize)>,
   focus_handle: FocusHandle,
   _setup_subscription: Option<Subscription>,
   _dialog_subscription: Option<Subscription>,
@@ -418,6 +419,7 @@ impl Workspace {
       selected_change: None,
       sidebar_tab: SidebarTab::default(),
       hovered_file: None,
+      hovered_folder: None,
       views: HashMap::new(),
       focus_handle: cx.focus_handle(),
       _setup_subscription: None,
@@ -1360,6 +1362,7 @@ impl Workspace {
   /// and comes back when it is opened again; its shells keep running.
   fn switch_project(&mut self, window: &mut Window, cx: &mut Context<Self>, change: impl FnOnce(&mut ProjectList)) {
     self.close_project_search(cx);
+    self.hovered_folder = None;
     let before = self.projects.active.clone();
     if let Some(root) = &before {
       let view = ProjectView {
@@ -1442,6 +1445,10 @@ impl Workspace {
 
   /// Reads the repository and the folder tree off the interface thread and shows them only if they changed.
   fn refresh_in_background(&mut self, cx: &mut Context<Self>) {
+    self.refresh_with_explorer_reveal(None, cx);
+  }
+
+  fn refresh_with_explorer_reveal(&mut self, reveal: Option<(PathBuf, ScrollStrategy)>, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
     let expanded = self.expanded.clone();
     let work = cx.background_executor().spawn({
@@ -1456,6 +1463,15 @@ impl Workspace {
           this.git = git;
           this.rows = rows;
           cx.notify();
+        }
+        if let Some((path, strategy)) = &reveal {
+          if this.projects.active.as_ref() == Some(&root)
+            && this.sidebar_tab == SidebarTab::Explorer
+            && this.selected_entry.as_deref() == Some(path.as_path())
+          {
+            this.scroll_to_explorer_entry(path, *strategy);
+            cx.notify();
+          }
         }
         if this.sidebar_tab == SidebarTab::Git && this.git_view == GitView::History {
           this.load_history(cx);
@@ -1619,15 +1635,34 @@ impl Workspace {
   fn reveal_file(&mut self, root: PathBuf, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
     self.sidebar_tab = SidebarTab::Explorer;
     self.close_project_search(cx);
+    self.open_file(path.clone(), window, cx);
+    if self.selected_entry.as_ref() == Some(&path) {
+      self.show_explorer_entry(&root, path, ScrollStrategy::Center, cx);
+    }
+  }
+
+  fn show_explorer_entry(&mut self, root: &Path, path: PathBuf, strategy: ScrollStrategy, cx: &mut Context<Self>) {
+    if !path.starts_with(root) {
+      return;
+    }
     let expanded = self.expanded.len();
-    self.expanded.extend(path.ancestors().skip(1).take_while(|parent| *parent != root && parent.starts_with(&root)).map(Path::to_path_buf));
+    self.expanded.extend(path.ancestors().skip(1).take_while(|parent| *parent != root).map(Path::to_path_buf));
+    self.selected_entry = Some(path.clone());
     if self.expanded.len() != expanded {
-      self.rows = explorer::rows(&root, &self.expanded);
+      self.refresh_with_explorer_reveal(Some((path, strategy)), cx);
+    } else {
+      self.scroll_to_explorer_entry(&path, strategy);
     }
+  }
+
+  fn scroll_to_explorer_entry(&self, path: &Path, strategy: ScrollStrategy) {
     if let Some(index) = self.rows.iter().position(|row| row.path == path) {
-      self.explorer_scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+      if strategy == ScrollStrategy::Center {
+        self.explorer_scroll.scroll_to_item_strict(index, strategy);
+      } else {
+        self.explorer_scroll.scroll_to_item(index, strategy);
+      }
     }
-    self.open_file(path, window, cx);
   }
 
   fn toggle_all_changes(&mut self, _: &ToggleAllChanges, window: &mut Window, cx: &mut Context<Self>) {
@@ -3879,21 +3914,28 @@ impl Workspace {
   }
 
   /// One line of the folder tree.
-  fn explorer_row(&self, row: &explorer::Row, cx: &mut Context<Self>) -> impl IntoElement {
+  fn explorer_row(&self, row: &explorer::Row, font_size: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     let path = row.path.clone();
     let selected = self.selected_entry.as_ref() == Some(&row.path);
     let icon_color = if selected { palette.explorer_selected_text } else { theme.muted_foreground };
     let open = self.expanded.contains(&row.path);
+    let file_icon = (!row.is_dir).then(|| explorer_file_icon(&row.path, &palette)).flatten();
     let menu = self.explorer_menu(Some(row), cx);
+    let highlighted_guide = self
+      .hovered_folder
+      .as_ref()
+      .and_then(|(folder, depth)| (row.depth > *depth && row.path.starts_with(folder) && self.expanded.contains(folder)).then_some(*depth));
     h_flex()
       .id(SharedString::from(format!("entry-{}", row.path.display())))
       .w_full()
+      .min_h_6()
       .gap_1p5()
       .pr_2()
-      .py_1()
-      .pl(INDENT * row.depth as f32 + px(8.))
+      .py_0p5()
+      .pl(INDENT * row.depth as f32 + rems(0.5))
+      .relative()
       .rounded_sm()
       .items_center()
       .cursor_pointer()
@@ -3902,10 +3944,12 @@ impl Workspace {
       .child(div().size_4().flex_none().when(row.is_dir, |chevron| {
         chevron.child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size_4().text_color(icon_color))
       }))
-      // Only folders get an icon; a file's name starts where a folder's icon does.
       .when(row.is_dir, |entry| entry.child(Icon::new(IconName::FolderClosed).size_4().text_color(icon_color)))
+      .children(file_icon)
       .child(
         Label::new(row.name.clone())
+          .text_size(font_size)
+          .line_height(relative(1.25))
           .when(selected, |label| label.text_color(palette.explorer_selected_text))
           .flex_1()
           .min_w_0()
@@ -3913,6 +3957,23 @@ impl Workspace {
           .whitespace_nowrap()
           .text_ellipsis(),
       )
+      .children((0..row.depth).map(|depth| {
+        let opacity = if highlighted_guide == Some(depth) { 0.5 } else { 0.15 };
+        div().absolute().top_0().bottom_0().left(INDENT * (depth + 1) as f32).w_px().bg(palette.control_border.opacity(opacity))
+      }))
+      .when(row.is_dir, |entry| {
+        let folder = path.clone();
+        let depth = row.depth;
+        entry.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+          if *hovered {
+            this.hovered_folder = Some((folder.clone(), depth));
+            cx.notify();
+          } else if this.hovered_folder.as_ref().is_some_and(|(path, _)| *path == folder) {
+            this.hovered_folder = None;
+            cx.notify();
+          }
+        }))
+      })
       .when(!row.is_dir, |entry| {
         let hovered_path = path.clone();
         entry.on_hover(cx.listener(move |this, hovered: &bool, window, cx| {
@@ -3954,18 +4015,30 @@ impl Workspace {
       self.rows.len(),
       cx.processor(|this, range: Range<usize>, _, cx| {
         let rows: Vec<explorer::Row> = this.rows.get(range).map(<[explorer::Row]>::to_vec).unwrap_or_default();
+        let font_size = px(this.settings.read(cx).preferences.explorer_font_size as f32);
         // Inset the rows and keep the scrollbar at the edge of the sidebar.
-        rows.iter().map(|row| div().w_full().px_1p5().child(this.explorer_row(row, cx)).into_any_element()).collect::<Vec<_>>()
+        rows.iter().map(|row| div().w_full().px_1p5().child(this.explorer_row(row, font_size, cx)).into_any_element()).collect::<Vec<_>>()
       }),
     )
     .track_scroll(&self.explorer_scroll)
     .size_full();
-    let rows = div().relative().flex_1().min_h_0().child(list).child(
-      div()
-        .absolute()
-        .inset_0()
-        .child(Scrollbar::new(&self.explorer_scroll).id("explorer-scrollbar").axis(ScrollbarAxis::Vertical).viewport_from_layout()),
-    );
+    let rows = div()
+      .id("explorer-viewport")
+      .relative()
+      .flex_1()
+      .min_h_0()
+      .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+        if !*hovered && this.hovered_folder.take().is_some() {
+          cx.notify();
+        }
+      }))
+      .child(list)
+      .child(
+        div()
+          .absolute()
+          .inset_0()
+          .child(Scrollbar::new(&self.explorer_scroll).id("explorer-scrollbar").axis(ScrollbarAxis::Vertical).viewport_from_layout()),
+      );
     let name = self
       .projects
       .projects
@@ -4045,7 +4118,15 @@ impl Workspace {
               return;
             }
             workspace.update(cx, |this, cx| {
+              let entering_explorer = tab == SidebarTab::Explorer && this.sidebar_tab != tab;
               this.sidebar_tab = tab;
+              this.hovered_folder = None;
+              if entering_explorer {
+                let active_file = this.editor_panel.read(cx).active_file().map(Path::to_path_buf);
+                if let (Some(root), Some(path)) = (this.projects.active.clone(), active_file) {
+                  this.show_explorer_entry(&root, path, ScrollStrategy::Nearest, cx);
+                }
+              }
               // The view of the sidebar and the editor come back when the terminals or the AI view were taking the main area.
               if this.full_area_open() {
                 this.hide_terminal(window, cx);
@@ -4556,6 +4637,31 @@ fn count_badge(count: usize, cx: &App) -> Div {
     .child(if count > 99 { "99+".to_string() } else { count.to_string() })
 }
 
+fn explorer_file_icon(path: &Path, palette: &crate::theme::Colors) -> Option<Icon> {
+  let (icon, color) = match path.file_name()?.to_str()? {
+    ".editorconfig" => ("icons/settings.svg", palette.text_secondary),
+    ".gitignore" => ("icons/git-branch.svg", palette.text_secondary),
+    "README.md" => ("icons/info.svg", palette.link),
+    "bun.lock" => ("icons/braces.svg", palette.modified),
+    "Cargo.lock" => ("icons/list.svg", palette.text_secondary),
+    _ => {
+      let extension = path.extension()?;
+      if extension.eq_ignore_ascii_case("toml") {
+        ("icons/settings.svg", palette.text_secondary)
+      } else if extension.eq_ignore_ascii_case("json") {
+        ("icons/braces.svg", palette.modified)
+      } else if extension.eq_ignore_ascii_case("md") {
+        ("icons/arrow-down-to-line.svg", palette.link)
+      } else if extension.eq_ignore_ascii_case("plist") {
+        ("icons/rss.svg", palette.plist_icon)
+      } else {
+        return None;
+      }
+    }
+  };
+  Some(Icon::empty().path(icon).size_3().text_color(color))
+}
+
 fn rail_button(
   id: &'static str,
   icon: Icon,
@@ -4678,6 +4784,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::toggle_all_changes))
       .on_action(cx.listener(Self::open_changed_file))
       .on_action(cx.listener(Self::run_file_command))
+      .on_action(cx.listener(Self::run_file_location))
       .on_action(cx.listener(Self::split_right))
       .on_action(cx.listener(Self::view_on_host))
       .on_action(cx.listener(Self::split_down))

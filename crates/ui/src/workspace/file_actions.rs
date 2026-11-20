@@ -89,6 +89,23 @@ impl Workspace {
     self.file_actions.mutation.is_some()
   }
 
+  pub(super) fn run_file_location(&mut self, action: &FileLocation, window: &mut Window, cx: &mut Context<Self>) {
+    let FileLocation(command, path) = action;
+    let Some(root) = self.projects.active.clone().filter(|root| path.starts_with(root)) else { return };
+    match command {
+      FileLocationCommand::CopyPath | FileLocationCommand::CopyRelativePath => {
+        let copied = if *command == FileLocationCommand::CopyPath { path.as_path() } else { path.strip_prefix(&root).unwrap_or(path) };
+        cx.write_to_clipboard(ClipboardItem::new_string(copied.to_string_lossy().into_owned()));
+      }
+      FileLocationCommand::RevealInFinder => self.open_in_system(path.clone(), true, window, cx),
+      FileLocationCommand::RevealInExplorer => {
+        self.sidebar_tab = SidebarTab::Explorer;
+        self.show_explorer_entry(&root, path.clone(), ScrollStrategy::Center, cx);
+        cx.notify();
+      }
+    }
+  }
+
   pub(super) fn run_file_command(&mut self, command: &FileCommand, window: &mut Window, cx: &mut Context<Self>) {
     use CommandKind::*;
     let FileCommand { kind, root, path, directory } = command;
@@ -98,7 +115,8 @@ impl Workspace {
     match kind {
       Preview => self.open_file_as(path.clone(), true, window, cx),
       Side => self.open_side_preview(path.clone(), window, cx),
-      OpenWith | Reveal => self.open_in_system(path.clone(), *kind == Reveal, window, cx),
+      OpenWith => self.open_in_system(path.clone(), false, window, cx),
+      Reveal => self.run_file_location(&FileLocation(FileLocationCommand::RevealInFinder, path.clone()), window, cx),
       Timeline => self.open_file_timeline(path.clone(), window, cx),
       Cut | Copy => {
         let marker = format!("vekro-file-{}-{:?}", std::process::id(), Instant::now());
@@ -106,8 +124,8 @@ impl Workspace {
         self.file_actions.clipboard = Some(FileClipboard { path: path.clone(), marker, cut: *kind == Cut });
       }
       CopyPath | CopyRelativePath => {
-        let copied = if *kind == CopyPath { path.as_path() } else { path.strip_prefix(root).unwrap_or(path) };
-        cx.write_to_clipboard(ClipboardItem::new_string(copied.to_string_lossy().into_owned()));
+        let command = if *kind == CopyPath { FileLocationCommand::CopyPath } else { FileLocationCommand::CopyRelativePath };
+        self.run_file_location(&FileLocation(command, path.clone()), window, cx);
       }
       Paste => {
         let Some(source) = self.file_actions.clipboard_file(cx).cloned() else {

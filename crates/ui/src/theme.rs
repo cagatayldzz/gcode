@@ -39,6 +39,7 @@ pub(crate) struct Colors {
   pub explorer_background: Hsla,
   pub explorer_selected: Hsla,
   pub explorer_selected_text: Hsla,
+  pub plist_icon: Hsla,
   pub hover: Hsla,
   /// The window title band.
   pub rail: Hsla,
@@ -103,6 +104,7 @@ impl Colors {
       explorer_background: hex(0x010409),
       explorer_selected: hex(0x2f353d),
       explorer_selected_text: hex(0xf0f6fc),
+      plist_icon: hex(0xf0883e),
       hover: hex(0x151b23),
       rail: hex(0x010409),
       rail_hover: hex(0x151b23),
@@ -127,9 +129,11 @@ impl Colors {
   }
 
   fn light() -> Self {
+    let text = hex(0x1f2328);
+    let rail_hover = hex(0xeaeef2);
     Self {
       background: hex(0xffffff),
-      text: hex(0x1f2328),
+      text,
       text_secondary: hex(0x59636e),
       surface: hex(0xffffff),
       surface_alt: hex(0xf6f8fa),
@@ -137,11 +141,12 @@ impl Colors {
       control_border: hex(0x818b98),
       selected: hex(0xddf4ff),
       explorer_background: hex(0xffffff),
-      explorer_selected: hex(0x0969da),
-      explorer_selected_text: hex(0xffffff),
+      explorer_selected: rail_hover,
+      explorer_selected_text: text,
+      plist_icon: hex(0xbc4c00),
       hover: hex(0xf6f8fa),
       rail: hex(0xf6f8fa),
-      rail_hover: hex(0xeaeef2),
+      rail_hover,
       rail_item_hover: hex(0xd1d9e0),
       rail_text: hex(0x59636e),
       accent: hex(0x0969da),

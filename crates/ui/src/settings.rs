@@ -21,7 +21,7 @@ use gpui_kit::{
 use std::path::PathBuf;
 use vekro_hosting::Accounts;
 use vekro_opencommit::{config_path, Config};
-use vekro_storage::{data_dir, Preferences, ThemeChoice, CODE_FONT_SIZES};
+use vekro_storage::{data_dir, Preferences, ThemeChoice, FONT_SIZES};
 
 /// The settings every window shares. Changing `preferences` and notifying makes each window save them and redraw.
 pub(crate) struct SettingsModel {
@@ -164,6 +164,20 @@ fn choose_projects_folder(cx: &mut App) {
   .detach();
 }
 
+fn font_size_item(title: &'static str, description: &'static str, size: fn(&mut Preferences) -> &mut u32) -> SettingItem {
+  let min = *FONT_SIZES.start() as f64;
+  let max = *FONT_SIZES.end() as f64;
+  SettingItem::new(
+    title,
+    SettingField::number_input(
+      NumberFieldOptions { min, max, step: 1.0 },
+      move |cx: &App| *size(&mut preferences(cx)) as f64,
+      move |value: f64, cx: &mut App| update(cx, |preferences| *size(preferences) = value.round().clamp(min, max) as u32),
+    ),
+  )
+  .description(description)
+}
+
 /// The Settings pages. `fallback_dir` is the projects folder shown while none is chosen.
 pub(crate) fn settings_view(
   fallback_dir: PathBuf,
@@ -202,22 +216,23 @@ pub(crate) fn settings_view(
         .description("System follows the macOS appearance."),
       ),
     ]),
-    SettingPage::new("Editor").default_open(first_page == "Editor").resettable(false).group(
-      SettingGroup::new().title("Code").item(
-        SettingItem::new(
+    SettingPage::new("Editor")
+      .default_open(first_page == "Editor")
+      .resettable(false)
+      .group(
+        SettingGroup::new().title("Code").item(font_size_item(
           "Font size",
-          SettingField::number_input(
-            NumberFieldOptions { min: *CODE_FONT_SIZES.start() as f64, max: *CODE_FONT_SIZES.end() as f64, step: 1.0 },
-            |cx: &App| preferences(cx).code_font_size as f64,
-            |value: f64, cx: &mut App| {
-              let size = (value.round() as i64).clamp(*CODE_FONT_SIZES.start() as i64, *CODE_FONT_SIZES.end() as i64) as u32;
-              update(cx, |preferences| preferences.code_font_size = size);
-            },
-          ),
-        )
-        .description("The size of code in the editor and in a file's changes, in pixels."),
+          "The size of code in the editor and in a file's changes, in pixels.",
+          |preferences| &mut preferences.code_font_size,
+        )),
+      )
+      .group(
+        SettingGroup::new().title("Explorer").item(font_size_item(
+          "Explorer font size",
+          "The size of file and folder names in Explorer, in pixels.",
+          |preferences| &mut preferences.explorer_font_size,
+        )),
       ),
-    ),
     SettingPage::new("Activity bar").default_open(first_page == "Activity bar").resettable(false).group(
       SettingGroup::new()
         .title("Buttons")
