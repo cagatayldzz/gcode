@@ -169,6 +169,11 @@ impl Terminal {
     self.title.clone()
   }
 
+  /// The folder the shell is in, as it last reported it.
+  pub fn directory(&self) -> Option<PathBuf> {
+    self.directory.clone()
+  }
+
   pub fn needs_attention(&self) -> bool {
     self.attention
   }

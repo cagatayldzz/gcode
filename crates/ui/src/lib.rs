@@ -10,6 +10,7 @@ mod commit_view;
 mod components;
 mod connect_account;
 mod connections;
+mod daemon;
 mod diff_view;
 mod editor;
 mod explorer;

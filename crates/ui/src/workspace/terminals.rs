@@ -124,6 +124,34 @@ impl Workspace {
     cx.notify();
   }
 
+  /// Replaces a pane's shell with a new one in the same place and folder, for a shell that hangs or is in a broken state.
+  pub(crate) fn restart_pane(&mut self, target: Entity<Terminal>, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    let directory = target.read(cx).directory().filter(|directory| directory.is_dir()).unwrap_or_else(|| root.clone());
+    let Some(terminal) = self.start_terminal(directory, window, cx) else { return };
+    let replaced = self.terminal_tabs.get_mut(&root).is_some_and(|tabs| tabs.replace(&target, terminal.clone()));
+    if !replaced {
+      window.push_notification(Notification::error("Could not restart this pane: it is not a shell of this project."), cx);
+      return;
+    }
+    self.focus_pane(&terminal, window, cx);
+    cx.notify();
+  }
+
+  /// Restarts the Codex daemon in the background and says how it went.
+  pub(crate) fn restart_codex_daemon(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    window.push_notification(Notification::info("Restarting the Codex daemon…"), cx);
+    let work = cx.background_executor().spawn(async { crate::daemon::restart_codex_daemon() });
+    cx.spawn_in(window, async move |_, cx| {
+      let result = work.await;
+      let _ = cx.update(|window, cx| match result {
+        Ok(()) => window.push_notification(Notification::success("The Codex daemon was restarted. Start Codex again in the pane."), cx),
+        Err(message) => window.push_notification(Notification::error(message), cx),
+      });
+    })
+    .detach();
+  }
+
   /// ⌘D: splits the shell that has the keyboard, side by side.
   pub fn split_right(&mut self, _: &SplitRight, window: &mut Window, cx: &mut Context<Self>) {
     if let (true, Some(terminal)) = (self.terminal_open, self.focused_terminal(window, cx)) {

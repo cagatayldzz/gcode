@@ -49,6 +49,18 @@ impl<T: PartialEq + Clone> Node<T> {
     }
   }
 
+  /// Puts `new` in the place of `target`. `false` when `target` is not here.
+  fn replace(&mut self, target: &T, new: T) -> bool {
+    match self {
+      Node::Pane(pane) if pane == target => {
+        *pane = new;
+        true
+      }
+      Node::Pane(_) => false,
+      Node::Split { first, second, .. } => first.replace(target, new.clone()) || second.replace(target, new),
+    }
+  }
+
   /// Takes `target` out; its sibling takes the place of the split. `None` when it was the only pane.
   fn without(self, target: &T) -> Option<Node<T>> {
     match self {
@@ -108,6 +120,13 @@ impl<T: PartialEq + Clone> Arrangement<T> {
     let id = self.next_id;
     self.active = index;
     self.tabs[index].split(target, new, direction, id)
+  }
+
+  /// Puts `new` in the place of `target`, in the same tab and split, and shows that tab. `false` when `target` is in no tab.
+  pub fn replace(&mut self, target: &T, new: T) -> bool {
+    let Some(index) = self.tabs.iter().position(|tab| tab.contains(target)) else { return false };
+    self.active = index;
+    self.tabs[index].replace(target, new)
   }
 
   /// Takes a pane out. A tab left without panes goes too, and the tab on its right (else on its left) is shown.

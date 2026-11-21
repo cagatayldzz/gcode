@@ -534,9 +534,16 @@ impl Workspace {
             .icon(Icon::empty().path("icons/ellipsis.svg").size_4())
             .tooltip("More")
             .dropdown_menu(move |menu, _, _| {
-              let (tab, vertical, horizontal, close) =
-                (menu_workspace.clone(), menu_workspace.clone(), menu_workspace.clone(), menu_workspace.clone());
-              let (vertical_terminal, horizontal_terminal, close_terminal) = (menu_terminal.clone(), menu_terminal.clone(), menu_terminal.clone());
+              let (tab, vertical, horizontal, restart, daemon, close) = (
+                menu_workspace.clone(),
+                menu_workspace.clone(),
+                menu_workspace.clone(),
+                menu_workspace.clone(),
+                menu_workspace.clone(),
+                menu_workspace.clone(),
+              );
+              let (vertical_terminal, horizontal_terminal, restart_terminal, close_terminal) =
+                (menu_terminal.clone(), menu_terminal.clone(), menu_terminal.clone(), menu_terminal.clone());
               menu
                 .item(
                   PopupMenuItem::new("New Tab").on_click(move |_, window, cx| tab.update(cx, |this, cx| this.new_terminal(&NewTerminal, window, cx))),
@@ -548,6 +555,15 @@ impl Workspace {
                 .item(PopupMenuItem::new("Split Pane Horizontally").on_click(move |_, window, cx| {
                   horizontal.update(cx, |this, cx| this.split_pane(horizontal_terminal.clone(), Direction::Rows, window, cx))
                 }))
+                .separator()
+                .item(
+                  PopupMenuItem::new("Restart Session")
+                    .on_click(move |_, window, cx| restart.update(cx, |this, cx| this.restart_pane(restart_terminal.clone(), window, cx))),
+                )
+                .item(
+                  PopupMenuItem::new("Restart Codex Daemon")
+                    .on_click(move |_, window, cx| daemon.update(cx, |this, cx| this.restart_codex_daemon(window, cx))),
+                )
                 .separator()
                 .item(
                   PopupMenuItem::new("Close")

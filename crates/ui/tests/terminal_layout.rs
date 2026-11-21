@@ -90,3 +90,16 @@ fn closing_a_pane_in_another_tab_keeps_the_shown_tab() {
   assert_eq!((panes(&tabs), tabs.active), (vec![vec![2], vec![3]], 1));
   assert_eq!(tabs.panes().into_iter().copied().collect::<Vec<_>>(), vec![2, 3]);
 }
+
+#[test]
+fn replacing_a_pane_keeps_its_place_in_the_tab_and_the_split() {
+  let mut tabs = Arrangement::new();
+  tabs.add_tab(1);
+  tabs.add_tab(2);
+  assert!(tabs.split(&2, 3, Direction::Rows));
+  tabs.select(0);
+  assert!(tabs.replace(&3, 7));
+  assert_eq!((panes(&tabs), tabs.active), (vec![vec![1], vec![2, 7]], 1), "the new pane took the old one's place and its tab is shown");
+  assert!(!tabs.replace(&99, 8), "a pane that is nowhere cannot be replaced");
+  assert_eq!(panes(&tabs), vec![vec![1], vec![2, 7]]);
+}

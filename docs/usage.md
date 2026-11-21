@@ -111,7 +111,9 @@ running while the editor is shown.
   close it and **+** to open another.
 - **Panes** (`⌘D` splits side by side, `⇧⌘D` one above the other): the shell that has the keyboard is split and the new shell gets
   the keyboard. A tab with several panes gives each a small header with **×** (close), the title of the shell and **⋯** (New Tab,
-  Split Pane Vertically, Split Pane Horizontally, Close). Drag the divider between panes to resize them.
+  Split Pane Vertically, Split Pane Horizontally, Restart Session, Restart Codex Daemon, Close). Drag the divider between panes to
+  resize them. **Restart Session** replaces a hung shell with a new one in the same place and folder. **Restart Codex Daemon**
+  runs `codex app-server daemon restart`, for when Codex keeps showing "Reconnecting to server…"; start Codex again afterwards.
 - **Right-click** in a terminal for New Window `⌘N`, New Tab `⌘T`, Split Pane Vertically `⌘D`, Split Pane Horizontally `⇧⌘D`,
   Copy `⌘C`, Paste `⌘V`, Clear Buffer `⌘K` and Close `⌘W`.
 - **Closing** (`⌘W`, ×, Close): the pane's shell stops; its sibling takes the whole place; a tab left without panes goes; when the
