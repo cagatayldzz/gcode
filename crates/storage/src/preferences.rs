@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 use std::{
-  fs, io,
+  io,
   path::{Path, PathBuf},
 };
 
@@ -126,7 +126,7 @@ impl Default for Preferences {
 impl Preferences {
   /// Reads the settings; a missing or damaged file gives the defaults.
   pub fn load(path: &Path) -> Self {
-    let Some(Value::Object(root)) = fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()) else {
+    let Some(Value::Object(root)) = crate::read_json(path) else {
       return Self::default();
     };
     Self {
@@ -141,9 +141,6 @@ impl Preferences {
   }
 
   pub fn save(&self, path: &Path) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-      fs::create_dir_all(parent)?;
-    }
     let value = json!({
       "theme": self.theme.name(),
       "projects_dir": self.projects_dir.as_ref().map(|path| path.to_string_lossy()),
@@ -154,7 +151,7 @@ impl Preferences {
       "activity_order": self.activity_bar.order,
       "activity_hidden": self.activity_bar.hidden,
     });
-    fs::write(path, serde_json::to_string_pretty(&value)?)
+    crate::write_json(path, &value)
   }
 }
 

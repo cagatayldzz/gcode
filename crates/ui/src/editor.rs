@@ -25,7 +25,7 @@ use std::{
   path::PathBuf,
   rc::Rc,
   sync::Arc,
-  time::Duration,
+  time::{Duration, SystemTime},
 };
 use vekro_index::highlight::{Highlights, Language};
 
@@ -73,6 +73,11 @@ struct ReadyFile {
   painted: bool,
   /// The text uses `\r\n` line endings.
   crlf: bool,
+  /// The modification time and size the file on disk had when its text was read; a save that finds other values knows
+  /// that something else wrote the file.
+  disk: Option<(SystemTime, u64)>,
+  /// A save was refused because the file changed on disk; the next save overwrites it.
+  overwrite_armed: bool,
   _changes: Subscription,
   /// Repaints the status bar when the cursor moves.
   _cursor: Subscription,
@@ -660,7 +665,20 @@ impl EditorPanel {
     });
     let cursor = cx.observe(&state, |_, _, cx| cx.notify());
     let minimap = cx.new(|cx| Minimap::new(state.clone(), language, cx));
-    self.files.insert(path.to_path_buf(), ReadyFile { state, minimap, dirty: false, painted: false, crlf, _changes: changes, _cursor: cursor });
+    self.files.insert(
+      path.to_path_buf(),
+      ReadyFile {
+        state,
+        minimap,
+        dirty: false,
+        painted: false,
+        crlf,
+        disk: disk_stamp(path),
+        overwrite_armed: false,
+        _changes: changes,
+        _cursor: cursor,
+      },
+    );
     self.touch(path);
     self.evict();
   }
@@ -745,7 +763,14 @@ impl EditorPanel {
     if self.replacement_files.contains(path) {
       return Err(io::Error::other("Wait for the project replacement to finish."));
     }
-    fs::write(path, file.state.read(cx).value().to_string())?;
+    let on_disk = disk_stamp(path);
+    if on_disk.is_some() && on_disk != file.disk && !file.overwrite_armed {
+      file.overwrite_armed = true;
+      return Err(io::Error::other("The file changed on disk since it was opened. Save again to overwrite it."));
+    }
+    vekro_storage::write_atomic(path, file.state.read(cx).value().to_string().as_bytes())?;
+    file.disk = disk_stamp(path);
+    file.overwrite_armed = false;
     file.dirty = false;
     cx.notify();
     Ok(true)
@@ -784,6 +809,12 @@ impl EditorPanel {
 
 /// How many spaces one indent is: the editor's default.
 const INDENT_WIDTH: usize = 2;
+
+/// The modification time and the size of a file, or `None` when it cannot be read.
+fn disk_stamp(path: &Path) -> Option<(SystemTime, u64)> {
+  let metadata = fs::metadata(path).ok()?;
+  Some((metadata.modified().ok()?, metadata.len()))
+}
 
 fn display_name(path: &Path) -> String {
   path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())

@@ -14,6 +14,8 @@ apps/vekro ─► app ─► ui ─► terminal
 ```
 
 `terminal`, `git`, `opencommit`, `hosting`, `updater`, `version`, `index` and `storage` never depend on the interface and are tested without a window.
+
+Files Vekro owns (projects, preferences, profiles, window placement, accounts) are written with `vekro_storage::write_json`: a temporary file beside the target replaces it in one step, and the previous file stays as `<name>.bak`. A file that is not valid JSON is set aside as `<name>.corrupt` and the backup is read instead. The editor saves a user's file with `write_atomic` and refuses the first save when the file changed on disk since it was read (the next save overwrites). Tokens reach the Keychain through the standard input of `security -i`, never through a command line.
 `app` depends on `ui` only.
 `visual-check` is a standalone development tool; the application does not depend on it.
 
@@ -58,7 +60,7 @@ apps/vekro ─► app ─► ui ─► terminal
 | `crates/hosting/src/` | `accounts.rs` (`Account`, `Accounts`, `TokenStore`: the macOS Keychain through `security`, or memory), `api.rs` (verify, repositories, pull requests per service), `remote.rs` (`RepoRef`: which repository a remote URL names) |
 | `crates/ui/src/{connections,connect_account,repository_picker,pull_request}.rs` | the accounts list in Settings and the helpers that find the login for a remote; the Connect dialog; the repository list of the Clone tab; the Create pull request dialog |
 | `crates/opencommit/src/` | `config.rs` (`Config`, the `~/.opencommit` file), `prompt.rs` (rules, diff splitting, parsing the answer), `client.rs` (`generate`, the chat API request), `apple.rs` (on-device helper client) |
-| `crates/storage/src/` | `paths.rs` (data directory), `profiles.rs` (`Profile`, `ProfileList`), `projects.rs` (`ProjectList`), `preferences.rs` (`Preferences`) |
+| `crates/storage/src/` | `paths.rs` (data directory), `profiles.rs` (`Profile`, `ProfileList`), `projects.rs` (`ProjectList`), `preferences.rs` (`Preferences`), `files.rs` (`write_atomic`, `write_json`, `read_json`) |
 | `crates/ui/src/profiles.rs`, `crates/ui/src/workspace/profiles.rs` | the profile list shared by the app, opening a window for a profile (`open_window`), New Window and Profiles menu actions, the Profiles page of Settings; adding, renaming and deleting profiles from a window |
 
 ## Window layout

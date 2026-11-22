@@ -57,7 +57,7 @@ pub struct ProjectList {
 impl ProjectList {
   /// Reads the list; a missing or damaged file gives an empty list.
   pub fn load(path: &Path) -> Self {
-    let Some(Value::Object(root)) = fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()) else {
+    let Some(Value::Object(root)) = crate::read_json(path) else {
       return Self::default();
     };
     // A project is a path (older files) or an object.
@@ -104,9 +104,6 @@ impl ProjectList {
   }
 
   pub fn save(&self, path: &Path) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-      fs::create_dir_all(parent)?;
-    }
     let value = json!({
       "projects": self.projects.iter().map(|project| json!({
           "path": project.path.to_string_lossy(),
@@ -119,7 +116,7 @@ impl ProjectList {
       "categories": self.categories.iter().map(|category| json!({ "id": category.id, "name": category.name, "collapsed": category.collapsed })).collect::<Vec<_>>(),
       "active": self.active.as_ref().map(|path| path.to_string_lossy()),
     });
-    fs::write(path, serde_json::to_string_pretty(&value)?)
+    crate::write_json(path, &value)
   }
 
   /// Adds a folder (once) and makes it the active project.

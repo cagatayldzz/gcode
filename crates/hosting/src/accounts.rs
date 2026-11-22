@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use std::{
   collections::HashMap,
-  fs, io,
+  io::{self, Write},
   path::Path,
   process::{Command, Stdio},
   sync::Mutex,
@@ -177,8 +177,8 @@ pub trait TokenStore: Send + Sync {
 
 /// The macOS Keychain, through the `security` program (generic passwords of the service "Vekro").
 ///
-/// `security` takes the password as an argument, so it is visible to other processes of the same user for the moment the
-/// command runs; it is never written to a file or a log.
+/// The password reaches `security -i` through its standard input, so it is never in a command line that other processes
+/// of the user could read, and it is never written to a file or a log.
 ///
 /// A namespace (a profile's) prefixes every key, so the same account connected in two profiles has two tokens.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -187,6 +187,11 @@ pub struct KeychainStore {
 }
 
 const SERVICE: &str = "Vekro";
+
+/// One argument of a `security -i` command line: in double quotes, with the quotes and backslashes escaped.
+fn quote(value: &str) -> String {
+  format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
 
 impl KeychainStore {
   /// A store whose entries belong to `namespace`; `None` is the unprefixed set that existed before namespaces.
@@ -210,15 +215,25 @@ impl TokenStore for KeychainStore {
   }
 
   fn set(&self, key: &str, token: &str) -> Result<(), String> {
-    let key = &self.entry(key);
-    let output = Command::new("security")
-      .args(["add-generic-password", "-U", "-s", SERVICE, "-a", key, "-w", token])
-      .output()
+    if token.chars().any(char::is_control) {
+      return Err("The token contains characters that cannot be stored.".into());
+    }
+    // The command goes through the standard input of `security -i`, never through its arguments, which other processes of
+    // the user can read.
+    let command = format!("add-generic-password -U -s {} -a {} -w {}\n", quote(SERVICE), quote(&self.entry(key)), quote(token));
+    let mut child = Command::new("security")
+      .arg("-i")
+      .stdin(Stdio::piped())
+      .stdout(Stdio::null())
+      .stderr(Stdio::piped())
+      .spawn()
       .map_err(|error| format!("Could not run the security program: {error}"))?;
-    if output.status.success() {
+    let written = child.stdin.take().map(|mut stdin| stdin.write_all(command.as_bytes()));
+    let output = child.wait_with_output().map_err(|error| format!("Could not run the security program: {error}"))?;
+    if output.status.success() && matches!(written, Some(Ok(()))) {
       Ok(())
     } else {
-      Err(format!("Could not save the token in the Keychain: {}", String::from_utf8_lossy(&output.stderr).trim()))
+      Err(format!("Could not save the token in the Keychain: {}", String::from_utf8_lossy(&output.stderr).lines().next().unwrap_or("").trim()))
     }
   }
 
@@ -296,7 +311,7 @@ impl Accounts {
 
   /// Reads the list of the profile with this Keychain namespace.
   pub fn load_in(path: &Path, namespace: Option<String>) -> Self {
-    let Some(Value::Object(root)) = fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()) else {
+    let Some(Value::Object(root)) = vekro_storage::read_json(path) else {
       return Self { items: Vec::new(), namespace };
     };
     let items = root
@@ -319,9 +334,6 @@ impl Accounts {
   }
 
   pub fn save(&self, path: &Path) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-      fs::create_dir_all(parent)?;
-    }
     let value = json!({
       "accounts": self.items.iter().map(|account| json!({
         "provider": account.provider.id(),
@@ -331,7 +343,7 @@ impl Accounts {
         "issue": account.issue,
       })).collect::<Vec<_>>(),
     });
-    fs::write(path, serde_json::to_string_pretty(&value)?)
+    vekro_storage::write_json(path, &value)
   }
 
   /// Adds an account, or replaces the one with the same key (a new token for the same account).

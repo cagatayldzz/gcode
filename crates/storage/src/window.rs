@@ -1,7 +1,7 @@
 use crate::data_dir;
 use serde_json::{json, Value};
 use std::{
-  fs, io,
+  io,
   path::{Path, PathBuf},
 };
 
@@ -51,7 +51,7 @@ impl WindowPlacement {
 
   /// Reads the placement; a missing, damaged or unusable file (a size that is not a real size) gives `None`.
   pub fn load(path: &Path) -> Option<Self> {
-    let Value::Object(root) = fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok())? else { return None };
+    let Value::Object(root) = crate::read_json(path)? else { return None };
     let number = |key: &str| root.get(key).and_then(Value::as_f64).map(|value| value as f32).filter(|value| value.is_finite());
     let placement = Self {
       x: number("x")?,
@@ -64,10 +64,7 @@ impl WindowPlacement {
   }
 
   pub fn save(&self, path: &Path) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-      fs::create_dir_all(parent)?;
-    }
     let value = json!({ "x": self.x, "y": self.y, "width": self.width, "height": self.height, "mode": self.mode.name() });
-    fs::write(path, serde_json::to_string_pretty(&value)?)
+    crate::write_json(path, &value)
   }
 }

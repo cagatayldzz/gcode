@@ -76,7 +76,7 @@ impl ProfileList {
 
   /// Reads the list; a missing or damaged file gives the default profile alone. The default profile is always in the list.
   pub fn load(path: &Path) -> Self {
-    let Some(Value::Object(root)) = fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()) else {
+    let Some(Value::Object(root)) = crate::read_json(path) else {
       return Self::default();
     };
     let mut profiles: Vec<Profile> = Vec::new();
@@ -97,14 +97,11 @@ impl ProfileList {
   }
 
   pub fn save(&self, path: &Path) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-      fs::create_dir_all(parent)?;
-    }
     let value = json!({
       "profiles": self.profiles.iter().map(|profile| json!({ "id": profile.id, "name": profile.name })).collect::<Vec<_>>(),
       "last": self.last,
     });
-    fs::write(path, serde_json::to_string_pretty(&value)?)
+    crate::write_json(path, &value)
   }
 
   pub fn get(&self, id: &str) -> Option<&Profile> {

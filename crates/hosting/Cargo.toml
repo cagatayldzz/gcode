@@ -16,6 +16,7 @@ doctest = false
 [dependencies]
 serde_json.workspace = true
 ureq.workspace = true
+vekro-storage.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

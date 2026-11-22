@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The GPUI crates are checked by the release workflow.
+  # The GPUI crates need macOS; the release workflow lints and tests the whole workspace.
   core:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -33,3 +33,18 @@ jobs:
         run: cargo clippy --locked -p vekro-terminal -p vekro-git -p vekro-storage -p vekro-opencommit -p vekro-hosting -p vekro-version -p vekro-updater -p vekro-index --all-targets -- -D warnings
       - name: Test
         run: cargo test --locked -p vekro-terminal -p vekro-git -p vekro-storage -p vekro-opencommit -p vekro-hosting -p vekro-version -p vekro-updater -p vekro-index
+
+  interface:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: interface
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check the interface crates
+        run: cargo check --locked -p vekro-ui -p vekro-app
+      - name: Open and draw the window headlessly
+        run: cargo test --locked -p vekro-ui --test window_render
