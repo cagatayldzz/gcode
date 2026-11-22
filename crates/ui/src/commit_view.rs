@@ -14,14 +14,17 @@ use gpui_kit::{
     diff::DiffFile,
     h_flex,
     label::Label,
-    scroll::{ScrollableElement as _, Scrollbar, ScrollbarAxis},
+    scroll::{Scrollbar, ScrollbarAxis, ScrollbarMode},
     spinner::Spinner,
-    v_flex, ActiveTheme as _, Icon, Sizable as _,
+    v_flex, v_virtual_list, ActiveTheme as _, Icon, Sizable as _, VirtualListScrollHandle,
   },
   *,
 };
-use std::path::PathBuf;
+use std::{path::PathBuf, rc::Rc};
 use vekro_git::{ChangeKind, CommitDetail};
+
+/// The fixed height of a changed file's line: the virtualized list needs every row's height before it draws.
+const FILE_ROW_HEIGHT: Pixels = px(32.);
 
 /// The width of the list of changed files.
 const FILES_WIDTH: Pixels = px(280.);
@@ -49,6 +52,9 @@ pub(crate) struct CommitView {
   /// The message box is unfolded to show more of the message, and the details of the commit are written out.
   message_unfolded: bool,
   message_scroll: ScrollHandle,
+  /// The scroll position and row sizes of the list of changed files, which only builds the lines in view.
+  files_scroll: VirtualListScrollHandle,
+  file_sizes: Rc<Vec<Size<Pixels>>>,
 }
 
 impl CommitView {
@@ -63,6 +69,8 @@ impl CommitView {
       epoch: 0,
       message_unfolded: false,
       message_scroll: ScrollHandle::new(),
+      files_scroll: VirtualListScrollHandle::new(),
+      file_sizes: Rc::new(Vec::new()),
     }
   }
 
@@ -90,6 +98,8 @@ impl CommitView {
         match result {
           Ok(detail) => {
             let first = detail.files.first().map(|change| change.path.clone());
+            this.file_sizes = Rc::new(vec![size(px(0.), FILE_ROW_HEIGHT); detail.files.len()]);
+            this.files_scroll.set_offset(point(px(0.), px(0.)));
             this.detail = Load::Ready(detail);
             match first {
               Some(file) => this.select_file(file, cx),
@@ -128,7 +138,7 @@ impl CommitView {
     .detach();
   }
 
-  fn file_row(&self, change: &vekro_git::Change, cx: &mut Context<Self>) -> impl IntoElement {
+  fn file_row(&self, change: &vekro_git::Change, width: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let theme = cx.theme().clone();
     let file = change.path.clone();
@@ -144,9 +154,13 @@ impl CommitView {
     };
     h_flex()
       .id(SharedString::from(format!("commit-file-{}", file.display())))
+      .when(width.is_zero(), |row| row.w_full())
+      .when(!width.is_zero(), |row| row.w(width))
+      .min_w_0()
+      .overflow_hidden()
+      .h(FILE_ROW_HEIGHT)
       .gap_1p5()
       .px_3()
-      .py_1()
       .items_center()
       .border_b_1()
       .border_color(row_divider(&palette))
@@ -336,7 +350,30 @@ impl Render for CommitView {
           .border_color(palette.border),
       )
       .child(
-        v_flex().id("commit-files").flex_1().min_h_0().overflow_y_scrollbar().children(detail.files.iter().map(|change| self.file_row(change, cx))),
+        div()
+          .relative()
+          .flex_1()
+          .min_h_0()
+          .child(
+            v_virtual_list(cx.entity(), "commit-files", self.file_sizes.clone(), |this, range, _, cx| {
+              let Load::Ready(detail) = &this.detail else {
+                return Vec::new();
+              };
+              let files: Vec<vekro_git::Change> = detail.files.get(range).map(<[vekro_git::Change]>::to_vec).unwrap_or_default();
+              let width = this.files_scroll.bounds().size.width;
+              files.iter().map(|change| this.file_row(change, width, cx)).collect()
+            })
+            .track_scroll(&self.files_scroll),
+          )
+          .child(
+            div().absolute().inset_0().child(
+              Scrollbar::new(&self.files_scroll)
+                .id("commit-files-scrollbar")
+                .axis(ScrollbarAxis::Vertical)
+                .mode(ScrollbarMode::Scrolling)
+                .viewport_from_layout(),
+            ),
+          ),
       );
     let diff = match &self.diff {
       Load::Loading => spinner(),

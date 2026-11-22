@@ -3,7 +3,19 @@
 use super::*;
 use gpui_kit::component::avatar::Avatar;
 
+/// The fixed height of a line in the Changes list: the virtualized list needs every row's height before it draws.
+const CHANGE_ROW_HEIGHT: Pixels = px(32.);
+
 impl Workspace {
+  /// The row sizes of the Changes list, rebuilt only when the number of files changes.
+  fn change_sizes(&self, count: usize) -> Rc<Vec<Size<Pixels>>> {
+    let mut cached = self.change_sizes.borrow_mut();
+    if cached.len() != count {
+      *cached = Rc::new(vec![size(px(0.), CHANGE_ROW_HEIGHT); count]);
+    }
+    cached.clone()
+  }
+
   pub(super) fn render_favorite_projects(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
     let palette = colors(cx);
     let workspace = cx.entity();
@@ -224,11 +236,113 @@ impl Workspace {
     )
   }
 
-  pub(super) fn render_git(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+  /// One line of the Changes list: a checkbox, the file name with its folder, and the kind of change. Its height is fixed
+  /// ([`CHANGE_ROW_HEIGHT`]) because the list is virtualized, and its width is the list's own: a virtual list lays its rows out
+  /// at their content width, so a percentage would leave short rows narrow and long ones unclipped.
+  fn change_row(&self, change: &vekro_git::Change, width: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
+    let workspace = cx.entity();
+    let root = self.projects.active.clone().unwrap_or_default();
+    let file = change.path.clone();
+    let selected = self.selected_change.as_ref() == Some(&change.path);
+    let included = !self.excluded.contains(&change.path);
+    let name = change.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let folder = change.path.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
+    h_flex()
+      .id(SharedString::from(format!("change-row-{}", change.path.display())))
+      .when(width.is_zero(), |row| row.w_full())
+      .when(!width.is_zero(), |row| row.w(width))
+      .min_w_0()
+      .overflow_hidden()
+      .h(CHANGE_ROW_HEIGHT)
+      .gap_1p5()
+      .px_3()
+      .border_b_1()
+      .border_color(palette.border)
+      .items_center()
+      .when(selected, |row| row.bg(palette.selected))
+      .hover(|row| row.bg(palette.hover))
+      .child(Checkbox::new(SharedString::from(format!("include-{}", change.path.display()))).checked(included).on_click(cx.listener({
+        let file = file.clone();
+        move |this, checked: &bool, _, cx| {
+          if *checked {
+            this.excluded.remove(&file);
+          } else {
+            this.excluded.insert(file.clone());
+          }
+          cx.notify();
+        }
+      })))
+      .child(
+        h_flex()
+          .id(SharedString::from(format!("change-{}", change.path.display())))
+          .flex_1()
+          .min_w_0()
+          .gap_1p5()
+          .items_center()
+          .cursor_pointer()
+          .child(
+            h_flex()
+              .flex_1()
+              .min_w_0()
+              .gap_2()
+              .child(Label::new(name).min_w_0().font_weight(FontWeight::MEDIUM).truncate())
+              .when_some(folder, |row, folder| {
+                row.child(Label::new(folder).flex_1().min_w_0().text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).truncate())
+              }),
+          )
+          .child(Icon::empty().path(change_kind_icon(change.kind)).size_4().flex_none().text_color(kind_color(change.kind, &palette)))
+          .on_click(cx.listener({
+            let file = file.clone();
+            // A double click opens the file itself, in the editor with the Explorer; one click shows its diff.
+            move |this, event: &ClickEvent, window, cx| {
+              if event.click_count() >= 2 {
+                this.open_change_in_editor(&file, window, cx);
+              } else {
+                this.open_change(file.clone(), cx);
+              }
+            }
+          })),
+      )
+      .context_menu({
+        let (workspace, deleted) = (workspace.clone(), change.kind == vekro_git::ChangeKind::Deleted);
+        let root = root.clone();
+        let busy = self.committing || self.discarding;
+        move |menu, _, _| {
+          let (open_workspace, open_file) = (workspace.clone(), file.clone());
+          let (discard_workspace, discard_file) = (workspace.clone(), file.clone());
+          let (finder_root, finder_file) = (root.clone(), file.clone());
+          let copy_path = file.to_string_lossy().into_owned();
+          menu
+            .item(
+              PopupMenuItem::new("Open in Editor")
+                .icon(Icon::empty().path("icons/file-pen-line.svg"))
+                .disabled(deleted)
+                .on_click(move |_, window, cx| open_workspace.update(cx, |this, cx| this.open_change_in_editor(&open_file, window, cx))),
+            )
+            .item(
+              PopupMenuItem::new(if deleted { "Open Containing Folder" } else { "Show in Finder" })
+                .icon(Icon::empty().path("icons/folder-open.svg"))
+                .on_click(move |_, window, cx| Self::show_change_in_finder(finder_root.clone(), finder_file.clone(), window, cx)),
+            )
+            .item(
+              PopupMenuItem::new("Copy Relative Path")
+                .icon(Icon::empty().path("icons/copy.svg"))
+                .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_path.clone()))),
+            )
+            .separator()
+            .item(PopupMenuItem::new("Discard Changes…").icon(Icon::empty().path("icons/trash.svg")).disabled(busy).on_click(move |_, window, cx| {
+              discard_workspace.update(cx, |this, cx| this.confirm_discard_changes(vec![discard_file.clone()], window, cx))
+            }))
+        }
+      })
+  }
+
+  pub(super) fn render_git(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let palette = colors(cx);
     let git = self.git.as_ref()?;
-    let root = self.projects.active.as_ref()?;
+    self.projects.active.as_ref()?;
     let changed = match git.changed() {
       0 => "No changes".to_string(),
       1 => "1 changed file".to_string(),
@@ -236,96 +350,16 @@ impl Workspace {
     };
     let chosen = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).count();
     let workspace = cx.entity();
-    let changes_list =
-      v_flex().id("git-changes").size_full().overflow_y_scroll().track_scroll(&self.changes_scroll).children(git.changes.iter().map(|change| {
-        let file = change.path.clone();
-        let selected = self.selected_change.as_ref() == Some(&change.path);
-        let included = !self.excluded.contains(&change.path);
-        let name = change.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-        let folder = change.path.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
-        h_flex()
-          .id(SharedString::from(format!("change-row-{}", change.path.display())))
-          .gap_1p5()
-          .px_3()
-          .py_1()
-          .border_b_1()
-          .border_color(palette.border)
-          .items_center()
-          .when(selected, |row| row.bg(palette.selected))
-          .hover(|row| row.bg(palette.hover))
-          .child(Checkbox::new(SharedString::from(format!("include-{}", change.path.display()))).checked(included).on_click(cx.listener({
-            let file = file.clone();
-            move |this, checked: &bool, _, cx| {
-              if *checked {
-                this.excluded.remove(&file);
-              } else {
-                this.excluded.insert(file.clone());
-              }
-              cx.notify();
-            }
-          })))
-          .child(
-            h_flex()
-              .id(SharedString::from(format!("change-{}", change.path.display())))
-              .flex_1()
-              .min_w_0()
-              .gap_1p5()
-              .items_center()
-              .cursor_pointer()
-              .child(
-                h_flex().flex_1().min_w_0().gap_2().child(Label::new(name).min_w_0().font_weight(FontWeight::MEDIUM).truncate()).when_some(
-                  folder,
-                  |row, folder| {
-                    row.child(Label::new(folder).flex_1().min_w_0().text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).truncate())
-                  },
-                ),
-              )
-              .child(Icon::empty().path(change_kind_icon(change.kind)).size_4().flex_none().text_color(kind_color(change.kind, &palette)))
-              .on_click(cx.listener({
-                let file = file.clone();
-                // A double click opens the file itself, in the editor with the Explorer; one click shows its diff.
-                move |this, event: &ClickEvent, window, cx| {
-                  if event.click_count() >= 2 {
-                    this.open_change_in_editor(&file, window, cx);
-                  } else {
-                    this.open_change(file.clone(), cx);
-                  }
-                }
-              })),
-          )
-          .context_menu({
-            let (workspace, deleted) = (workspace.clone(), change.kind == vekro_git::ChangeKind::Deleted);
-            let root = root.clone();
-            let busy = self.committing || self.discarding;
-            move |menu, _, _| {
-              let (open_workspace, open_file) = (workspace.clone(), file.clone());
-              let (discard_workspace, discard_file) = (workspace.clone(), file.clone());
-              let (finder_root, finder_file) = (root.clone(), file.clone());
-              let copy_path = file.to_string_lossy().into_owned();
-              menu
-                .item(
-                  PopupMenuItem::new("Open in Editor")
-                    .icon(Icon::empty().path("icons/file-pen-line.svg"))
-                    .disabled(deleted)
-                    .on_click(move |_, window, cx| open_workspace.update(cx, |this, cx| this.open_change_in_editor(&open_file, window, cx))),
-                )
-                .item(
-                  PopupMenuItem::new(if deleted { "Open Containing Folder" } else { "Show in Finder" })
-                    .icon(Icon::empty().path("icons/folder-open.svg"))
-                    .on_click(move |_, window, cx| Self::show_change_in_finder(finder_root.clone(), finder_file.clone(), window, cx)),
-                )
-                .item(
-                  PopupMenuItem::new("Copy Relative Path")
-                    .icon(Icon::empty().path("icons/copy.svg"))
-                    .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_path.clone()))),
-                )
-                .separator()
-                .item(PopupMenuItem::new("Discard Changes…").icon(Icon::empty().path("icons/trash.svg")).disabled(busy).on_click(
-                  move |_, window, cx| discard_workspace.update(cx, |this, cx| this.confirm_discard_changes(vec![discard_file.clone()], window, cx)),
-                ))
-            }
-          })
-      }));
+    // Only the rows in view are built: a project can have thousands of changed files.
+    let changes_list = v_virtual_list(workspace.clone(), "git-changes", self.change_sizes(git.changes.len()), |this, range, _, cx| {
+      let Some(git) = this.git.as_ref() else {
+        return Vec::new();
+      };
+      let changes: Vec<vekro_git::Change> = git.changes.get(range).map(<[vekro_git::Change]>::to_vec).unwrap_or_default();
+      let width = this.changes_scroll.bounds().size.width;
+      changes.iter().map(|change| this.change_row(change, width, cx)).collect()
+    })
+    .track_scroll(&self.changes_scroll);
     let summary_filled = !self.commit_summary.read(cx).value().trim().is_empty();
     let label = match chosen {
       1 => format!("Commit 1 file to {}", git.branch),

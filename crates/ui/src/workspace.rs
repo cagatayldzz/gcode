@@ -48,12 +48,12 @@ use gpui_kit::{
     status_bar::StatusBar,
     tab::{Tab, TabBar},
     tooltip::Tooltip,
-    v_flex, ActiveTheme, Disableable as _, Icon, IconName, Sizable as _, TitleBar, WindowExt as _,
+    v_flex, v_virtual_list, ActiveTheme, Disableable as _, Icon, IconName, Sizable as _, TitleBar, VirtualListScrollHandle, WindowExt as _,
   },
   *,
 };
 use std::{
-  cell::Cell,
+  cell::{Cell, RefCell},
   collections::{HashMap, HashSet},
   ops::Range,
   path::{Path, PathBuf},
@@ -365,7 +365,9 @@ pub struct Workspace {
   /// How many commits the History view asks for now, and its scroll position (to load more near the end).
   history_limit: usize,
   history_scroll: ScrollHandle,
-  changes_scroll: ScrollHandle,
+  changes_scroll: VirtualListScrollHandle,
+  /// Row sizes of the virtualized Changes list.
+  change_sizes: RefCell<Rc<Vec<Size<Pixels>>>>,
   /// Makes the open project's index ready in the background; a newer project replaces (cancels) it.
   index_task: Task<()>,
   /// The window is the one in front, and what the Repository menu said last.
@@ -518,7 +520,8 @@ impl Workspace {
       history_epoch: 0,
       history_limit: HISTORY_PAGE,
       history_scroll: ScrollHandle::new(),
-      changes_scroll: ScrollHandle::new(),
+      changes_scroll: VirtualListScrollHandle::new(),
+      change_sizes: RefCell::new(Rc::new(Vec::new())),
       index_task: Task::ready(()),
       window_active: true,
       menu_host: None,
