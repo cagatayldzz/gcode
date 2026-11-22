@@ -11,7 +11,6 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
     button::{Button, ButtonVariants as _},
-    diff::DiffFile,
     h_flex,
     label::Label,
     spinner::Spinner,
@@ -161,7 +160,7 @@ impl ChangeView {
             this.diff = match image {
               Ok(Some(image)) if image.original.is_some() || image.current.is_some() => Load::Ready(ChangeDiff::Image(image)),
               Err(error) => Load::Failed(format!("Could not preview the image: {error}").into()),
-              _ => match DiffFile::parse(&patch) {
+              _ => match crate::diff_view::parse_patch(&patch) {
                 Ok(files) if files.is_empty() => Load::Failed("This file has no text changes to show.".into()),
                 Ok(files) => Load::Ready(ChangeDiff::Text(ShownDiff::new(files, &patch, cx))),
                 Err(error) => Load::Failed(format!("Could not read the changes: {error}").into()),

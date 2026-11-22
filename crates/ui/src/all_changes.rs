@@ -69,7 +69,7 @@ impl AllChanges {
       if previous.as_deref() == Some(patch.as_str()) {
         return Ok(None);
       }
-      let files = DiffFile::parse(&patch).map_err(|error| error.to_string())?;
+      let files = crate::diff_view::parse_patch(&patch)?;
       let line_probes = line_probes(&patch, &files);
       Ok::<_, String>(Some((patch, files, line_probes)))
     });

@@ -11,7 +11,6 @@ use gpui_kit::{
     avatar::Avatar,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
-    diff::DiffFile,
     h_flex,
     label::Label,
     scroll::{Scrollbar, ScrollbarAxis, ScrollbarMode},
@@ -127,7 +126,7 @@ impl CommitView {
         if this.epoch != epoch {
           return;
         }
-        this.diff = match result.and_then(|patch| DiffFile::parse(&patch).map(|files| (files, patch)).map_err(|error| error.to_string())) {
+        this.diff = match result.and_then(|patch| crate::diff_view::parse_patch(&patch).map(|files| (files, patch))) {
           Ok((files, _)) if files.is_empty() => Load::Failed("This file has no text changes to show.".into()),
           Ok((files, patch)) => Load::Ready(ShownDiff::new(files, &patch, cx)),
           Err(message) => Load::Failed(message.into()),

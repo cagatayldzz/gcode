@@ -1,11 +1,35 @@
 //! A diff as the Changes and History views show it: the Kit `Diff` with whole-line red and green backgrounds from the
 //! theme's palette (`Colors::diff_added`, `Colors::diff_removed`), like GitHub Desktop, instead of a tint of the status colors.
 
-use crate::theme::colors;
+use crate::{editor::language_for, theme::colors};
 use gpui_kit::{
-  component::diff::{Diff, DiffDecoration, DiffFile, DiffLineRange, DiffMode, DiffSide, DiffState},
+  component::{
+    diff::{Diff, DiffDecoration, DiffFile, DiffLineRange, DiffMode, DiffSide, DiffState},
+    highlighter::LanguageRegistry,
+  },
   *,
 };
+use std::path::Path;
+
+/// Parses a patch into files whose syntax is colored like the editor's: the Kit detects the language from the extension alone,
+/// so the files it does not know (`Cargo.lock`, `.zsh`, `.yml`, ...) get the language the editor uses for them.
+pub(crate) fn parse_patch(patch: &str) -> Result<Vec<DiffFile>, String> {
+  let files = DiffFile::parse(patch).map_err(|error| error.to_string())?;
+  Ok(files.into_iter().map(with_editor_language).collect())
+}
+
+fn with_editor_language(file: DiffFile) -> DiffFile {
+  if file.language() != "text" {
+    return file;
+  }
+  let path = Path::new(file.path().as_ref());
+  let language = if path.file_name().is_some_and(|name| name == "Cargo.lock") { "toml" } else { language_for(path) };
+  if language != "text" && LanguageRegistry::singleton().language(language).is_some() {
+    file.with_language(language)
+  } else {
+    file
+  }
+}
 
 /// A run of lines the patch adds or removes.
 struct ChangedRange {

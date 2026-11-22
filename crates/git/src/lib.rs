@@ -637,10 +637,22 @@ pub fn fetch(path: &Path, credentials: Option<&Credentials>, mut on_progress: im
   with_login(credentials, |credentials| finish(run_git(path, &["fetch"], credentials, &mut on_progress)?, "git fetch failed."))
 }
 
-/// Brings in the remote's new commits with `git pull --ff-only`: it only moves the branch forward, never creates a merge, and
-/// refuses (with git's message) when the branches have diverged or local changes are in the way.
+/// Brings in the remote's new commits with `git pull`, like GitHub Desktop: a branch that only fell behind moves forward, and one
+/// that has commits of its own gets a merge commit. The user's `pull.rebase` setting is honored; without one the pull merges,
+/// instead of asking git to choose. A merge that conflicts stays in progress (see [`read_merge`]) for the conflict resolver, and
+/// the error says so.
 pub fn pull(path: &Path, credentials: Option<&Credentials>, mut on_progress: impl FnMut(&str)) -> Result<String, String> {
-  with_login(credentials, |credentials| finish(run_git(path, &["pull", "--ff-only"], credentials, &mut on_progress)?, "git pull failed."))
+  let rebase_configured =
+    Repository::discover(path).ok().and_then(|repository| repository.config().ok()).is_some_and(|config| config.get_entry("pull.rebase").is_ok());
+  let arguments: &[&str] = if rebase_configured { &["pull"] } else { &["pull", "--no-rebase", "--no-edit"] };
+  with_login(credentials, |credentials| {
+    let result = run_git(path, arguments, credentials, &mut on_progress)?;
+    // git reports the conflicting files on its standard output, which is not read: the state of the repository says it.
+    if !result.0 && Repository::discover(path).is_ok_and(|repository| repository.state() == git2::RepositoryState::Merge) {
+      return Err("The pull has merge conflicts. Resolve them to finish the merge, or abort it.".into());
+    }
+    finish(result, "git pull failed.")
+  })
 }
 
 /// Whether a remote branch already has the commit.
