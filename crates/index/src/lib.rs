@@ -2,10 +2,12 @@
 //!
 //! - [`ProjectIndex`]: every file the project's Git ignore rules let through, kept on disk and checked with a few `stat` calls
 //!   when the project is opened again;
+//! - [`fuzzy`]: the matching of a few typed letters against file paths, for opening a file quickly;
 //! - [`highlight`]: the colors of `.env` and `.gitignore` files, worked out once for the whole text as runs that cover it.
 //!
 //! The crate knows nothing of the interface: roles stand for colors, and the interface maps them to its theme.
 
+pub mod fuzzy;
 pub mod highlight;
 mod index;
 

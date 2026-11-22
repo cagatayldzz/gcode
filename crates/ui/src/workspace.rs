@@ -78,6 +78,7 @@ mod git;
 mod helpers;
 mod profiles;
 mod projects;
+mod quick_open;
 mod render_git;
 mod render_menus;
 mod render_panels;
@@ -775,6 +776,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::edit_profiles))
       .on_action(cx.listener(Self::check_for_updates))
       .on_action(cx.listener(Self::search_project))
+      .on_action(cx.listener(Self::go_to_file))
       .on_action(cx.listener(Self::open_search_results))
       .on_action(cx.listener(Self::new_terminal))
       .on_action(cx.listener(Self::toggle_terminal))

@@ -25,6 +25,7 @@ mod project_search;
 mod project_settings;
 mod project_setup;
 mod pull_request;
+mod quick_open;
 mod repository_picker;
 mod selection;
 mod settings;
@@ -50,6 +51,8 @@ actions!(
     OpenSettings,
     CheckForUpdates,
     SearchProject,
+    // Go to file: the dialog that opens a file by a few letters of its path.
+    GoToFile,
     OpenSearchResults,
     NewTerminal,
     SaveFile,

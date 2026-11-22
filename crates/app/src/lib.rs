@@ -2,8 +2,8 @@
 
 use gpui_kit::*;
 use vekro_ui::{
-  Assets, ClearBuffer, CloseTab, CopySelection, MentionProjects, NewTerminal, OpenSearchResults, OpenSettings, PasteClipboard, Quit, SaveFile,
-  SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleTerminal, ViewOnHost,
+  Assets, ClearBuffer, CloseTab, CopySelection, GoToFile, MentionProjects, NewTerminal, OpenSearchResults, OpenSettings, PasteClipboard, Quit,
+  SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleTerminal, ViewOnHost,
 };
 
 /// Starts the application and runs it until it quits.
@@ -22,6 +22,7 @@ pub fn run() {
       KeyBinding::new("cmd-q", Quit, None),
       KeyBinding::new("cmd-,", OpenSettings, None),
       KeyBinding::new("cmd-t", NewTerminal, None),
+      KeyBinding::new("cmd-p", GoToFile, None),
       KeyBinding::new("cmd-s", SaveFile, None),
       KeyBinding::new("cmd-w", CloseTab, None),
       KeyBinding::new("cmd-j", ToggleTerminal, None),

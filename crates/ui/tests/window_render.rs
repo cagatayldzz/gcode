@@ -141,3 +141,16 @@ fn the_project_settings_view_opens_and_closes_from_the_activity_bar(cx: &mut Tes
   toggle_project_settings(cx, handle);
   assert!(!settings_view_is_open(cx, handle), "the button closes the settings view again");
 }
+
+#[gpui_kit::test]
+fn go_to_file_opens_and_draws_its_list(cx: &mut TestAppContext) {
+  let (data, handle) = open_window_with_project(cx);
+  let project = data.path().join("project");
+  fs::create_dir_all(project.join("src")).expect("create a folder");
+  fs::write(project.join("src/main.rs"), "fn main() {}\n").expect("write a file");
+  cx.update_window(handle, |_, window, cx| window.dispatch_action(Box::new(vekro_ui::GoToFile), cx)).expect("dispatch");
+  // The index is read in the background; the list is drawn once with nothing and once with the files.
+  draw_every_window(cx);
+  draw_every_window(cx);
+  assert_eq!(cx.windows().len(), 1);
+}
