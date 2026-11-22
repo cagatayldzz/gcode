@@ -265,6 +265,7 @@ pub(crate) struct EditorPanel {
   /// A few lines of code drawn out of sight so the first real file of a language does not pay for its highlighter.
   warmup: Option<Entity<EditorState>>,
   _warmup_task: Task<()>,
+  _refresh_task: Task<()>,
   /// The editor of a file the pointer rests on, drawn out of sight so its highlighting is done before the click.
   preview: Option<Entity<EditorState>>,
   preview_epoch: u64,
@@ -305,6 +306,48 @@ impl EditorPanel {
         cx.notify();
       });
     });
+    let refresh_task = cx.spawn_in(window, async move |this, cx| loop {
+      cx.background_executor().timer(Duration::from_secs(2)).await;
+      let Ok(files) = this.update(cx, |this, cx| {
+        this
+          .files
+          .iter()
+          .filter(|(_, file)| !file.dirty)
+          .map(|(path, file)| (path.clone(), file.state.entity_id(), file.state.read(cx).value().to_string()))
+          .collect::<Vec<_>>()
+      }) else {
+        break;
+      };
+      let work = cx.background_executor().spawn(async move {
+        files
+          .into_iter()
+          .filter_map(|(path, id, original)| {
+            let metadata = fs::metadata(&path).ok()?;
+            if metadata.len() > MAX_FILE_BYTES {
+              return None;
+            }
+            let text = fs::read_to_string(&path).ok()?;
+            (text != original).then_some((path, id, original, text))
+          })
+          .collect::<Vec<_>>()
+      });
+      let changes = work.await;
+      if this
+        .update_in(cx, |this, window, cx| {
+          for (path, id, original, text) in changes {
+            if this.files.get(&path).is_some_and(|file| !file.dirty && file.state.entity_id() == id && file.state.read(cx).value() == original) {
+              let cursor = this.files[&path].state.read(cx).cursor_position();
+              this.install_text(&path, text, window, cx);
+              this.files[&path].state.update(cx, |state, cx| state.set_cursor_position(cursor, window, cx));
+              cx.notify();
+            }
+          }
+        })
+        .is_err()
+      {
+        break;
+      }
+    });
     Self {
       tabs: Tabs::default(),
       read_only,
@@ -315,6 +358,7 @@ impl EditorPanel {
       recent: Vec::new(),
       warmup: None,
       _warmup_task: warmup_task,
+      _refresh_task: refresh_task,
       preview: None,
       preview_epoch: 0,
       focus_handle: cx.focus_handle(),
