@@ -557,19 +557,29 @@ impl Render for ProjectSettings {
             .viewport_from_layout(),
         ),
       );
-    v_flex().size_full().bg(palette.background).text_size(FONT_SIZE).child(h_flex().flex_1().min_h_0().child(sidebar).child(body)).child(
-      h_flex()
-        .justify_end()
-        .gap_2()
-        .px_6()
-        .py_3()
-        .border_t_1()
-        .border_color(palette.border)
-        .bg(palette.rail)
-        .child(Button::new("settings-cancel").label(if dirty { "Discard" } else { "Close" }).on_click(cx.listener(|_, _, _, cx| {
-          cx.emit(ProjectSettingsEvent::Close);
-        })))
-        .child(Button::new("settings-save").label("Save").primary().disabled(!dirty).on_click(cx.listener(|this, _, _, cx| this.save(cx)))),
-    )
+    let footer = h_flex()
+      .items_center()
+      .gap_3()
+      .px_8()
+      .py_3()
+      .border_t_1()
+      .border_color(palette.border)
+      .bg(palette.background)
+      .child(
+        Label::new(if dirty { "You have unsaved changes" } else { "All changes saved" })
+          .text_size(FONT_SIZE_SM)
+          .text_color(palette.text_secondary)
+          .flex_1(),
+      )
+      .child(Button::new("settings-cancel").ghost().label(if dirty { "Discard" } else { "Close" }).on_click(cx.listener(|_, _, _, cx| {
+        cx.emit(ProjectSettingsEvent::Close);
+      })))
+      .child(Button::new("settings-save").label("Save changes").primary().disabled(!dirty).on_click(cx.listener(|this, _, _, cx| this.save(cx))));
+    h_flex()
+      .size_full()
+      .bg(palette.background)
+      .text_size(FONT_SIZE)
+      .child(sidebar)
+      .child(v_flex().flex_1().min_w_0().h_full().child(body).child(footer))
   }
 }

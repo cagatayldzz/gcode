@@ -274,15 +274,23 @@ pub(super) fn kind_color(kind: vekro_git::ChangeKind, palette: &crate::theme::Co
 /// One entry of a shortcut bar: what a command does, with the keys that run it as the keymap has them now. An unbound command
 /// shows no keys.
 pub(super) fn shortcut_hint(label: &'static str, action: &dyn Action, window: &Window) -> AnyElement {
-  h_flex().gap_1p5().items_center().child(label).children(Kbd::binding_for_action(action, Some("Terminal"), window)).into_any_element()
+  h_flex()
+    .gap_1p5()
+    .items_center()
+    .flex_none()
+    .child(label)
+    .children(Kbd::binding_for_action(action, Some("Terminal"), window).map(|key| key.appearance(true)))
+    .into_any_element()
 }
 
 /// The info bar under the terminals and the AI view: the shortcuts that work there.
 pub(super) fn shortcut_bar(hints: Vec<AnyElement>, cx: &App) -> StatusBar {
   let palette = colors(cx);
-  hints
-    .into_iter()
-    .fold(StatusBar::new().bg(palette.surface_alt).border_color(palette.border).text_color(palette.text_secondary), |bar, hint| bar.left(hint))
+  StatusBar::new()
+    .bg(palette.surface_alt)
+    .border_color(palette.border)
+    .text_color(palette.text_secondary)
+    .left(h_flex().items_center().gap_3().px_1().children(hints))
 }
 
 /// How far one step of a push, pull or fetch has got, from the percentage in git's progress line: the steps weigh differently
