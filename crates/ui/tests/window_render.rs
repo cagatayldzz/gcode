@@ -154,3 +154,12 @@ fn go_to_file_opens_and_draws_its_list(cx: &mut TestAppContext) {
   draw_every_window(cx);
   assert_eq!(cx.windows().len(), 1);
 }
+
+#[gpui_kit::test]
+fn the_command_palette_opens_and_draws_its_list(cx: &mut TestAppContext) {
+  let (_data, handle) = open_window_with_project(cx);
+  cx.update_window(handle, |_, window, cx| window.dispatch_action(Box::new(vekro_ui::OpenCommandPalette), cx)).expect("dispatch");
+  draw_every_window(cx);
+  draw_every_window(cx);
+  assert_eq!(cx.windows().len(), 1);
+}

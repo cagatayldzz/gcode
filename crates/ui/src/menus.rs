@@ -1,8 +1,8 @@
 //! Native menus for the menu bar and Dock icon.
 
 use crate::{
-  AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, GoToFile, NewClaude, NewCodex, OpenSettings, Quit, SaveFile, SwitchProfile,
-  ToggleAgents, ToggleTerminal, ViewOnHost,
+  AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, GoToFile, NewClaude, NewCodex, OpenCommandPalette, OpenSettings, Quit, SaveFile,
+  SwitchProfile, ToggleAgents, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::*;
 use vekro_storage::Profile;
@@ -39,6 +39,8 @@ pub fn menus(host: Option<&str>, profiles: &[Profile], current: &str) -> Vec<Men
       MenuItem::action("Close Tab", CloseTab),
     ]),
     Menu::new("View").items([
+      MenuItem::action("Command Palette…", OpenCommandPalette),
+      MenuItem::separator(),
       MenuItem::action("Toggle Terminal", ToggleTerminal),
       MenuItem::action("Toggle AI Agents", ToggleAgents),
       MenuItem::separator(),

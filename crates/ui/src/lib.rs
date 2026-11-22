@@ -5,6 +5,7 @@ mod all_changes;
 mod assets;
 mod change_view;
 mod close_order;
+mod command_palette;
 mod commit_settings;
 mod commit_view;
 mod components;
@@ -53,6 +54,8 @@ actions!(
     SearchProject,
     // Go to file: the dialog that opens a file by a few letters of its path.
     GoToFile,
+    // The list of every command and project, searchable.
+    OpenCommandPalette,
     OpenSearchResults,
     NewTerminal,
     SaveFile,

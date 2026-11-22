@@ -71,6 +71,7 @@ use vekro_storage::{Category, Profile, Project, ProjectList, WindowMode, WindowP
 
 mod accounts;
 mod changes;
+mod command_palette;
 mod commit;
 mod entries;
 mod file_actions;
@@ -777,6 +778,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::check_for_updates))
       .on_action(cx.listener(Self::search_project))
       .on_action(cx.listener(Self::go_to_file))
+      .on_action(cx.listener(Self::open_command_palette))
       .on_action(cx.listener(Self::open_search_results))
       .on_action(cx.listener(Self::new_terminal))
       .on_action(cx.listener(Self::toggle_terminal))
