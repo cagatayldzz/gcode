@@ -48,7 +48,7 @@ const PREVIEW_TIME: Duration = Duration::from_millis(500);
 
 const WARMUP_DELAY: Duration = Duration::from_millis(1000);
 const WARMUP_STEP: Duration = Duration::from_millis(250);
-const WARMUP_SAMPLES: [(&str, &str); 13] = [
+const WARMUP_SAMPLES: [(&str, &str); 14] = [
   ("rust", "// a\nfn main() {\n  let x: Vec<u8> = vec![1];\n  println!(\"{x:?}\");\n}\n"),
   ("toml", "# a\n[package]\nname = \"a\"\nversion = \"1.0\"\n"),
   ("markdown", "# Title\n\nText with `code` and [a link](https://a.b).\n\n- item\n"),
@@ -61,6 +61,7 @@ const WARMUP_SAMPLES: [(&str, &str); 13] = [
   ("bash", "# a\nset -e\necho \"$HOME\" | grep a\n"),
   ("yaml", "# a\na:\n  - b\n  - c: 1\n"),
   ("swift", "// a\nlet x: Int = 1\nfunc f() -> String { \"a\" }\n"),
+  ("kotlin", "// a\nval x: Int = 1\nfun f(): String = \"a\"\n"),
   ("go", "// a\npackage main\nfunc main() { x := 1 }\n"),
 ];
 
@@ -839,6 +840,7 @@ pub(crate) fn language_for(path: &Path) -> &'static str {
     "sh" | "zsh" | "bash" => "bash",
     "yml" | "yaml" => "yaml",
     "swift" => "swift",
+    "kt" | "kts" => "kotlin",
     "go" => "go",
     _ => "text",
   }
@@ -866,6 +868,7 @@ fn language_label(path: &Path) -> &'static str {
     "bash" => "Shell",
     "yaml" => "YAML",
     "swift" => "Swift",
+    "kotlin" => "Kotlin",
     "go" => "Go",
     _ => "Plain Text",
   }

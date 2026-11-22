@@ -23,3 +23,24 @@ fn swift_uses_semantic_colors_in_both_themes() {
     }
   }
 }
+
+#[test]
+fn kotlin_uses_semantic_colors_in_both_themes() {
+  syntax::register_highlights();
+  let source =
+    "// Says hi.\n@Composable\nfun greet(name: String?): Boolean {\n  if (name == null) return false\n  return true\n}\nclass User(val id: Int)\n";
+  let mut highlighter = SyntaxHighlighter::new("kotlin");
+  assert!(highlighter.update(None, &Rope::from(source), None));
+
+  for theme in [HighlightTheme::default_light(), HighlightTheme::default_dark()] {
+    let styles = highlighter.styles(&(0..source.len()), &*theme);
+    for (token, role) in
+      [("// Says hi.", "comment"), ("fun", "keyword"), ("greet", "function"), ("String", "type"), ("class", "keyword"), ("User", "type")]
+    {
+      let offset = source.find(token).unwrap();
+      let expected = theme.style(role).and_then(|style| style.color).unwrap();
+      let actual = styles.iter().find(|(range, _)| range.contains(&offset)).and_then(|(_, style)| style.color);
+      assert_eq!(actual, Some(expected), "{token} should use the {role} color");
+    }
+  }
+}

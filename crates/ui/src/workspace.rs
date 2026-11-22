@@ -130,8 +130,8 @@ const SIDEBAR_WIDTH: Pixels = px(280.);
 const SIDEBAR_MIN_WIDTH: Pixels = px(200.);
 const SIDEBAR_MAX_WIDTH: Pixels = px(960.);
 
-/// Indentation of each tree level.
-const INDENT: Rems = rems(1.);
+/// Indentation of each tree level, as in VS Code: a child's arrow sits a little right of its parent's, not a full arrow's width.
+const INDENT: Rems = rems(0.75);
 
 /// The views of the sidebar, in activity-bar order.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]

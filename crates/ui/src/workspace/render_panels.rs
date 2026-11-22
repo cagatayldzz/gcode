@@ -49,7 +49,7 @@ impl Workspace {
       )
       .children((0..row.depth).map(|depth| {
         let opacity = if highlighted_guide == Some(depth) { 0.5 } else { 0.15 };
-        div().absolute().top_0().bottom_0().left(INDENT * (depth + 1) as f32).w_px().bg(palette.control_border.opacity(opacity))
+        div().absolute().top_0().bottom_0().left(INDENT * depth as f32 + rems(1.)).w_px().bg(palette.control_border.opacity(opacity))
       }))
       .when(row.is_dir, |entry| {
         let folder = path.clone();
