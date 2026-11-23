@@ -9043,6 +9043,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ws-capture"
+version = "0.1.0"
+dependencies = [
+ "ws-product",
+ "ws-storage",
+]
+
+[[package]]
 name = "ws-desktop"
 version = "0.1.0"
 dependencies = [

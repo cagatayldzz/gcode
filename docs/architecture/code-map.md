@@ -23,6 +23,7 @@ repository/
 │   ├── opencommit/        commit message generation
 │   ├── updater/           self-update
 │   ├── version/           version comparison
+│   ├── capture/           screenshot CLI for the running app (window or screen)
 │   └── visual-check/      screenshot pixel inspection tool
 ├── docs/                  this site (VitePress)
 ├── scripts/               build, bundle, sign, release, profile; shell tests in scripts/tests/
@@ -107,6 +108,7 @@ repository/
 | **`ws-opencommit`** | `Config` (`~/.opencommit`), `generate`, `split_diff`, `parse_message`, `system_prompt` |
 | **`ws-updater`** | `check`, `prepare`, `install`, `SWAP_SCRIPT`, `Release` |
 | **`ws-version`** | `is_newer` |
+| **`ws-capture`** | `cargo run -p ws-capture -- window\|screen [--out FILE] [--delay SECONDS]`: saves a PNG (default `<data dir>/captures/`) with macOS `screencapture`; needs Accessibility and Screen Recording access for the terminal |
 | **`ws-visual-check`** | `cargo run -p ws-visual-check -- <png> <x> <y> <w> <h>` |
 
 ## Finding things quickly

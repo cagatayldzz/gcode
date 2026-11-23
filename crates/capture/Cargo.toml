@@ -1,0 +1,15 @@
+[package]
+name = "ws-capture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Take screenshots of the running app for visual development"
+
+[lints]
+workspace = true
+
+[dependencies]
+ws-product.workspace = true
+ws-storage.workspace = true
