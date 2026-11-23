@@ -759,7 +759,11 @@ impl EditorPanel {
 
   /// Writes the open file to disk.
   pub fn save(&mut self, cx: &mut Context<Self>) -> io::Result<bool> {
-    let Some(path) = self.tabs.current().filter(|_| !self.report_active) else { return Ok(false) };
+    let Some(path) = self.tabs.current().filter(|_| !self.report_active).cloned() else { return Ok(false) };
+    let path = path.as_path();
+    // Saving is a decision to work on the file: a preview tab becomes a regular one even when nothing was typed.
+    self.tabs.keep_open(path);
+    cx.notify();
     let Some(file) = self.files.get_mut(path) else { return Ok(false) };
     if self.replacement_files.contains(path) {
       return Err(io::Error::other("Wait for the project replacement to finish."));
