@@ -30,7 +30,7 @@ A tab with several panes gives each a small header with **×**, the shell's titl
 Split Pane Horizontally, Restart Session, Restart Codex Daemon, Close).
 
 - **Restart Session** replaces a hung shell with a new one in the same place and folder.
-- **Restart Codex Daemon** runs `codex app-server daemon restart`, for when Codex keeps showing "Reconnecting to server…". Start Codex again afterwards.
+- **Restart Codex Daemon** runs `codex app-server daemon restart`, for when Codex keeps showing "Reconnecting to server…" or sits at "Waiting for startup". If the restart does not finish within 20 seconds, the daemon's processes are stopped and the restart is tried once more. Codex sessions running in terminals are not touched. Start Codex again afterwards.
 - A shell that exits (`exit`, `⌃D`) closes its pane the same way as ×.
 
 Right-click in a terminal for New Tab, Split Pane Vertically/Horizontally, Copy, Paste, Clear Buffer and Close; each shows its shortcut.

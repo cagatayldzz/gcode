@@ -121,6 +121,11 @@ const RECENT_BRANCHES: usize = 5;
 /// How often the toolbar redraws while git reports its progress.
 /// How long the fill of a finished push, pull or fetch takes to reach the right edge.
 const REMOTE_FINISH: Duration = Duration::from_millis(300);
+
+/// How often the terminal's activity dot fades once while a command runs, and how long that fade lasts. Rare on purpose: it only shows that
+/// the work goes on, and nothing redraws between the fades.
+const TERMINAL_PULSE_INTERVAL: Duration = Duration::from_secs(10);
+const TERMINAL_PULSE: Duration = Duration::from_millis(1200);
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
 
 /// How long the pointer must rest on a file in the Explorer before it is prepared for opening, so that moving past
@@ -433,6 +438,9 @@ pub struct Workspace {
   /// Selects in the sidebar what the editor area shows.
   _active_tab: Subscription,
   _refresh_task: Task<()>,
+  /// Counts the fades of the terminal's activity dot; a new count restarts its animation.
+  terminal_pulse: usize,
+  _terminal_pulse_task: Task<()>,
   /// A check for projects whose folder was deleted is running.
   syncing: bool,
   dock: Entity<DockArea>,
@@ -680,6 +688,19 @@ impl Workspace {
           this.sync_projects(window, cx);
         });
         if refreshed.is_err() {
+          break;
+        }
+      }),
+      terminal_pulse: 0,
+      _terminal_pulse_task: cx.spawn_in(window, async move |this, cx| loop {
+        cx.background_executor().timer(TERMINAL_PULSE_INTERVAL).await;
+        let pulsed = this.update_in(cx, |this, _, cx| {
+          if this.projects.active.as_ref().is_some_and(|root| this.project_has_terminal_activity(root, cx)) {
+            this.terminal_pulse += 1;
+            cx.notify();
+          }
+        });
+        if pulsed.is_err() {
           break;
         }
       }),
