@@ -2,6 +2,7 @@
 
 use crate::close_order::CloseOrder;
 use crate::components::{strip, strip_tab};
+use crate::line_comments::{self, CommentMode};
 use crate::minimap::{line_styles, Minimap};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -13,6 +14,7 @@ use gpui_kit::{
     input::{Editor, EditorState, InputEvent},
     menu::{ContextMenuExt as _, PopupMenuItem},
     notification::Notification,
+    scroll::{Scrollbar, ScrollbarMode},
     v_flex, ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _,
   },
   *,
@@ -649,6 +651,8 @@ impl EditorPanel {
     let highlights = Language::from_name(language).map(|language| (language, Arc::new(Highlights::compute(language, &text))));
     let state = cx.new(|cx| {
       let mut state = EditorState::new(window, cx).language(language).line_number(true).default_value(text);
+      // The editor's scrollbar stays visible instead of fading out when the file is not scrolling.
+      state.set_scrollbar_renderer(Some(Rc::new(|context, _, _| Scrollbar::vertical(&context).mode(ScrollbarMode::Always).into_any_element())));
       if let Some((language, highlights)) = highlights {
         state.set_highlighter_factory(Rc::new(move |_| Some(Box::new(LineHighlighter { language, highlights: highlights.clone() }))), cx);
       }
@@ -755,6 +759,29 @@ impl EditorPanel {
       self.tabs.close_order.reset();
     }
     self.announce(cx);
+  }
+
+  /// Comments out or in the lines the selection touches in the open file's editor. Does nothing (and says so) unless that editor
+  /// has the focus, and for a language without comments says so by returning an error.
+  pub fn comment_lines(&mut self, mode: CommentMode, window: &mut Window, cx: &mut Context<Self>) -> Result<bool, String> {
+    let Some(path) = self.tabs.current().filter(|_| !self.report_active).cloned() else { return Ok(false) };
+    let Some(file) = self.files.get(&path) else { return Ok(false) };
+    let state = file.state.clone();
+    if !state.read(cx).focus_handle(cx).contains_focused(window, cx) {
+      return Ok(false);
+    }
+    let Some(markers) = line_comments::markers(language_for(&path)) else {
+      return Err(format!("{} has no line comments.", language_label(&path)));
+    };
+    let text = state.read(cx).value().to_string();
+    let selection = state.read(cx).selected_range();
+    let Some(edit) = line_comments::edit(&text, selection, markers, mode) else { return Ok(true) };
+    state.update(cx, |state, cx| {
+      state.set_selected_range(edit.range.clone(), cx);
+      state.replace(edit.text.clone(), window, cx);
+      state.set_selected_range(edit.range.start + (edit.selection.start - edit.range.start)..edit.selection.end, cx);
+    });
+    Ok(true)
   }
 
   /// Writes the open file to disk.

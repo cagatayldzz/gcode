@@ -117,7 +117,6 @@ impl Render for Minimap {
       .border_color(palette.border)
       .bg(palette.background)
       .cursor_default()
-      .on_hover(cx.listener(|_, _: &bool, _, cx| cx.notify()))
       .on_mouse_down(MouseButton::Left, move |event, window, cx| {
         let Some(bounds) = hit_bounds.get().filter(|bounds| bounds.size.height > Pixels::ZERO) else { return };
         let editor = pointer_editor.read(cx);
@@ -166,9 +165,8 @@ impl Render for Minimap {
 
             let height = indicator_height(area, window);
             let travel = indicator_travel(area, height, line_count, window);
-            let show_indicator = area.contains(&window.mouse_position()) || drag_anchor.get().is_some();
             let state = editor.read(cx);
-            if let Some(range) = show_indicator.then(|| scroll_range(state)).flatten().filter(|range| *range > Pixels::ZERO) {
+            if let Some(range) = scroll_range(state).filter(|range| *range > Pixels::ZERO) {
               let top = travel * scroll_progress(state, range);
               let origin = point(area.origin.x + inset, area.origin.y + top);
               let size = size(area.size.width - inset * 2., height);

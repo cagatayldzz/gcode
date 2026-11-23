@@ -2,8 +2,9 @@
 
 use gpui_kit::*;
 use ws_ui::{
-  Assets, ClearBuffer, CloseTab, CopySelection, GoToFile, MentionProjects, NewTerminal, OpenCommandPalette, OpenSearchResults, OpenSettings,
-  PasteClipboard, Quit, SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleTerminal, ViewOnHost,
+  AddLineComment, Assets, ClearBuffer, CloseTab, CopySelection, GoToFile, MentionProjects, NewTerminal, OpenCommandPalette, OpenSearchResults,
+  OpenSettings, PasteClipboard, Quit, RemoveLineComment, SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleLineComment,
+  ToggleTerminal, ViewOnHost,
 };
 
 /// Starts the application and runs it until it quits.
@@ -25,6 +26,9 @@ pub fn run() {
       KeyBinding::new("cmd-p", GoToFile, None),
       KeyBinding::new("cmd-shift-p", OpenCommandPalette, None),
       KeyBinding::new("cmd-s", SaveFile, None),
+      KeyBinding::new("cmd-k cmd-c", AddLineComment, Some("Input && mode == editor")),
+      KeyBinding::new("cmd-k cmd-u", RemoveLineComment, Some("Input && mode == editor")),
+      KeyBinding::new("cmd-/", ToggleLineComment, Some("Input && mode == editor")),
       KeyBinding::new("cmd-w", CloseTab, None),
       KeyBinding::new("cmd-j", ToggleTerminal, None),
       KeyBinding::new("cmd-shift-a", ToggleAgents, None),

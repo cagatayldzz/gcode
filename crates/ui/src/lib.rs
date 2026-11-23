@@ -16,6 +16,7 @@ mod diff_view;
 mod editor;
 mod explorer;
 mod labels;
+mod line_comments;
 mod mention_picker;
 mod menus;
 mod merge_dialog;
@@ -60,6 +61,10 @@ actions!(
     OpenSearchResults,
     NewTerminal,
     SaveFile,
+    // In the editor: comment out, comment in, or switch the comments of the selected lines.
+    AddLineComment,
+    RemoveLineComment,
+    ToggleLineComment,
     CloseTab,
     MentionProjects,
     ToggleTerminal,

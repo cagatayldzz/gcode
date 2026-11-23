@@ -1,3 +1,4 @@
+use crate::line_comments::CommentMode;
 use crate::{
   agents::{AgentKind, AgentTabs},
   all_changes::{AllChanges, OpenChangedFile},
@@ -26,8 +27,9 @@ use crate::{
   terminal_layout::{Arrangement, Direction, Node},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
-  AddProfile, AddProject, CheckForUpdates, ClearBuffer, CloseTab, EditProfiles, MentionProjects, NewClaude, NewCodex, NewTerminal, OpenSettings,
-  SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
+  AddLineComment, AddProfile, AddProject, CheckForUpdates, ClearBuffer, CloseTab, EditProfiles, MentionProjects, NewClaude, NewCodex, NewTerminal,
+  OpenSettings, RemoveLineComment, SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleLineComment,
+  ToggleProjectSettings, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{base::Selectable as _, prelude::FluentBuilder as _};
 use gpui_kit::{
@@ -715,6 +717,27 @@ impl Workspace {
     }
   }
 
+  /// Add Line Comment (⌘K ⌘C): comments out the selected lines of the file in the editor.
+  pub fn add_line_comment(&mut self, _: &AddLineComment, window: &mut Window, cx: &mut Context<Self>) {
+    self.comment_lines(CommentMode::Add, window, cx);
+  }
+
+  /// Remove Line Comment (⌘K ⌘U): comments in the selected lines.
+  pub fn remove_line_comment(&mut self, _: &RemoveLineComment, window: &mut Window, cx: &mut Context<Self>) {
+    self.comment_lines(CommentMode::Remove, window, cx);
+  }
+
+  /// Toggle Line Comment (⌘/): comments the selected lines out, or in when they all are comments already.
+  pub fn toggle_line_comment(&mut self, _: &ToggleLineComment, window: &mut Window, cx: &mut Context<Self>) {
+    self.comment_lines(CommentMode::Toggle, window, cx);
+  }
+
+  fn comment_lines(&mut self, mode: CommentMode, window: &mut Window, cx: &mut Context<Self>) {
+    if let Err(message) = self.editor_panel.update(cx, |editor, cx| editor.comment_lines(mode, window, cx)) {
+      window.push_notification(Notification::info(message), cx);
+    }
+  }
+
   /// Saves the file open in the editor.
   pub fn save_file(&mut self, _: &SaveFile, window: &mut Window, cx: &mut Context<Self>) {
     if self.file_actions.focused_side(window, cx).is_some() {
@@ -813,6 +836,9 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::view_on_host))
       .on_action(cx.listener(Self::split_down))
       .on_action(cx.listener(Self::save_file))
+      .on_action(cx.listener(Self::add_line_comment))
+      .on_action(cx.listener(Self::remove_line_comment))
+      .on_action(cx.listener(Self::toggle_line_comment))
       .on_action(cx.listener(Self::close_tab))
       .on_action(cx.listener(Self::mention_projects))
       .size_full()

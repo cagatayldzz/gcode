@@ -3,9 +3,9 @@
 //! A command is an `Action`, the same one a button, a menu item or a key runs, so the palette adds no command of its own.
 
 use crate::{
-  components::display_path, theme::FONT_SIZE_SM, AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, GoToFile, NewClaude, NewCodex,
-  NewTerminal, OpenSettings, SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleProjectSettings, ToggleTerminal,
-  ViewOnHost,
+  components::display_path, theme::FONT_SIZE_SM, AddLineComment, AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, GoToFile,
+  NewClaude, NewCodex, NewTerminal, OpenSettings, RemoveLineComment, SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges,
+  ToggleLineComment, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{
   component::{
@@ -67,6 +67,9 @@ fn commands() -> Vec<Entry> {
     entry("Search in Project", &["find", "grep", "replace"], SearchProject),
     entry("Add Project", &["open folder", "clone", "new"], AddProject),
     entry("Save File", &["write"], SaveFile),
+    entry("Add Line Comment", &["comment out", "#", "//"], AddLineComment),
+    entry("Remove Line Comment", &["uncomment", "comment in"], RemoveLineComment),
+    entry("Toggle Line Comment", &["comment", "uncomment"], ToggleLineComment),
     entry("Close Tab", &["close file"], CloseTab),
     entry("New Terminal", &["shell", "console"], NewTerminal),
     entry("Toggle Terminal", &["shell", "console", "show", "hide"], ToggleTerminal),

@@ -21,6 +21,17 @@ The terminal info bar and the command palette read the live keymap, so what they
 | `⌘,` | Settings |
 | `⌘Q` | Quit |
 
+## Editor
+
+| Shortcut | Action |
+| --- | --- |
+| `⌘K` `⌘C` | Add line comment to the selected lines |
+| `⌘K` `⌘U` | Remove line comment |
+| `⌘/` | Toggle line comment: off when every line is already a comment, else on |
+
+The marker follows the language: `//` (Rust, JavaScript, TypeScript, Go, Swift, Kotlin), `#` (Python, shell, YAML, TOML, `.env`, Dockerfile,
+`.gitignore`), `<!-- -->` (HTML, Markdown) and `/* */` (CSS). A language without comments, such as JSON, says so in a notification.
+
 ## Search results
 
 | Shortcut | Action |
