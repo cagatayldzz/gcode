@@ -21,7 +21,7 @@ pub(crate) struct Row {
 const HIDDEN: [&str; 2] = [".git", ".DS_Store"];
 
 /// The rows to show for `root`: its children, and the children of every folder in `expanded`,
-/// folders before files, each group sorted by name.
+/// folders before files, each group sorted by name as GitHub does: by bytes, so a capital letter comes before a lowercase one.
 pub(crate) fn rows(root: &Path, expanded: &HashSet<PathBuf>) -> Vec<Row> {
   let mut out = Vec::new();
   let rules = ws_git::IgnoreRules::open(root);
@@ -44,7 +44,7 @@ fn collect(dir: &Path, depth: usize, inherited: bool, rules: Option<&ws_git::Ign
         _ => path.is_dir(),
       };
       let ignored = inherited || rules.is_some_and(|rules| rules.is_ignored(&path));
-      Some((!is_dir, name.to_lowercase(), Row { is_dir, path, name, depth, ignored }))
+      Some((!is_dir, name.clone(), Row { is_dir, path, name, depth, ignored }))
     })
     .collect();
   children.sort_unstable_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));

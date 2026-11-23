@@ -83,3 +83,22 @@ fn entries_ignored_by_git_are_marked_and_their_children_inherit_it() {
     ]
   );
 }
+
+#[test]
+fn names_are_sorted_by_bytes_as_on_github() {
+  let root = std::env::temp_dir().join(format!("ws-explorer-order-{}", std::process::id()));
+  let _ = fs::remove_dir_all(&root);
+  fs::create_dir_all(&root).unwrap();
+  for folder in ["scripts", ".cargo", "apps", "Docs"] {
+    fs::create_dir(root.join(folder)).unwrap();
+  }
+  for file in ["rustfmt.toml", "README.md", "bun.lock", "Cargo.toml", "AGENTS.md", ".gitignore", "clippy.toml"] {
+    fs::write(root.join(file), "").unwrap();
+  }
+  let names: Vec<_> = explorer::rows(&root, &HashSet::new()).into_iter().map(|row| row.name).collect();
+  assert_eq!(
+    names,
+    [".cargo", "Docs", "apps", "scripts", ".gitignore", "AGENTS.md", "Cargo.toml", "README.md", "bun.lock", "clippy.toml", "rustfmt.toml"]
+  );
+  fs::remove_dir_all(root).unwrap();
+}

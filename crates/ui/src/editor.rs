@@ -658,8 +658,13 @@ impl EditorPanel {
     let highlights = Language::from_name(language).map(|language| (language, Arc::new(Highlights::compute(language, &text))));
     let state = cx.new(|cx| {
       let mut state = EditorState::new(window, cx).language(language).line_number(true).default_value(text);
-      // The editor's scrollbar stays visible instead of fading out when the file is not scrolling.
-      state.set_scrollbar_renderer(Some(Rc::new(|context, _, _| Scrollbar::vertical(&context).mode(ScrollbarMode::Always).into_any_element())));
+      // Long lines are not wrapped: the file scrolls sideways, as on GitHub.
+      state.set_soft_wrap(false, window, cx);
+      // The editor's scrollbars (vertical, and horizontal for long lines) stay visible instead of fading out when the file is not scrolling.
+      state.set_scrollbar_renderer(Some(Rc::new(|context, _, _| {
+        let axis = context.axis();
+        Scrollbar::new(&context).axis(axis).mode(ScrollbarMode::Always).into_any_element()
+      })));
       if let Some((language, highlights)) = highlights {
         state.set_highlighter_factory(Rc::new(move |_| Some(Box::new(LineHighlighter { language, highlights: highlights.clone() }))), cx);
       }
