@@ -124,14 +124,6 @@ impl Workspace {
     let accent = theme.primary;
     let palette = colors(cx);
     let picker = self.render_branch_picker(&git.branch, cx);
-    let pending_merge = git.merging.then(|| {
-      Button::new("reopen-merge")
-        .small()
-        .label("Resolve merge")
-        .icon(Icon::empty().path("icons/triangle-alert.svg"))
-        .disabled(self.merge_task.is_some())
-        .on_click(cx.listener(|this, _, window, cx| this.merge_compare(window, cx)))
-    });
     let sync = git.sync.as_ref().map(|sync| {
       let (icon, title, count) = if !sync.upstream {
         ("icons/upload.svg", "Publish branch".to_string(), 0)
@@ -246,8 +238,7 @@ impl Workspace {
             })
           };
           div().relative().h_12().overflow_hidden().border_r_1().border_color(palette.border).child(button).children(fill)
-        }))
-        .children(pending_merge),
+        })),
     )
   }
 
@@ -854,12 +845,15 @@ impl Workspace {
     let current = self.git.as_ref().map(|git| git.branch.clone()).unwrap_or_default();
     let (behind, ahead) = view.found.as_ref().map_or((0, 0), |found| (found.behind_count, found.ahead_count));
     let tabs = TabBar::new("compare-sides")
-      .segmented()
+      .underline()
       .selected_index(usize::from(view.side == CompareSide::Ahead))
       .on_click(
         cx.listener(|this, index: &usize, _, cx| this.set_compare_side(if *index == 1 { CompareSide::Ahead } else { CompareSide::Behind }, cx)),
       )
-      .children([Tab::new().cursor_pointer().label(format!("Behind ({behind})")), Tab::new().cursor_pointer().label(format!("Ahead ({ahead})"))]);
+      .children([
+        Tab::new().cursor_pointer().flex_1().justify_center().label(format!("Behind ({behind})")),
+        Tab::new().cursor_pointer().flex_1().justify_center().label(format!("Ahead ({ahead})")),
+      ]);
     let list = match &view.found {
       None => h_flex()
         .gap_2()
@@ -902,7 +896,7 @@ impl Workspace {
       };
       v_flex()
         .gap_2()
-        .pr_3()
+        .px_3()
         .pb_3()
         .pt_2()
         .items_center()
@@ -926,6 +920,6 @@ impl Workspace {
           )
         })
     });
-    v_flex().flex_1().min_h_0().gap_2().child(div().pr_3().child(tabs)).child(list).children(footer).into_any_element()
+    v_flex().flex_1().min_h_0().gap_2().child(div().px_3().child(tabs)).child(list).children(footer).into_any_element()
   }
 }
