@@ -3,3 +3,9 @@ node_modules/
 *.log
 !keep.log
 /dist
+build/**/output
+docs/*.tmp
+**/cache
+file?.txt
+[Tt]humbs.db
+\#not-a-comment

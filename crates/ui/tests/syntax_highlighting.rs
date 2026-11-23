@@ -77,14 +77,21 @@ fn color_of(source: &str, language: &str, token: &str) -> Option<gpui_kit::Hsla>
   syntax::register_highlights();
   let mut highlighter = SyntaxHighlighter::new(language);
   assert!(highlighter.update(None, &Rope::from(source), None));
-  let theme = HighlightTheme::default_dark();
+  let theme = test_theme();
   let styles = highlighter.styles(&(0..source.len()), &*theme);
   let offset = source.find(token).unwrap();
   styles.iter().find(|(range, _)| range.contains(&offset)).and_then(|(_, style)| style.color)
 }
 
 fn role_color(role: &str) -> Option<gpui_kit::Hsla> {
-  HighlightTheme::default_dark().style(role).and_then(|style| style.color)
+  test_theme().style(role).and_then(|style| style.color)
+}
+
+/// The kit's dark theme with the one role the app defines and the kit does not: the gold of a table's pipes.
+fn test_theme() -> std::sync::Arc<HighlightTheme> {
+  let mut theme = (*HighlightTheme::default_dark()).clone();
+  theme.style.syntax.variant = serde_json::from_value(serde_json::json!({ "color": "#f2cc60" })).ok();
+  std::sync::Arc::new(theme)
 }
 
 #[test]
@@ -105,4 +112,25 @@ fn shell_commands_are_constants_and_operators_keywords() {
   let source = "ls -la | cat\necho hi\n";
   assert_eq!(color_of(source, "bash", "echo"), role_color("constant"));
   assert_eq!(color_of(source, "bash", "|"), role_color("keyword"));
+}
+
+#[test]
+fn markdown_marks_use_the_roles_github_colors_come_from() {
+  let source =
+    "# Title\n\n> quoted\n\n- item\n\nA [link](https://example.com) and `code` and **strong**.\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n---\n";
+  for role in ["title", "tag", "string", "variant", "link_uri"] {
+    assert!(role_color(role).is_some(), "{role} has a color in the theme, so the comparisons below are real");
+  }
+  assert_eq!(color_of(source, "markdown", "Title"), role_color("title"));
+  assert_eq!(color_of(source, "markdown", "# "), role_color("title"));
+  assert_eq!(color_of(source, "markdown", "> "), role_color("tag"));
+  assert_eq!(color_of(source, "markdown", "quoted"), role_color("tag"));
+  assert_eq!(color_of(source, "markdown", "- item"), role_color("punctuation.list_marker"));
+  assert_eq!(color_of(source, "markdown", "[link"), role_color("string"));
+  assert_eq!(color_of(source, "markdown", "https://example.com)"), role_color("link_uri"));
+  assert_eq!(color_of(source, "markdown", "`code"), role_color("string"));
+  assert_eq!(color_of(source, "markdown", "code` and"), role_color("text.code.span"));
+  assert_eq!(color_of(source, "markdown", "**strong"), role_color("string"));
+  assert_eq!(color_of(source, "markdown", "| a"), role_color("variant"));
+  assert_eq!(color_of(source, "markdown", "---"), role_color("title"));
 }

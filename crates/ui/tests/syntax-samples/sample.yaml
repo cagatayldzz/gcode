@@ -1,14 +1,62 @@
 # Syntax sample: YAML.
+%YAML 1.2
+---
 name: sample
+version: 1.2.3
+enabled: true
+disabled: no
+nothing: null
+count: 3
+ratio: 0.75
+hex: 0xFF
+date: 2026-11-23
+quoted: "double \"quoted\" with \n escape"
+single: 'it''s single'
+plain: a plain string with spaces
+"quoted key": value
+? complex key
+: complex value
+
+defaults: &defaults
+  adapter: postgres
+  host: localhost
+
+development:
+  <<: *defaults
+  database: dev_db
+
+list:
+  - one
+  - two: nested
+    three: [a, b, c]
+  - {x: 1, y: 2}
+
+multiline: |
+  literal block
+  keeps newlines
+folded: >-
+  folded block
+  joins lines
+
 on:
   push:
     branches: [main]
+  pull_request:
+    types: [opened, synchronize]
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - run: echo "hello"
+      - name: Run
+        run: echo "hello" && exit 0
         env:
           DEBUG: true
-          COUNT: 3
+tagged: !!str 123
+binary: !!binary |
+  R0lGODlhDAAMAIQAAP
+...

@@ -37,6 +37,25 @@ pub(crate) fn register_highlights() {
       .replace("(variable_name) @property", "(variable_name) @variable")
       .replace("] @operator", "] @keyword")
   });
+  // Markdown as GitHub draws it: headings and rules in the heading style, quotes green, fences and inline marks like strings, link
+  // brackets like strings, list markers orange and the pipes of a table gold (the `variant` role).
+  rewrite(registry, "markdown", |query| {
+    let query = query
+      .replace("(setext_h2_underline)\n] @punctuation.special", "(setext_h2_underline)\n] @title")
+      .replace("(block_continuation)\n  (block_quote_marker)\n] @punctuation.special", "(block_quote_marker)\n] @tag")
+      .replace("(list_marker_parenthesis)\n  (thematic_break)\n] @punctuation.list_marker", "(list_marker_parenthesis)\n] @punctuation.list_marker")
+      .replace("] @punctuation.delimiter", "] @string")
+      .replace("@text.uri", "@link_uri");
+    format!(
+      "{query}\n(thematic_break) @title\n(block_quote (paragraph (inline) @tag))\n(pipe_table_delimiter_row) @variant\n(pipe_table_header \"|\" @variant)\n(pipe_table_row \"|\" @variant)"
+    )
+  });
+  rewrite(registry, "markdown_inline", |query| {
+    format!(
+      "{}\n(inline_link [\"[\" \"]\" \"(\" \")\"] @string)\n(full_reference_link [\"[\" \"]\"] @string)\n(image [\"!\" \"[\" \"]\" \"(\" \")\"] @string)",
+      query.replace("] @punctuation.delimiter", "] @string")
+    )
+  });
   // GPUI Kit registers the Swift grammar with an empty highlight query.
   if let Some(mut swift) = registry.language("swift") {
     swift.highlights = tree_sitter_swift::HIGHLIGHTS_QUERY.into();

@@ -181,7 +181,11 @@ pub(crate) fn colors(cx: &App) -> Colors {
 }
 
 fn syntax_color(color: Hsla) -> Option<ThemeStyle> {
-  serde_json::from_value(serde_json::json!({ "color": color })).ok()
+  syntax_json(serde_json::json!({ "color": color }))
+}
+
+fn syntax_json(value: serde_json::Value) -> Option<ThemeStyle> {
+  serde_json::from_value(value).ok()
 }
 
 /// The dark theme's code colors as GitHub draws them: properties, attributes, constants and operators blue; identifiers, types and
@@ -193,15 +197,22 @@ fn github_dark(syntax: &mut SyntaxColors, c: &Colors) {
   syntax.property = blue;
   syntax.attribute = blue;
   syntax.operator = blue;
-  syntax.title = blue;
   syntax.text_literal = blue;
   syntax.text_code_span = blue;
-  syntax.link_uri = blue;
+  syntax.link_uri = string;
+  syntax.link_text = text;
   syntax.string_escape = string;
   syntax.string_regex = string;
   syntax.string_special = string;
   syntax.string_special_symbol = string;
   syntax.preproc = syntax.keyword;
+  // Markdown: headings and rules bold in the heading blue, list markers orange, the cells' pipes gold, emphasis in the text color.
+  let heading = hex(0x1f6feb);
+  syntax.title = syntax_json(serde_json::json!({ "color": heading, "font_weight": 700 }));
+  syntax.punctuation_list_marker = syntax.constructor;
+  syntax.variant = syntax_color(hex(0xf2cc60));
+  syntax.emphasis = syntax_json(serde_json::json!({ "color": c.text, "font_style": "italic" }));
+  syntax.emphasis_strong = syntax_json(serde_json::json!({ "color": c.text, "font_weight": 700 }));
   for role in [
     &mut syntax.type_,
     &mut syntax.variable,

@@ -1,12 +1,44 @@
 # Syntax sample: TOML.
+title = "TOML sample"
+enabled = true
+count = 42
+ratio = 3.14
+hex = 0xDEADBEEF
+big = 1_000_000
+inf = inf
+date = 1979-05-27
+time = 07:32:00
+stamp = 1979-05-27T07:32:00-08:00
+
 [package]
 name = "sample"
 version = "0.1.0"
-authors = ["Ada <ada@example.com>"]
+authors = ["Ada <ada@example.com>", 'Bob']
+description = """
+A multi-line
+basic string."""
+path = 'C:\Users\literal'
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+tokio = "1.0"
+
+[dependencies.regex]
+version = "1"
+default-features = false
 
 [profile.release]
 opt-level = 3
-lto = true
+lto = "thin"
+
+[[bin]]
+name = "first"
+path = "src/main.rs"
+
+[[bin]]
+name = "second"
+
+[servers.alpha]
+ip = "10.0.0.1"
+"quoted key" = [1, 2, [3, 4]]
+inline = { a = 1, b.c = 2 }

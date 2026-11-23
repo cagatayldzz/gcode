@@ -1,6 +1,16 @@
+// Syntax sample: JSON with comments.
 {
-  // Syntax sample: JSON with comments.
-  "name": "sample",
+  /* A block comment. */
+  "name": "sample", // A trailing comment.
   "enabled": true,
-  "list": [1, 2, 3],
+  "count": 3,
+  "ratio": 1.5,
+  "nothing": null,
+  "list": [1, 2, 3,], // A trailing comma.
+  "path": "C:\\Users\\sample",
+  "editor.fontSize": 13,
+  "files.exclude": {
+    "**/.git": true,
+    "**/node_modules": true
+  }
 }
