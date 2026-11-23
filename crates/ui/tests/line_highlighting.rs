@@ -30,7 +30,7 @@ fn the_styles_cover_the_asked_range_in_both_themes() {
 }
 
 #[test]
-fn roles_become_the_themes_colors_and_underlines() {
+fn roles_become_the_themes_colors() {
   let highlights = Highlights::compute(Language::Dotenv, ENV);
   for theme in [HighlightTheme::default_light(), HighlightTheme::default_dark()] {
     let styles = outline::line_styles(&highlights, &(0..ENV.len()), &*theme);
@@ -40,9 +40,13 @@ fn roles_become_the_themes_colors_and_underlines() {
     assert_eq!(style_at(&styles, "# a comment").color, comment);
     assert_eq!(style_at(&styles, "abc/def").color, theme.style("string").and_then(|style| style.color), "a value is a string");
     assert_eq!(style_at(&styles, "export").color, theme.style("keyword").and_then(|style| style.color));
-    assert!(style_at(&styles, "https://www.example.com").underline.is_some());
+    assert_eq!(
+      style_at(&styles, "https://www.example.com").color,
+      theme.style("string").and_then(|style| style.color),
+      "an address is part of the string"
+    );
     let in_comment = style_at(&styles, "https://old.example.com");
-    assert!(in_comment.underline.is_some() && in_comment.color == comment, "an address in a comment keeps the comment color");
+    assert_eq!(in_comment.color, comment, "an address in a comment keeps the comment color");
   }
 }
 

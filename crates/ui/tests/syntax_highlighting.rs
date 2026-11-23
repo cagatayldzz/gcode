@@ -134,3 +134,13 @@ fn markdown_marks_use_the_roles_github_colors_come_from() {
   assert_eq!(color_of(source, "markdown", "| a"), role_color("variant"));
   assert_eq!(color_of(source, "markdown", "---"), role_color("title"));
 }
+
+#[test]
+fn go_calls_and_fields_are_properties_and_declared_names_are_plain() {
+  let source = "package main\nconst Limit = 1\ntype User struct { Name string }\nfunc find() { fmt.Println(user.Name) }\n";
+  assert_eq!(color_of(source, "go", "Println"), role_color("property"));
+  assert_eq!(color_of(source, "go", "Name)"), role_color("property"));
+  assert_eq!(color_of(source, "go", "Name string"), role_color("property"));
+  assert_eq!(color_of(source, "go", "Limit"), role_color("variable"));
+  assert_eq!(color_of(source, "go", "find"), role_color("variable"));
+}

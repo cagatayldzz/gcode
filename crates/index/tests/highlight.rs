@@ -204,3 +204,30 @@ fn a_dockerfile_quoted_string_is_a_value() {
   assert_eq!(role_at(&runs, text, "'dist"), Some(Role::Value));
   assert_eq!(role_at(&runs, text, "\"unclosed"), None);
 }
+
+#[test]
+fn a_gitignore_class_is_a_constant_and_an_escape_is_plain() {
+  let text = "[Tt]humbs.db\n\\#not-a-comment\ndir/**/x\n";
+  let runs = Highlights::compute(Language::Gitignore, text).runs().to_vec();
+  assert_eq!(role_at(&runs, text, "Tt"), Some(Role::Constant));
+  assert_eq!(text_of(&runs, text, "Tt"), "Tt");
+  assert_eq!(role_at(&runs, text, "[Tt"), None, "the brackets are plain");
+  assert_eq!(role_at(&runs, text, "humbs"), Some(Role::Entity));
+  assert_eq!(role_at(&runs, text, "\\#"), None, "a backslash is plain");
+  assert_eq!(role_at(&runs, text, "#not"), None, "the escaped character is plain");
+  assert_eq!(role_at(&runs, text, "not-a-comment"), Some(Role::Entity));
+  assert_eq!(role_at(&runs, text, "**"), Some(Role::Keyword));
+  covers(&runs, &(0..text.len()));
+}
+
+#[test]
+fn a_dotenv_value_ends_at_its_closing_quote_or_a_comment_and_the_rest_is_a_comment() {
+  let text = "A=1 # trailing\nB=\"x # kept\" # after quote\nC='y'\nD=https://e.com/#anchor\n";
+  let runs = Highlights::compute(Language::Dotenv, text).runs().to_vec();
+  assert_eq!(role_at(&runs, text, "1 #"), Some(Role::Value));
+  assert_eq!(role_at(&runs, text, "# trailing"), Some(Role::Comment));
+  assert_eq!(role_at(&runs, text, "# kept"), Some(Role::Value), "a hash inside quotes is part of the value");
+  assert_eq!(role_at(&runs, text, "# after quote"), Some(Role::Comment));
+  assert_eq!(role_at(&runs, text, "'y'"), Some(Role::Value));
+  assert_eq!(text_of(&runs, text, "https://e.com/#anchor"), "https://e.com/#anchor", "a hash with no space before it stays in the value");
+}

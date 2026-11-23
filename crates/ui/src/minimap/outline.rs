@@ -3,7 +3,7 @@
 use gpui_kit::{
   base::input::{HighlightStyleResolver, Rope, RopeExt as _},
   component::highlighter::{HighlightTheme, SyntaxHighlighter},
-  px, HighlightStyle, Hsla, SharedString, UnderlineStyle,
+  HighlightStyle, Hsla, SharedString,
 };
 use std::{ops::Range, sync::Arc};
 use ws_index::highlight::{Highlights, Language, Role};
@@ -64,11 +64,11 @@ pub(crate) fn line_styles(
   resolver: &dyn HighlightStyleResolver,
 ) -> Vec<(Range<usize>, HighlightStyle)> {
   let comment = resolver.style("comment").unwrap_or_default();
-  let underline = Some(UnderlineStyle { thickness: px(1.), color: None, wavy: false });
   let name = orange_style(resolver);
   let keyword = resolver.style("keyword").unwrap_or_default();
   let string = resolver.style("string").unwrap_or_default();
   let entity = resolver.style("function").unwrap_or_default();
+  let constant = resolver.style("constant").unwrap_or_default();
   let variable = resolver.style("variable").or_else(|| resolver.style("property")).unwrap_or_default();
   highlights
     .slice(range)
@@ -81,9 +81,10 @@ pub(crate) fn line_styles(
         Some(Role::Keyword | Role::Instruction) => keyword,
         Some(Role::Value) => string,
         Some(Role::Entity) => entity,
+        Some(Role::Constant) => constant,
         Some(Role::Variable) => variable,
-        Some(Role::Link) => HighlightStyle { underline, ..string },
-        Some(Role::CommentLink) => HighlightStyle { underline, ..comment },
+        Some(Role::Link) => string,
+        Some(Role::CommentLink) => comment,
       };
       (run, style)
     })

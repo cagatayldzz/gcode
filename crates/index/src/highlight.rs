@@ -71,6 +71,8 @@ pub enum Role {
   Value,
   /// A file or folder name of a `.gitignore` pattern.
   Entity,
+  /// The characters of a `[...]` class of a `.gitignore` pattern.
+  Constant,
 }
 
 /// A stretch of the text and what it is; `None` is plain text.
@@ -180,9 +182,20 @@ fn gitignore_line(line: &str, offset: usize, builder: &mut Builder) {
     builder.push(offset..offset + line.len(), Role::Comment);
     return;
   }
-  // The wildcards and a leading `!` are keywords; the names between them and the slashes are entities.
+  // The wildcards and a leading `!` are keywords, the characters of a `[...]` class are constants, a backslash and the character it
+  // escapes are plain, and the names between them are entities.
   let mut start = 0;
-  for (at, character) in line.char_indices() {
+  let mut class_start = None;
+  let mut characters = line.char_indices().peekable();
+  while let Some((at, character)) = characters.next() {
+    if let Some(from) = class_start {
+      if character == ']' {
+        builder.push(offset + from..offset + at, Role::Constant);
+        class_start = None;
+        start = at + 1;
+      }
+      continue;
+    }
     let wildcard = matches!(character, '*' | '?') || (character == '!' && at == 0);
     if wildcard || matches!(character, '/' | '[' | ']' | '\\') || character.is_whitespace() {
       builder.push(offset + start..offset + at, Role::Entity);
@@ -190,9 +203,19 @@ fn gitignore_line(line: &str, offset: usize, builder: &mut Builder) {
         builder.push(offset + at..offset + at + 1, Role::Keyword);
       }
       start = at + character.len_utf8();
+      if character == '[' && line[start..].contains(']') {
+        class_start = Some(start);
+      } else if character == '\\' {
+        // The escaped character is plain as well.
+        if let Some((_, escaped)) = characters.next() {
+          start += escaped.len_utf8();
+        }
+      }
     }
   }
-  builder.push(offset + start..offset + line.len(), Role::Entity);
+  if class_start.is_none() {
+    builder.push(offset + start..offset + line.len(), Role::Entity);
+  }
 }
 
 /// The instructions a Dockerfile line can start with.
@@ -356,10 +379,12 @@ fn dotenv_line(line: &str, offset: usize, builder: &mut Builder) {
       value_from = Some(name_start + equals + 1);
     }
   }
-  // The value is a string, and the web addresses in it stay underlined. A line that is no setting only has its addresses marked.
+  // The value is a string, up to a closing quote or a ` #` that starts a trailing comment; the web addresses in it keep their own
+  // role. A line that is no setting only has its addresses marked.
   let mut cursor = value_from.unwrap_or(0);
+  let value_end = value_from.map_or(line.len(), |from| value_end(line, from));
   for address in addresses {
-    if address.start >= cursor {
+    if address.start >= cursor && address.end <= value_end {
       if value_from.is_some() {
         builder.push(offset + cursor..offset + address.start, Role::Value);
       }
@@ -368,7 +393,30 @@ fn dotenv_line(line: &str, offset: usize, builder: &mut Builder) {
     }
   }
   if value_from.is_some() {
-    builder.push(offset + cursor..offset + line.len(), Role::Value);
+    builder.push(offset + cursor..offset + value_end, Role::Value);
+    if let Some(hash) = line[value_end..].find('#') {
+      builder.push(offset + value_end + hash..offset + line.len(), Role::Comment);
+    }
+  }
+}
+
+/// Where the value that starts at `from` ends: after its closing quote, else before a `#` that follows a space.
+fn value_end(line: &str, from: usize) -> usize {
+  let value = &line[from..];
+  match value.chars().next() {
+    Some(quote @ ('"' | '\'')) => {
+      let mut escaped = false;
+      for (at, character) in value.char_indices().skip(1) {
+        match character {
+          _ if escaped => escaped = false,
+          '\\' if quote == '"' => escaped = true,
+          _ if character == quote => return from + at + 1,
+          _ => {}
+        }
+      }
+      line.len()
+    }
+    _ => value.find([' ', '\t']).and_then(|space| value[space..].trim_start().starts_with('#').then_some(from + space)).unwrap_or(line.len()),
   }
 }
 

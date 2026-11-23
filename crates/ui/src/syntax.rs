@@ -37,6 +37,14 @@ pub(crate) fn register_highlights() {
       .replace("(variable_name) @property", "(variable_name) @variable")
       .replace("] @operator", "] @keyword")
   });
+  // Go as GitHub draws it: calls, methods and fields are blue, names of constants and functions are plain.
+  rewrite(registry, "go", |query| {
+    query
+      .replace("(function_declaration\n  name: (identifier) @function)", "(function_declaration\n  name: (identifier) @variable)")
+      .replace("(const_spec\n  name: (identifier) @constant)", "(const_spec\n  name: (identifier) @variable)")
+      .replace("@function", "@property")
+      .replace("@variable.member", "@property")
+  });
   // Markdown as GitHub draws it: headings and rules in the heading style, quotes green, fences and inline marks like strings, link
   // brackets like strings, list markers orange and the pipes of a table gold (the `variant` role).
   rewrite(registry, "markdown", |query| {
