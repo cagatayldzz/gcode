@@ -24,7 +24,7 @@ One `Workspace` entity renders one window. This page explains how the pieces are
 project and an Add button), then the favorite projects as tabs, then the Add button.
 
 **Activity bar** (`render_activity_bar`). A 56 px strip of buttons — Explorer, Search, Git, terminals, AI agents, and project settings
-below the tool group. The profile's avatar sits at the bottom and opens a menu with the profile list. Which buttons show, and in what
+below the tool group. The profile's avatar sits at the bottom and opens a menu with the profile list; the gear below it opens Settings. Which buttons show, and in what
 order, follows `Preferences.activity_bar` (`ActivityBarLayout`: order and hidden ids, in `preferences.json`).
 
 **Sidebar.** The selected view, in a Kit `h_resizable` pane. It is *plain workspace content, not a dock panel*, so it has no tab bar, and
