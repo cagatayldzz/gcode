@@ -23,8 +23,9 @@ the same time — but it is organized around coding agents instead of shells.
 
 ## Mention other projects — `⇧⌘M`
 
-Press `⇧⌘M` in the AI view or in the terminals to open a list of your projects. Tick some, and their paths are written into the
-prompt as shell-escaped paths, so one prompt can refer to several projects.
+Press `⇧⌘M` in the AI view or in the terminals to open a list of your projects. Type to filter, move with `↑` and `↓`, and press
+`Enter` to write the highlighted project's path into the prompt. To mention several, press `⇧Enter` on each one to tick it, then `Enter`
+(the mouse works too: click a row to tick it). Paths are shell-escaped, so one prompt can refer to several projects.
 
 ## Choosing which buttons show
 
