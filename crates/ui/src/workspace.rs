@@ -110,11 +110,14 @@ const MENU_WIDTH: Pixels = px(380.);
 /// The width of the project menu: wider, as each project also shows what is waiting in it.
 const PROJECT_MENU_WIDTH: Pixels = px(380.);
 
-/// How tall the lists of the project menu get before they scroll, and the least the branch menu's lists are.
+/// How tall the lists of the project menu and of the branch menu get before they scroll.
 const MENU_LIST_MAX_HEIGHT: Pixels = px(320.);
 
 /// The line under the Git bar: the branch menu starts below it, so that it does not cover it.
 const BAR_BORDER: Pixels = px(1.);
+
+/// The space between the Git bar and the branch menu that floats under it.
+const MENU_GAP: Pixels = px(4.);
 
 /// How many of the most recently changed branches the branch menu lists as recent.
 const RECENT_BRANCHES: usize = 5;

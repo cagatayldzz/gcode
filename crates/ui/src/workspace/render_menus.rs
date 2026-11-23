@@ -73,9 +73,9 @@ impl Workspace {
   }
 
   /// The branch menu: the branches in sections (favorites, default, recent, others), and the pull requests when a connected
-  /// account serves the repository. It is drawn over the window, right under the branch button's slot in the Git bar and down to
-  /// the bottom of the window; a click outside it, or Escape, closes it. It belongs to no popover, so nothing else decides where it
-  /// goes: the position comes from the slot's measured bounds.
+  /// account serves the repository. It floats over the window like the project menu, rounded, right under the branch button's slot
+  /// in the Git bar; a click outside it, or Escape, closes it. It belongs to no popover, so nothing else decides where it goes: the
+  /// position comes from the slot's measured bounds.
   pub(super) fn render_branch_menu(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
     if !self.branch_menu_open {
       return None;
@@ -100,9 +100,8 @@ impl Workspace {
           starred,
         )
       };
-      // The menu always reaches the bottom of the window, whatever it holds: from the bottom of its button to the window's edge,
-      // less its own bottom border line. Its list takes what the header leaves, and scrolls when it holds more.
-      let menu_height = (window.viewport_size().height - slot.bottom() - BAR_BORDER - px(1.)).max(MENU_LIST_MAX_HEIGHT);
+      // A floating menu like the project menu: it fits its content up to a cap, and never runs past the window's bottom edge.
+      let menu_height = (window.viewport_size().height - slot.bottom() - BAR_BORDER - MENU_GAP * 2.).max(MENU_LIST_MAX_HEIGHT);
       let lowered = query.trim().to_lowercase();
       let tab = if hosted.is_some() { tab } else { BranchTab::Branches };
 
@@ -123,6 +122,8 @@ impl Workspace {
           .children([Tab::new().cursor_pointer().label("Branches"), Tab::new().cursor_pointer().label(format!("Pull Requests{count}"))])
       });
 
+      // The list takes what the header and the tabs leave of the cap.
+      let list_height = (menu_height - px(64.)).min(MENU_LIST_MAX_HEIGHT);
       let body = match tab {
         BranchTab::Branches => {
           // Sections, as in GitHub Desktop: the starred branches, the default one, the five most recently changed, then the rest.
@@ -148,11 +149,10 @@ impl Workspace {
             h_flex()
               .id(SharedString::from(format!("branch-{name}")))
               .gap_2()
-              .px_3()
+              .px_2()
               .py_1()
+              .rounded_md()
               .items_center()
-              .border_b_1()
-              .border_color(crate::theme::row_divider(&palette))
               .cursor_pointer()
               .when(selected, |row| row.bg(palette.selected))
               .hover(|row| row.bg(palette.hover))
@@ -160,7 +160,7 @@ impl Workspace {
               .child(
                 div()
                   .id(SharedString::from(format!("branch-star-{name}")))
-                  .size_5()
+                  .size_6()
                   .flex()
                   .flex_none()
                   .items_center()
@@ -214,9 +214,8 @@ impl Workspace {
             }
             rows.push(
               Label::new(label)
-                .px_3()
+                .px_2()
                 .pt_2()
-                .pb_1()
                 .text_size(FONT_SIZE_SM)
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme.muted_foreground)
@@ -232,14 +231,18 @@ impl Workspace {
               .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.new_branch(suggestion.clone(), window, cx)))
           };
           v_flex()
-            .gap_2()
-            .flex_1()
+            .gap_1()
             .min_h_0()
-            .child(h_flex().gap_2().items_center().px_3().child(div().flex_1().child(crate::components::soft_input(&filter, cx))).child(new_branch))
             .child(
-              div().id("branch-list").flex_1().min_h_0().overflow_y_scrollbar().child(
+              h_flex().gap_2().items_center().p_3().pb_0().child(div().flex_1().child(crate::components::soft_input(&filter, cx))).child(new_branch),
+            )
+            .child(
+              div().id("branch-list").max_h(list_height).overflow_y_scrollbar().child(
                 v_flex()
-                  .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_3().py_1().text_color(theme.muted_foreground)))
+                  .gap_0p5()
+                  .px_3()
+                  .pb_3()
+                  .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground)))
                   .children(rows),
               ),
             )
@@ -354,7 +357,7 @@ impl Workspace {
             .into_any_element()
         }
       };
-      v_flex().w(MENU_WIDTH).h(menu_height).pt_3().gap_2().children(tabs.map(|tabs| div().px_3().child(tabs))).child(body)
+      v_flex().w(MENU_WIDTH).max_h(menu_height).gap_1().children(tabs.map(|tabs| div().px_3().pt_3().child(tabs))).child(body)
     };
     Some(
       deferred(
@@ -369,11 +372,13 @@ impl Workspace {
               .occlude()
               .absolute()
               .left(slot.left())
-              .top(slot.bottom() + BAR_BORDER)
+              .top(slot.bottom() + BAR_BORDER + MENU_GAP)
               .bg(theme.popover)
               .border_1()
-              .border_t_0()
               .border_color(theme.border)
+              .rounded_lg()
+              .shadow_lg()
+              .overflow_hidden()
               .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
               .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" {
