@@ -309,6 +309,7 @@ fn a_refused_token_is_followed_by_the_users_own_login_and_the_message_says_both_
   // Without a connected account there is only one attempt and the plain message.
   let error = ws_git::push(&dir, None, |_| {}).unwrap_err();
   assert!(error.contains("403") && !error.contains("connected account"), "{error}");
+  assert!(error.contains("no login to give Git") && error.contains("Settings → Accounts"), "the message says what to do: {error}");
   assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 3);
   fs::remove_dir_all(dir).unwrap();
 }

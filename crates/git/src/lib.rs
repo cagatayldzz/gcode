@@ -661,6 +661,12 @@ fn with_login(credentials: Option<&Credentials>, mut command: impl FnMut(Option<
         second
       }
     }),
+    // Nothing to give git: no account serves the address, or its token is not in the Keychain. git's own words ("could not read
+    // Username") do not say what to do about it.
+    (Err(error), None) if login_refused(&error) => Err(format!(
+      "{} The app had no login to give Git (no account is connected for this address, or the account's token is missing from the Keychain), and your own Git login has no saved password. Connect the account again in Settings → Accounts, or sign in once with `git push` in a terminal.",
+      error.trim_end()
+    )),
     (result, _) => result,
   }
 }
