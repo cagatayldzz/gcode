@@ -27,6 +27,7 @@ The terminal info bar and the command palette read the live keymap, so what they
 | --- | --- |
 | `⌘K` `⌘C` | Add line comment to the selected lines |
 | `⌘K` `⌘U` | Remove line comment |
+| `⌘D` | Add the next occurrence: selects the word at the cursor, then each press adds the next place the selected text occurs (wraps around the file). In a terminal, `⌘D` still splits the pane |
 | `⌘/` | Toggle line comment: off when every line is already a comment, else on |
 
 The marker follows the language: `//` (Rust, JavaScript, TypeScript, Go, Swift, Kotlin), `#` (Python, shell, YAML, TOML, `.env`, Dockerfile,

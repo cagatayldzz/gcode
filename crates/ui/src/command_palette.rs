@@ -4,8 +4,8 @@
 
 use crate::{
   components::display_path, theme::FONT_SIZE_SM, AddLineComment, AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, GoToFile,
-  NewClaude, NewCodex, NewTerminal, OpenSettings, RemoveLineComment, SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges,
-  ToggleLineComment, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
+  NewClaude, NewCodex, NewTerminal, OpenSettings, RemoveLineComment, SaveFile, SearchProject, SelectNextOccurrence, SplitDown, SplitRight,
+  ToggleAgents, ToggleAllChanges, ToggleLineComment, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{
   component::{
@@ -70,6 +70,7 @@ fn commands() -> Vec<Entry> {
     entry("Add Line Comment", &["comment out", "#", "//"], AddLineComment),
     entry("Remove Line Comment", &["uncomment", "comment in"], RemoveLineComment),
     entry("Toggle Line Comment", &["comment", "uncomment"], ToggleLineComment),
+    entry("Add Next Occurrence", &["select", "multi cursor", "same word"], SelectNextOccurrence),
     entry("Close Tab", &["close file"], CloseTab),
     entry("New Terminal", &["shell", "console"], NewTerminal),
     entry("Toggle Terminal", &["shell", "console", "show", "hide"], ToggleTerminal),

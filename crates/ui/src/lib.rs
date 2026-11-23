@@ -21,6 +21,7 @@ mod mention_picker;
 mod menus;
 mod merge_dialog;
 mod minimap;
+mod occurrences;
 mod profiles;
 mod project_manager;
 mod project_search;
@@ -65,6 +66,8 @@ actions!(
     AddLineComment,
     RemoveLineComment,
     ToggleLineComment,
+    // In the editor: select the next place the selected text (or the word at the cursor) occurs, keeping the selections so far.
+    SelectNextOccurrence,
     CloseTab,
     MentionProjects,
     ToggleTerminal,

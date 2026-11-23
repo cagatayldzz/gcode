@@ -4,6 +4,7 @@ use crate::close_order::CloseOrder;
 use crate::components::{strip, strip_tab};
 use crate::line_comments::{self, CommentMode};
 use crate::minimap::{line_styles, Minimap};
+use crate::occurrences::{next_occurrence, word_at};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   base::input::{FoldRange, HighlightStyleResolver, InputEdit, InputHighlighter, Rope},
@@ -281,6 +282,8 @@ pub(crate) struct EditorPanel {
   search_report: Option<(SharedString, Entity<EditorState>)>,
   report_active: bool,
   replacement_files: std::collections::HashSet<PathBuf>,
+  /// The run of "Add Next Occurrence" in progress: the file, the selection it started from and where the last occurrence ended.
+  occurrences: Option<(PathBuf, Range<usize>, usize)>,
 }
 
 impl EditorPanel {
@@ -373,6 +376,7 @@ impl EditorPanel {
       search_report: None,
       report_active: false,
       replacement_files: Default::default(),
+      occurrences: None,
     }
   }
 
@@ -782,6 +786,35 @@ impl EditorPanel {
       state.set_selected_range(edit.range.start + (edit.selection.start - edit.range.start)..edit.selection.end, cx);
     });
     Ok(true)
+  }
+
+  /// Add Next Occurrence (⌘D): the first press selects the word at the cursor; each next press adds the next place the selected text
+  /// occurs, wrapping around the file. Does nothing unless the file's editor has the focus.
+  pub fn select_next_occurrence(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    let Some(path) = self.tabs.current().filter(|_| !self.report_active).cloned() else { return false };
+    let Some(file) = self.files.get(&path) else { return false };
+    let state = file.state.clone();
+    if !state.read(cx).focus_handle(cx).contains_focused(window, cx) {
+      return false;
+    }
+    let text = state.read(cx).value().to_string();
+    let active = state.read(cx).selected_range();
+    let run = self.occurrences.take().filter(|(owner, origin, _)| *owner == path && *origin == active && text.get(origin.clone()).is_some());
+    let (origin, from) = match run {
+      Some((_, origin, last_end)) => (origin, last_end),
+      None if active.is_empty() => {
+        if let Some(word) = word_at(&text, active.start) {
+          state.update(cx, |state, cx| state.set_selected_range(word.clone(), cx));
+          self.occurrences = Some((path, word.clone(), word.end));
+        }
+        return true;
+      }
+      None => (active.clone(), active.end),
+    };
+    let Some(found) = next_occurrence(&text, &text[origin.clone()], from) else { return true };
+    state.update(cx, |state, cx| state.add_selection(found.clone(), cx));
+    self.occurrences = Some((path, origin, found.end));
+    true
   }
 
   /// Writes the open file to disk.

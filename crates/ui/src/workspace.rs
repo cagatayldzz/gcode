@@ -28,8 +28,8 @@ use crate::{
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
   AddLineComment, AddProfile, AddProject, CheckForUpdates, ClearBuffer, CloseTab, EditProfiles, MentionProjects, NewClaude, NewCodex, NewTerminal,
-  OpenSettings, RemoveLineComment, SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleLineComment,
-  ToggleProjectSettings, ToggleTerminal, ViewOnHost,
+  OpenSettings, RemoveLineComment, SaveFile, SearchProject, SelectNextOccurrence, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges,
+  ToggleLineComment, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{base::Selectable as _, prelude::FluentBuilder as _};
 use gpui_kit::{
@@ -732,6 +732,11 @@ impl Workspace {
     self.comment_lines(CommentMode::Toggle, window, cx);
   }
 
+  /// Add Next Occurrence (⌘D in the editor): see `EditorPanel::select_next_occurrence`.
+  pub fn select_next_occurrence(&mut self, _: &SelectNextOccurrence, window: &mut Window, cx: &mut Context<Self>) {
+    self.editor_panel.update(cx, |editor, cx| editor.select_next_occurrence(window, cx));
+  }
+
   fn comment_lines(&mut self, mode: CommentMode, window: &mut Window, cx: &mut Context<Self>) {
     if let Err(message) = self.editor_panel.update(cx, |editor, cx| editor.comment_lines(mode, window, cx)) {
       window.push_notification(Notification::info(message), cx);
@@ -836,6 +841,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::view_on_host))
       .on_action(cx.listener(Self::split_down))
       .on_action(cx.listener(Self::save_file))
+      .on_action(cx.listener(Self::select_next_occurrence))
       .on_action(cx.listener(Self::add_line_comment))
       .on_action(cx.listener(Self::remove_line_comment))
       .on_action(cx.listener(Self::toggle_line_comment))
