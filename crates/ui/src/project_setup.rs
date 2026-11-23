@@ -339,6 +339,8 @@ impl Render for ProjectSetup {
                 .child(Icon::empty().path("icons/info.svg").size_4().flex_none().text_color(theme.muted_foreground))
                 .child(
                   Label::new("Connect GitHub, GitLab or Azure DevOps in Settings → Accounts to browse your repositories and clone private ones.")
+                    .flex_1()
+                    .min_w_0()
                     .text_size(FONT_SIZE_SM)
                     .text_color(theme.muted_foreground),
                 ),

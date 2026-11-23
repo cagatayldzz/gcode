@@ -37,17 +37,23 @@ jobs:
   interface:
     runs-on: macos-26
     timeout-minutes: 45
+    env:
+      # CI only needs the window to open and draw, not fast or debuggable code: no debug info for the crates of this
+      # workspace, and the dependencies stay unoptimized (the development profile optimizes them for the editor's sake).
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CI_CARGO_FLAGS: --locked --config profile.dev.package."*".opt-level=0 --config profile.dev.package."*".debug=false
     steps:
       - uses: actions/checkout@v6
       - run: rustup default stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: interface
+          shared-key: interface-fast
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          # A failing test must not leave the next run with a cold cache (a cold run is about 13 minutes).
+          # A failing test must not leave the next run with a cold cache.
           cache-on-failure: true
+          cache-workspace-crates: true
       # One build profile for both steps: `cargo check` would compile every dependency a second time.
       - name: Build the interface crates
-        run: cargo test --locked -p ws-ui -p ws-app --no-run
+        run: cargo test $CI_CARGO_FLAGS -p ws-ui -p ws-app --no-run
       - name: Open and draw the window headlessly
-        run: cargo test --locked -p ws-ui --test window_render
+        run: cargo test $CI_CARGO_FLAGS -p ws-ui --test window_render
