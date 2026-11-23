@@ -17,6 +17,9 @@ fn repository(name: &str) -> PathBuf {
   let _ = fs::remove_dir_all(&dir);
   fs::create_dir_all(&dir).unwrap();
   git(&dir, &["init", "--initial-branch=main"]);
+  // The library reads the identity from the repository: CI machines have none of their own.
+  git(&dir, &["config", "user.name", "Test"]);
+  git(&dir, &["config", "user.email", "test@example.com"]);
   fs::write(dir.join("a.txt"), "one\ntwo\nthree\n").unwrap();
   git(&dir, &["add", "."]);
   git(&dir, &["commit", "-m", "first"]);
@@ -186,10 +189,6 @@ fn recent_authors_lists_other_people_once_and_leaves_out_the_committer() {
   fs::write(dir.join("c.txt"), "c").unwrap();
   git(&dir, &["add", "."]);
   git(&dir, &["commit", "-m", "by ada again", "--author=Ada <ADA@example.com>"]);
-
-  let mut repository = git2::Repository::open(&dir).unwrap();
-  repository.config().unwrap().set_str("user.email", "test@example.com").unwrap();
-  let _ = &mut repository;
 
   assert_eq!(vekro_git::recent_authors(&dir, 100, 10), vec![("Ada".to_string(), "ADA@example.com".to_string())]);
   fs::remove_dir_all(dir).unwrap();

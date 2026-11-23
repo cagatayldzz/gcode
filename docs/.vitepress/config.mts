@@ -6,6 +6,8 @@ export default defineConfig({
   lang: 'en',
   base: `${(process.env.VEKRO_DOCS_BASE ?? '/vekro').replace(/\/$/, '')}/`,
   cleanUrls: true,
+  // Not a dot-directory: the Pages artifact upload skips hidden folders and would publish nothing.
+  outDir: '../docs-site',
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/guide/', activeMatch: '^/guide/' },

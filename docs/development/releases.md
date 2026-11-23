@@ -56,7 +56,7 @@ The site is [VitePress](https://vitepress.dev) in `docs/`.
 ```sh
 bun install
 bun run docs:dev        # edit locally with hot reload
-bun run docs:build      # static site in docs/.vitepress/dist
+bun run docs:build      # static site in docs-site/
 bun run docs:preview    # serve that build
 ```
 

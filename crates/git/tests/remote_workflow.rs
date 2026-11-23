@@ -35,6 +35,11 @@ impl Remote {
     git(&seed, &["push", "-u", "origin", "main"]);
     git(&root, &["clone", origin.to_str().unwrap(), "mine"]);
     git(&root, &["clone", origin.to_str().unwrap(), "other"]);
+    // The library reads the identity from the repository: CI machines have none of their own.
+    for clone in ["mine", "other"] {
+      git(&root.join(clone), &["config", "user.name", "Test"]);
+      git(&root.join(clone), &["config", "user.email", "test@example.com"]);
+    }
     Self { mine: root.join("mine"), other: root.join("other"), root }
   }
 }
