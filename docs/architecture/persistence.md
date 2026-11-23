@@ -1,9 +1,9 @@
 # Persistence
 
-Everything gcode owns lives in one data directory:
+Everything gCode owns lives in one data directory:
 
 ```text
-~/Library/Application Support/gcode/          (override with GCODE_DATA_DIR)
+~/Library/Application Support/gCode/          (override with GCODE_DATA_DIR)
 ├── profiles.json            list of profiles, the one used last
 ├── window.json              window placement, shared by all profiles
 ├── index/<hash>.idx         per-project file index (binary; a cache)
@@ -15,7 +15,7 @@ Everything gcode owns lives in one data directory:
 
 ## Safe writing
 
-Files gcode owns are written with `ws_storage::write_json`:
+Files gCode owns are written with `ws_storage::write_json`:
 
 1. the new content goes to a **temporary file beside the target**;
 2. it **replaces** the target in one step;
@@ -92,7 +92,7 @@ Dock layout, open files, running terminals. (Window size and position are stored
 The name appears in `product.toml`, nowhere else in the code:
 
 ```toml
-name = "gcode"                       # the app bundle, executable, Application Support folder, Keychain service, user agent
+name = "gCode"                       # the app bundle, executable, Application Support folder, Keychain service, user agent
 env_prefix = "GCODE"                 # <prefix>_DATA_DIR and friends
 bundle_id = "com.cagatayldzz.gcode"  # the development build adds ".dev"
 legacy_name = "…"                    # the previous name, read only by the first-start migration

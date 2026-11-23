@@ -18,7 +18,7 @@ the token needs, named as the service names them:
 | **GitLab** | the `api` scope |
 | **Azure DevOps** | Code, *Read & write*, with the token's organization set to **yours**, not "All accessible organizations" (that choice stops working on December 1, 2026) |
 
-After connecting, gcode reports what it could confirm:
+After connecting, gCode reports what it could confirm:
 
 - GitLab and classic GitHub tokens list their scopes, so a missing one is named.
 - For a fine-grained GitHub token and for Azure DevOps, only *reading* can be tried. An information notice says that pushing and pull

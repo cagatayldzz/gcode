@@ -19,15 +19,15 @@ Requirements:
 git clone https://github.com/cagatayldzz/vekro.git
 cd <repository>
 bun install
-bun run dev          # debug build, launches dist/gcode.app
+bun run dev          # debug build, launches dist/gCode.app
 ```
 
 ## Commands
 
 | Command | Does |
 | --- | --- |
-| `bun run dev` | debug build, launch `dist/gcode.app` |
-| `bun run build` | release build → `dist/gcode.app` |
+| `bun run dev` | debug build, launch `dist/gCode.app` |
+| `bun run build` | release build → `dist/gCode.app` |
 | `bun run check` | script syntax and shell tests, `cargo fmt --check`, clippy with warnings as errors, tests — **run before finishing a change** |
 | `bun run test` | shell tests, then `cargo test --locked --workspace` |
 | `bun run benchmark` | the performance suite (see [Performance](./performance.md)) |
@@ -46,7 +46,7 @@ cargo fmt --all
 bun run check                              # the whole workspace, no app bundle, no window
 ```
 
-These checks run **without bundling or opening gcode**. Use `bun run dev` only when you need to look at the interface.
+These checks run **without bundling or opening gCode**. Use `bun run dev` only when you need to look at the interface.
 
 ### Dependencies
 
@@ -82,8 +82,8 @@ App and release automation use shell and Rust. The documentation workflow uses B
 | --- | --- |
 | `scripts/app.sh` | build, bundle, sign, launch, check (`--dev`, `[debug\|release] --build`, `--check`, `--icon`) |
 | `scripts/release.sh` | request a release; in CI: `prepare` (next version, stamping), `notes`, `package`, `finalize` (assets, checksums) |
-| `scripts/notarize-app.sh` | sign with Developer ID and notarize `dist/gcode.app` (macOS tools, release secrets) |
-| `scripts/profile-app.sh` | sample a running gcode's CPU and memory ([Performance](./performance.md)) |
+| `scripts/notarize-app.sh` | sign with Developer ID and notarize `dist/gCode.app` (macOS tools, release secrets) |
+| `scripts/profile-app.sh` | sample a running gCode's CPU and memory ([Performance](./performance.md)) |
 | `scripts/tests/*.sh` | shell tests, run by `scripts/tests/run.sh` (version, notes, packaging, workflow guarantees) |
 
 ## Running the app in isolation

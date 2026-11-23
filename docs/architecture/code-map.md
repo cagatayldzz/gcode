@@ -17,7 +17,7 @@ repository/
 │   ├── product/           ws-product: the name, as constants generated from product.toml
 │   ├── terminal/          PTY + emulator
 │   ├── git/               libgit2 reads, git-program network & merge operations
-│   ├── storage/           files gcode owns
+│   ├── storage/           files gCode owns
 │   ├── index/             project file index, fuzzy matching, line highlighters
 │   ├── hosting/           hosting-service accounts and APIs
 │   ├── opencommit/        commit message generation
@@ -121,4 +121,4 @@ repository/
 | colors | `crates/ui/src/theme.rs` |
 | the product's name, bundle id or environment prefix | `product.toml` (nowhere else) |
 | a language's highlighting | `crates/ui/src/syntax.rs`, and `crates/ui/src/editor.rs` (`language_for`) |
-| a file gcode saves | `crates/storage/src/` and [Persistence](./persistence.md) |
+| a file gCode saves | `crates/storage/src/` and [Persistence](./persistence.md) |

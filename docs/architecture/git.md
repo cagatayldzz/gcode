@@ -81,7 +81,7 @@ let args = if rebase_configured { ["pull"] } else { ["pull", "--no-rebase", "--n
 ```
 
 If the command fails and the repository is in the `Merge` state, the error says there are conflicts and the merge stays in progress for the
-resolver. (git prints `CONFLICT` on stdout, which gcode does not read; the repository state is the reliable signal.)
+resolver. (git prints `CONFLICT` on stdout, which gCode does not read; the repository state is the reliable signal.)
 
 ### Switching branches
 

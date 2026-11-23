@@ -83,5 +83,5 @@ The terminals and the AI view end in an info bar (`shortcut_bar`) that lists the
 
 - Pixels appear only for terminal geometry, window size/placement, platform boundaries and named constants (`FONT_SIZE`,
   `LEFT_DOCK_WIDTH`, `CHANGE_ROW_HEIGHT`…). Everything else uses Kit size tokens (`gap_2`, `size_5`, `rounded_md`).
-- The Kit sizes icons and dock parts in `rem`, so the theme's `font_size` is **never changed**; gcode's own content sets its text size with `FONT_SIZE`.
+- The Kit sizes icons and dock parts in `rem`, so the theme's `font_size` is **never changed**; gCode's own content sets its text size with `FONT_SIZE`.
 - Colors come from `cx.theme()` or the palette in `theme.rs` (`colors(cx)`), never from raw `rgb`/`hsla`.

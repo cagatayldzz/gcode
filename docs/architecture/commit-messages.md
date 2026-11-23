@@ -30,7 +30,7 @@ The sparkle button beside the commit description writes a message from the diff 
 - Settings live in the user's **`~/.opencommit`**, shared with the `oco` command. Unknown lines are kept and the file is mode `0600`. The
   `GCODE_OPENCOMMIT_CONFIG` variable names another file (for scratch runs).
 - The **commit instructions** are in `preferences.json` (`commit_instructions`: `None` is the built-in text, `Some("")` none at all).
-- gcode's `APP_COMMIT_PROVIDER` key selects the optional **Apple Intelligence** provider and leaves the `oco` provider settings available to the CLI.
+- gCode's `APP_COMMIT_PROVIDER` key selects the optional **Apple Intelligence** provider and leaves the `oco` provider settings available to the CLI.
 - **Push after commit**: the commit button runs `git push` right after committing.
 
 ## Apple Intelligence

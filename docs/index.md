@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: gcode
+  name: gCode
   text: Projects, editor, terminals and Git — one native macOS window
   tagline: Built with Rust and GPUI Kit. Fast to open, safe with your repositories.
   actions:
@@ -47,9 +47,9 @@ features:
 
 | I want to… | Read |
 | --- | --- |
-| use gcode | [User guide](/guide/) |
+| use gCode | [User guide](/guide/) |
 | understand the code and where things live | [Architecture](/architecture/) and the [code map](/architecture/code-map) |
 | build it, test it, ship it | [Development](/development/) |
 | follow the project's rules | [Conventions](/development/conventions) |
 
-![gcode in Light mode with the file explorer and a Rust file open in the editor](./images/workspace-light.png)
+![gCode in Light mode with the file explorer and a Rust file open in the editor](./images/workspace-light.png)

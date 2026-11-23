@@ -1,6 +1,6 @@
 # Architecture overview
 
-gcode is a Cargo workspace of small libraries and one thin executable. The rule that shapes everything:
+gCode is a Cargo workspace of small libraries and one thin executable. The rule that shapes everything:
 
 > **Dependencies flow one way, from the interface down. Nothing below `ui` ever knows the interface exists.**
 
@@ -35,7 +35,7 @@ no GPUI types, so they are tested without a window and (for the plain-Rust ones)
 | **Thin entry point** | `apps/desktop/src/main.rs` calls `ws_app::run`. Application logic lives in `crates/*`. |
 | **Speed is a feature** | Opening a file, switching projects and typing must feel instant. Slow work (Git, search, indexing, network, Keychain) runs on background tasks; the interface thread only applies results. Measure before optimizing. |
 | **Safe by default** | Nothing changes a user's repository (commit, checkout, reset…) without an explicit action. A failed multi-step operation is rolled back: merges, reverts and cherry-picks abort instead of leaving half-done state. |
-| **Atomic persistence** | Files gcode owns are written to a temporary file and swapped in; the previous version is kept as `.bak`. |
+| **Atomic persistence** | Files gCode owns are written to a temporary file and swapped in; the previous version is kept as `.bak`. |
 | **One command, one action** | A command is a single `Action` shared by buttons, menus and keys. Key bindings are made in `crates/app`. |
 | **Kit first** | Interface parts come from GPUI Kit (`Dock`, `Editor`, `Diff`, `Empty`, `StatusBar`, `Settings`, `Command`…) instead of hand-built elements. |
 | **No `unsafe`** | The workspace sets `unsafe_code = "deny"`. |
@@ -71,4 +71,4 @@ Rendering is a pure function of state: **no state changes and no focus requests 
 - [Workspace & state](./workspace.md) — projects, switching, the refresh loop
 - [Terminals](./terminal.md) · [Git](./git.md) · [Editor & performance](./editor.md)
 - [Hosting & accounts](./hosting.md) · [Commit messages](./commit-messages.md) · [Updates](./updates.md)
-- [Persistence](./persistence.md) — every file gcode writes
+- [Persistence](./persistence.md) — every file gCode writes

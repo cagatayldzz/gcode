@@ -1,8 +1,8 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'gcode',
-  description: 'User and developer documentation for the gcode macOS app.',
+  title: 'gCode',
+  description: 'User and developer documentation for the gCode macOS app.',
   lang: 'en',
   base: `${(process.env.DOCS_BASE ?? '/').replace(/\/$/, '')}/`,
   cleanUrls: true,

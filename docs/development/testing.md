@@ -78,4 +78,4 @@ check` and CI both do.
 | Release workflow | the whole workspace's clippy and tests on the release runner |
 
 For routine changes: `cargo check --locked -p <package>` and `cargo test --locked -p <package>`, then `bun run check`. None of it bundles or
-opens gcode.
+opens gCode.

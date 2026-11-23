@@ -1,6 +1,6 @@
 # Editor & performance
 
-> **Opening a file must feel instant.** This page explains how gcode keeps that promise, and how highlighting and previews fit in.
+> **Opening a file must feel instant.** This page explains how gCode keeps that promise, and how highlighting and previews fit in.
 
 ## Opening files quickly
 
@@ -41,9 +41,9 @@ Two systems cover all languages:
               (newlines included); drawing only slices the runs
 ```
 
-- **Grammars** come from GPUI Kit's features (`tree-sitter-rust`, …). gcode adds two registrations in `crates/ui/src/syntax.rs`: the Swift
+- **Grammars** come from GPUI Kit's features (`tree-sitter-rust`, …). gCode adds two registrations in `crates/ui/src/syntax.rs`: the Swift
   highlight query (Kit registers the grammar with an empty one), and **Kotlin**, whose grammar crate (`tree-sitter-kotlin-ng`) ships no
-  query, so `crates/ui/src/syntax/kotlin.scm` is written for gcode. In that grammar `true`, `false` and `null` are plain identifiers, so
+  query, so `crates/ui/src/syntax/kotlin.scm` is written for gCode. In that grammar `true`, `false` and `null` are plain identifiers, so
   they are matched by text predicates.
 - **Line-based languages** are classified by `ws-index` with no interface dependency, which is why they are unit-tested alone.
 - A **language label** for the status bar comes from `language_label` (for example `"kotlin" → "Kotlin"`).

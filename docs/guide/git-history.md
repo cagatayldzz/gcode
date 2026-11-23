@@ -40,7 +40,7 @@ Right-click a commit:
 | **Copy SHA** | Copies the full commit id. |
 
 ::: info Safe by design
-Revert and cherry-pick need a clean working tree. If either one hits a **conflict**, gcode aborts it, puts you back on the branch you
+Revert and cherry-pick need a clean working tree. If either one hits a **conflict**, gCode aborts it, puts you back on the branch you
 started on and tells you which files conflicted. **Nothing is left half done.**
 :::
 

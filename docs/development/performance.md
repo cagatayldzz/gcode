@@ -41,7 +41,7 @@ Generate a scratch fixture; the command prints the directory containing `project
 cargo bench --locked -p ws-ui --bench performance -- --fixture
 ```
 
-Run an optimized gcode build with a scratch `GCODE_DATA_DIR`, add both fixture projects, find gcode's PID in Activity Monitor and record one
+Run an optimized gCode build with a scratch `GCODE_DATA_DIR`, add both fixture projects, find gCode's PID in Activity Monitor and record one
 trace per scenario. Keep the CSVs and Instruments traces **outside the repository**.
 
 ```sh

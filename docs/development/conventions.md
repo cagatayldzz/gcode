@@ -39,7 +39,7 @@ and `ScrollableElement`, over hand-built ones. Read the relevant part of the Kit
 | State changes and focus requests in handlers, `defer`, `defer_in` | State changes or focus requests inside `render` |
 | One command = one `Action` shared by buttons, menus and keys; bind keys in `crates/app` | Parallel code paths per entry point |
 | Show actionable failures in the interface (a notification) | Only logging errors |
-| Never change the theme's `font_size` (the Kit sizes icons and dock parts in `rem`) — set gcode's own text size with `FONT_SIZE` | Rescaling the theme |
+| Never change the theme's `font_size` (the Kit sizes icons and dock parts in `rem`) — set gCode's own text size with `FONT_SIZE` | Rescaling the theme |
 
 ### Speed is a feature
 

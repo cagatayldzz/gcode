@@ -18,7 +18,7 @@ The version comes from Conventional Commits since the latest `v*` tag:
    2 Prepare    choose the version · stamp Cargo.toml, Cargo.lock, package.json, Info.plist (in CI only)
                 · write RELEASE_NOTES.md (New Features / Bug Fixes / Documentation / Chores + changelog link)
    3 Build      ONE macOS job: release build · Developer ID signature · notarization
-                · gcode-<tag>-macos-arm64.zip · then workspace clippy and tests on the same runner
+                · gCode-<tag>-macos-arm64.zip · then workspace clippy and tests on the same runner
    4 Verify     exactly the expected assets, none empty, SHA256SUMS.txt
    5 Publish    checksums verified · draft GitHub release · published as latest
 ```
@@ -35,7 +35,7 @@ Required Actions secrets:
 | `APPLE_TEAM_ID` | signing and the updater's same-developer check |
 | `APPLE_APP_SPECIFIC_PASSWORD` | notarization |
 
-The release's assets must be exactly `gcode-<tag>-macos-arm64.zip` and `SHA256SUMS.txt`: the in-app updater only trusts those names under the
+The release's assets must be exactly `gCode-<tag>-macos-arm64.zip` and `SHA256SUMS.txt`: the in-app updater only trusts those names under the
 repository's own download URLs (see [Updates](../architecture/updates.md)).
 
 ## Continuous integration

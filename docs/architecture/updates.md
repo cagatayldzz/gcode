@@ -13,7 +13,7 @@
 `ws_updater::check` asks the GitHub API for the latest release of the repository in `[workspace.package]`, and
 `ws_version::is_newer` decides whether it is newer than the running version (`CARGO_PKG_VERSION`, stamped by the release workflow).
 
-The release's assets must be `gcode-<tag>-macos-arm64.zip` and `SHA256SUMS.txt` **under that repository's own download URLs**, so a tampered
+The release's assets must be `gCode-<tag>-macos-arm64.zip` and `SHA256SUMS.txt` **under that repository's own download URLs**, so a tampered
 answer cannot point the updater elsewhere.
 
 ## Download and verify
@@ -30,7 +30,7 @@ Only on request (`SettingsModel::download_update`) is the archive downloaded, ne
 
 ## Install
 
-**Restart to Update** (`restart_to_update`) quits and runs `SWAP_SCRIPT`, which waits for the app to exit, swaps `gcode.app` and reopens it,
+**Restart to Update** (`restart_to_update`) quits and runs `SWAP_SCRIPT`, which waits for the app to exit, swaps `gCode.app` and reopens it,
 **restoring the old app if the swap fails**.
 
 ## Rules

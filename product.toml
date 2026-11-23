@@ -2,7 +2,7 @@
 # with `scripts/product.sh`. Everything else (crates, types, files) is named without it, so renaming the product means editing this file.
 
 # The name people see: the app bundle, its executable, the Application Support folder, the Keychain service, the user agent.
-name = "gcode"
+name = "gCode"
 # The prefix of the environment variables the app reads (`<prefix>_DATA_DIR`, …).
 env_prefix = "GCODE"
 # The macOS bundle identifier (the development build adds `.dev`).
