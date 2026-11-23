@@ -20,8 +20,8 @@ use gpui_kit::{
   *,
 };
 use std::path::{Path, PathBuf};
-use vekro_index::{IndexInfo, ProjectIndex};
-use vekro_storage::Project;
+use ws_index::{IndexInfo, ProjectIndex};
+use ws_storage::Project;
 
 /// The icons a project can take instead of its first letter.
 pub(crate) const PROJECT_ICONS: [&str; 20] = [
@@ -144,7 +144,7 @@ impl ProjectSettings {
     let folder = project.folder_name();
     let current = project.name();
     let input = cx.new(|cx| InputState::new(window, cx).placeholder(folder).default_value(current));
-    let remote = vekro_git::remote_url(&project.path).unwrap_or_default();
+    let remote = ws_git::remote_url(&project.path).unwrap_or_default();
     let remote_input = cx.new(|cx| InputState::new(window, cx).placeholder("https://github.com/owner/repository.git").default_value(remote.clone()));
     let subscription = cx.subscribe_in(&input, window, |this, _, event: &InputEvent, _, cx| match event {
       InputEvent::PressEnter { .. } => this.save(cx),
@@ -178,7 +178,7 @@ impl ProjectSettings {
     self.index_work = work.map(|(label, _)| label);
     self.index_error = None;
     let job = cx.background_executor().spawn(async move {
-      let cache = vekro_storage::index_dir();
+      let cache = ws_storage::index_dir();
       let failure = work.and_then(|(_, run)| run(&cache, &root).err());
       (ProjectIndex::info(&cache, &root), failure)
     });
@@ -483,7 +483,7 @@ impl ProjectSettings {
     )
   }
 
-  /// Removing the project from Vekro; its folder stays on disk.
+  /// Removing the project from the app; its folder stays on disk.
   fn danger(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let path = self.project.path.clone();
     section(

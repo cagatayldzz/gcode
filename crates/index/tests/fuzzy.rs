@@ -1,4 +1,4 @@
-use vekro_index::fuzzy::{rank, score};
+use ws_index::fuzzy::{rank, score};
 
 #[test]
 fn letters_must_appear_in_order() {

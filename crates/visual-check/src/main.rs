@@ -1,5 +1,5 @@
 use std::{env, error::Error, io};
-use vekro_visual_check::{pixel, window_point};
+use ws_visual_check::{pixel, window_point};
 
 fn main() {
   if let Err(error) = run() {
@@ -11,7 +11,7 @@ fn main() {
 fn run() -> Result<(), Box<dyn Error>> {
   let args: Vec<_> = env::args().skip(1).collect();
   if args.len() != 1 && args.len() != 3 && args.len() != 5 {
-    return Err(io::Error::other("Usage: vekro-visual-check IMAGE.png [X Y [WINDOW_WIDTH WINDOW_HEIGHT]]").into());
+    return Err(io::Error::other("Usage: ws-visual-check IMAGE.png [X Y [WINDOW_WIDTH WINDOW_HEIGHT]]").into());
   }
   let image = image::open(&args[0])?;
   println!("image: {} x {} pixels", image.width(), image.height());

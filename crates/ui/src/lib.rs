@@ -1,4 +1,4 @@
-//! The Vekro interface: projects, editor, terminal and Git in one window, built with GPUI Kit.
+//! The interface: projects, editor, terminal and Git in one window, built with GPUI Kit.
 
 mod agents;
 mod all_changes;
@@ -45,7 +45,7 @@ pub use profiles::{open_last_window, open_window};
 pub use workspace::{Workspace, TOOLBAR_HEIGHT};
 
 actions!(
-  vekro,
+  app,
   [
     Quit,
     AddProject,
@@ -86,13 +86,17 @@ actions!(
 
 /// Profiles menu: show the window of the profile with this id, or open one.
 #[derive(Clone, Debug, PartialEq, Action)]
-#[action(namespace = vekro, no_json)]
+#[action(namespace = app, no_json)]
 pub struct SwitchProfile {
   pub id: String,
 }
 
-/// Loads the bundled fonts and registers editor highlighting.
+/// Moves data saved under the previous name, loads the bundled fonts and registers editor highlighting.
 pub fn init(cx: &mut App) {
+  // Data saved under the product's previous name moves to the current folder before anything reads it.
+  if let Err(error) = ws_storage::migrate_legacy_data_dir() {
+    eprintln!("Could not move the data folder of the previous name: {error}");
+  }
   syntax::register_highlights();
   profiles::init(cx);
   if let Err(error) = cx.text_system().add_fonts(vec![

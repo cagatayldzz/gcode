@@ -10,7 +10,10 @@ use std::{
   process::{Command, Stdio},
 };
 
-const APP_NAME: &str = "Vekro.app";
+/// The file name of the app bundle.
+fn app_name() -> String {
+  format!("{}.app", ws_product::NAME)
+}
 
 /// The steps of preparing an update, reported to the interface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,11 +31,11 @@ pub struct Staged {
 
 /// The `.app` bundle the running executable lives in.
 pub fn current_app_bundle() -> Result<PathBuf, UpdateError> {
-  let exe = std::env::current_exe().map_err(|e| UpdateError::new(format!("Could not locate Vekro: {e}")))?;
-  bundle_of(&exe).ok_or_else(|| UpdateError::new("Updates are available when Vekro runs from Vekro.app."))
+  let exe = std::env::current_exe().map_err(|e| UpdateError::new(format!("Could not locate {}: {e}", ws_product::NAME)))?;
+  bundle_of(&exe).ok_or_else(|| UpdateError::new(format!("Updates are available when {} runs from {}.", ws_product::NAME, app_name())))
 }
 
-/// The `.app` bundle an executable at `…/Vekro.app/Contents/MacOS/Vekro` lives in; `None` for any other location.
+/// The `.app` bundle an executable at `…/<name>.app/Contents/MacOS/<name>` lives in; `None` for any other location.
 pub fn bundle_of(executable: &Path) -> Option<PathBuf> {
   let bundle = executable.parent()?.parent()?.parent()?;
   (bundle.extension()? == "app" && executable.parent()?.file_name()? == "MacOS").then(|| bundle.to_path_buf())
@@ -41,13 +44,12 @@ pub fn bundle_of(executable: &Path) -> Option<PathBuf> {
 /// Downloads the release next to the running app, verifies it, and returns the
 /// replacement. Staging beside the app keeps the final swap an atomic rename.
 pub fn prepare(release: &Release, current_app: &Path, mut on_stage: impl FnMut(Stage)) -> Result<Staged, UpdateError> {
-  let parent = current_app.parent().ok_or_else(|| UpdateError::new("Could not locate the Vekro folder."))?;
-  let directory = parent.join(format!(".Vekro-update-{}", std::process::id()));
+  let parent = current_app.parent().ok_or_else(|| UpdateError::new(format!("Could not locate the {} folder.", ws_product::NAME)))?;
+  let directory = parent.join(format!(".{}-update-{}", ws_product::NAME, std::process::id()));
   let _ = fs::remove_dir_all(&directory);
-  fs::DirBuilder::new()
-    .mode(0o700)
-    .create(&directory)
-    .map_err(|_| UpdateError::new(format!("Vekro cannot write to {}. Move it to Applications or fix the folder permissions.", parent.display())))?;
+  fs::DirBuilder::new().mode(0o700).create(&directory).map_err(|_| {
+    UpdateError::new(format!("{} cannot write to {}. Move it to Applications or fix the folder permissions.", ws_product::NAME, parent.display()))
+  })?;
   let result = stage(release, current_app, &directory, &mut on_stage);
   if result.is_err() {
     let _ = fs::remove_dir_all(&directory);
@@ -72,12 +74,12 @@ fn stage(release: &Release, current_app: &Path, directory: &Path, on_stage: &mut
   }
   let extracted = directory.join("extracted");
   run("/usr/bin/ditto", &["-x", "-k", &archive.to_string_lossy(), &extracted.to_string_lossy()])?;
-  let app = extracted.join(APP_NAME);
+  let app = extracted.join(app_name());
   if !app.is_dir() {
-    return Err(UpdateError::new("The download does not contain Vekro.app."));
+    return Err(UpdateError::new(format!("The download does not contain {}.", app_name())));
   }
   verify_app(&app, current_app, &release.version)?;
-  let replacement = directory.join(APP_NAME);
+  let replacement = directory.join(app_name());
   fs::rename(&app, &replacement).map_err(|e| UpdateError::new(format!("Could not stage the update: {e}")))?;
   Ok(Staged { app: replacement, directory: directory.to_path_buf() })
 }
@@ -119,7 +121,7 @@ pub fn discard(staged: &Staged) {
 }
 
 /// Waits for this process to exit, swaps the staged app into place, and reopens
-/// Vekro. The caller must quit right after this returns. A failed swap restores
+/// it. The caller must quit right after this returns. A failed swap restores
 /// the previous app and reopens it.
 pub fn install(staged: &Staged, current_app: &Path) -> Result<(), UpdateError> {
   let script = staged.directory.join("swap.sh");

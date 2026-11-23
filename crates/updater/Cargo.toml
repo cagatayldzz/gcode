@@ -1,12 +1,12 @@
 [package]
-name = "vekro-updater"
+name = "ws-updater"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Vekro self-update from GitHub releases"
+description = "Self-update from GitHub releases"
 
 [lints]
 workspace = true
@@ -15,5 +15,6 @@ workspace = true
 doctest = false
 
 [dependencies]
-vekro-version.workspace = true
+ws-product.workspace = true
+ws-version.workspace = true
 serde_json.workspace = true

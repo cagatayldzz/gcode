@@ -1,5 +1,5 @@
 use std::{fs, path::Path, thread, time::Duration};
-use vekro_index::ProjectIndex;
+use ws_index::ProjectIndex;
 
 fn write(root: &Path, path: &str, text: &str) {
   let file = root.join(path);

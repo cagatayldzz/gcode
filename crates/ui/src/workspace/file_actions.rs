@@ -21,7 +21,7 @@ enum CommandKind {
 }
 
 #[derive(Action, Clone, PartialEq)]
-#[action(namespace = vekro, no_json)]
+#[action(namespace = app, no_json)]
 pub(super) struct FileCommand {
   kind: CommandKind,
   root: PathBuf,
@@ -119,7 +119,7 @@ impl Workspace {
       Reveal => self.run_file_location(&FileLocation(FileLocationCommand::RevealInFinder, path.clone()), window, cx),
       Timeline => self.open_file_timeline(path.clone(), window, cx),
       Cut | Copy => {
-        let marker = format!("vekro-file-{}-{:?}", std::process::id(), Instant::now());
+        let marker = format!("file-{}-{:?}", std::process::id(), Instant::now());
         cx.write_to_clipboard(ClipboardItem::new_string_with_metadata(path.to_string_lossy().into_owned(), marker.clone()));
         self.file_actions.clipboard = Some(FileClipboard { path: path.clone(), marker, cut: *kind == Cut });
       }
@@ -306,7 +306,7 @@ impl Workspace {
 
   fn open_file_timeline(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
     let title = SharedString::from(format!("Timeline · {}", display_path(&path)));
-    let work = cx.background_executor().spawn(async move { vekro_git::file_history(&path, 100) });
+    let work = cx.background_executor().spawn(async move { ws_git::file_history(&path, 100) });
     self.file_actions.timeline = Some(cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
       let _ = this.update_in(cx, |this, window, cx| {

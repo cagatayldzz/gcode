@@ -12,8 +12,8 @@ use std::{
 /// What `switch_branch` says when the changes in the working tree are in the way: the interface offers to set them aside.
 pub const SWITCH_OVERWRITE: &str = "Your changes would be overwritten by switching to";
 
-/// The marker of the stash entries Vekro makes, followed by the branch the changes belong to.
-const STASH_MARK: &str = "!!Vekro<";
+/// The marker of the stash entries the app makes, followed by the branch the changes belong to.
+const STASH_MARK: &str = "!!app-stash<";
 
 /// A branch the branch menu lists.
 #[derive(Clone, Debug, PartialEq, Eq)]

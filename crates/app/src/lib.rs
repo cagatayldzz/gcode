@@ -1,7 +1,7 @@
-//! The Vekro application: startup, windows and key bindings. `apps/vekro` only calls [`run`].
+//! The application: startup, windows and key bindings. `apps/desktop` only calls [`run`].
 
 use gpui_kit::*;
-use vekro_ui::{
+use ws_ui::{
   Assets, ClearBuffer, CloseTab, CopySelection, GoToFile, MentionProjects, NewTerminal, OpenCommandPalette, OpenSearchResults, OpenSettings,
   PasteClipboard, Quit, SaveFile, SearchProject, SplitDown, SplitRight, ToggleAgents, ToggleTerminal, ViewOnHost,
 };
@@ -11,7 +11,7 @@ pub fn run() {
   let app = gpui_kit::application().with_assets(Assets);
   app.on_reopen(|cx| {
     if cx.windows().is_empty() {
-      vekro_ui::open_last_window(cx);
+      ws_ui::open_last_window(cx);
     }
     cx.activate(true);
   });
@@ -39,9 +39,9 @@ pub fn run() {
       KeyBinding::new("cmd-v", PasteClipboard, Some("Terminal")),
       KeyBinding::new("cmd-k", ClearBuffer, Some("Terminal")),
     ]);
-    vekro_ui::init(cx);
+    ws_ui::init(cx);
     cx.on_action(|_: &Quit, cx| cx.quit());
-    // The Profiles menu is handled by `vekro_ui::init`.
-    vekro_ui::open_last_window(cx);
+    // The Profiles menu is handled by `ws_ui::init`.
+    ws_ui::open_last_window(cx);
   });
 }

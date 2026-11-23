@@ -14,7 +14,10 @@ pub fn run(program: &str, args: &[&str]) -> Result<String, UpdateError> {
   }
 }
 
-const USER_AGENT: &str = concat!("Vekro/", env!("CARGO_PKG_VERSION"));
+/// The user agent of the update requests: the product name and version.
+fn user_agent() -> String {
+  format!("{}/{}", ws_product::NAME, env!("CARGO_PKG_VERSION"))
+}
 
 /// HTTPS GET through curl; returns the status code and body. Redirects stay on HTTPS.
 pub fn get(url: &str) -> Result<(u16, String), UpdateError> {
@@ -32,7 +35,7 @@ pub fn get(url: &str) -> Result<(u16, String), UpdateError> {
       "--max-time",
       "45",
       "--user-agent",
-      USER_AGENT,
+      &user_agent(),
       "-H",
       "Accept: application/vnd.github+json",
       "--write-out",
@@ -62,7 +65,7 @@ pub fn download(url: &str, destination: &Path) -> Result<(), UpdateError> {
       "--max-time",
       "900",
       "--user-agent",
-      USER_AGENT,
+      &user_agent(),
       "--output",
       &destination,
       url,

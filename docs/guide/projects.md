@@ -1,7 +1,7 @@
 # Projects
 
-A **project** is a folder on your Mac. Vekro lists it, remembers how you grouped it, and gives it its own Explorer state,
-editor tabs and terminals. Nothing Vekro does ever deletes a project's folder.
+A **project** is a folder on your Mac. gcode lists it, remembers how you grouped it, and gives it its own Explorer state,
+editor tabs and terminals. Nothing gcode does ever deletes a project's folder.
 
 ## Adding a project
 
@@ -33,7 +33,7 @@ Choose a project from the **project menu** at the left of the title bar, or clic
 Everything in the window belongs to the open project: the Git summary, the folder tree (with the folders you had opened and the
 file you had selected), the file in the editor and the terminals. A dev server running in project A is still running when you come back to it.
 
-If a project's folder disappears (deleted in Finder, by a command, by another app), Vekro removes it from the list on its own, at the
+If a project's folder disappears (deleted in Finder, by a command, by another app), gcode removes it from the list on its own, at the
 next start, when the window comes to the front, and every few seconds, and tells you which one it removed. A folder that cannot be
 read (no permission, an unmounted disk) is **not** counted as deleted.
 
@@ -63,7 +63,7 @@ The sort button beside **Add** in the menu opens **Settings → Project list**, 
 | --- | --- |
 | Add a category | **New category** (top right) asks for a name. |
 | Move a project | Drag a row by its grip: onto a category title to put it in, onto **No category** to take it out, onto another project to put it right before that one. |
-| Per project | **Name, icon and color**, the category menu, **Move up / down**, and **Remove from Vekro** (asks first; its terminals stop, the folder and files stay). |
+| Per project | **Name, icon and color**, the category menu, **Move up / down**, and **Remove from gcode** (asks first; its terminals stop, the folder and files stay). |
 | Per category | **Rename**, **Move up / down**, **Fold / unfold** in the menu, and **Delete** (the projects stay). |
 
 **Settings → Projects** holds the projects folder (where new and cloned projects go) and **Add all**, which adds every Git repository
@@ -80,7 +80,7 @@ button again, or Explorer, Git or the terminal button, to leave.
 | **Appearance** | **Color** tints the avatar and fills it while the project is open; **Icon** shows one of 20 icons instead of the first letter. **Default** and **Aa** go back to the theme's blue and the first letter. |
 | **Git** | Changes the address of the remote. |
 | **Index** | Shows the saved list of the project's files that searching starts from: status (ready, out of date, not made yet), file count, size, when it was made and where it is kept. **Rebuild index** walks the project again; **Delete index** removes the saved one. |
-| **Remove project** | Takes the project out of Vekro. The folder stays on disk. |
+| **Remove project** | Takes the project out of gcode. The folder stays on disk. |
 
 **Save** is available once something changed; **Discard** leaves without saving. Enter in the name field also saves.
 

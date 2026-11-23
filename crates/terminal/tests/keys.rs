@@ -1,4 +1,4 @@
-use vekro_terminal::{dropped_paths, encode_key, paste_bytes, Modifiers};
+use ws_terminal::{dropped_paths, encode_key, paste_bytes, Modifiers};
 
 #[test]
 fn dropped_paths_are_escaped_as_separate_shell_arguments() {

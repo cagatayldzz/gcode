@@ -145,9 +145,9 @@ pub(super) fn project_list_row(
 /// What a failed push, pull or fetch says about the account's token, if it says anything: the host turned the token down, or
 /// accepted it but refused commits that change workflow files.
 pub(super) fn refusal_kind(message: &str) -> Option<IssueKind> {
-  if message.contains(vekro_git::WORKFLOWS_REFUSED) {
+  if message.contains(ws_git::WORKFLOWS_REFUSED) {
     Some(IssueKind::Workflows)
-  } else if message.contains(vekro_git::TOKEN_REFUSED) {
+  } else if message.contains(ws_git::TOKEN_REFUSED) {
     Some(IssueKind::Push)
   } else {
     None
@@ -251,23 +251,23 @@ pub(super) fn rail_button(
 }
 
 /// The color of a changed file's mark: green for new, red for deleted, amber for modified and so on.
-pub(super) fn change_kind_icon(kind: vekro_git::ChangeKind) -> &'static str {
+pub(super) fn change_kind_icon(kind: ws_git::ChangeKind) -> &'static str {
   match kind {
-    vekro_git::ChangeKind::New => "icons/file-plus.svg",
-    vekro_git::ChangeKind::Modified => "icons/file-pen-line.svg",
-    vekro_git::ChangeKind::Deleted => "icons/file-minus.svg",
-    vekro_git::ChangeKind::Renamed => "icons/file-symlink.svg",
-    vekro_git::ChangeKind::Conflicted => "icons/file-exclamation-point.svg",
+    ws_git::ChangeKind::New => "icons/file-plus.svg",
+    ws_git::ChangeKind::Modified => "icons/file-pen-line.svg",
+    ws_git::ChangeKind::Deleted => "icons/file-minus.svg",
+    ws_git::ChangeKind::Renamed => "icons/file-symlink.svg",
+    ws_git::ChangeKind::Conflicted => "icons/file-exclamation-point.svg",
   }
 }
 
-pub(super) fn kind_color(kind: vekro_git::ChangeKind, palette: &crate::theme::Colors) -> Hsla {
+pub(super) fn kind_color(kind: ws_git::ChangeKind, palette: &crate::theme::Colors) -> Hsla {
   match kind {
-    vekro_git::ChangeKind::New => palette.new,
-    vekro_git::ChangeKind::Modified => palette.modified,
-    vekro_git::ChangeKind::Deleted => palette.deleted,
-    vekro_git::ChangeKind::Renamed => palette.renamed,
-    vekro_git::ChangeKind::Conflicted => palette.conflicted,
+    ws_git::ChangeKind::New => palette.new,
+    ws_git::ChangeKind::Modified => palette.modified,
+    ws_git::ChangeKind::Deleted => palette.deleted,
+    ws_git::ChangeKind::Renamed => palette.renamed,
+    ws_git::ChangeKind::Conflicted => palette.conflicted,
   }
 }
 

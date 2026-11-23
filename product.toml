@@ -1,0 +1,13 @@
+# The one place the product's name is written. Rust code reads it through the `ws-product` crate; shell scripts and workflows read it
+# with `scripts/product.sh`. Everything else (crates, types, files) is named without it, so renaming the product means editing this file.
+
+# The name people see: the app bundle, its executable, the Application Support folder, the Keychain service, the user agent.
+name = "gcode"
+# The prefix of the environment variables the app reads (`<prefix>_DATA_DIR`, …).
+env_prefix = "GCODE"
+# The macOS bundle identifier (the development build adds `.dev`).
+bundle_id = "com.cagatayldzz.gcode"
+
+# What the product was called before. Only the first-start migration reads these: it moves the old data folder and the old Keychain
+# entries to the current names. Delete them, and the migration, once nobody has the old version any more.
+legacy_name = "Vekro"

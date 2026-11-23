@@ -18,7 +18,7 @@ use std::{
   collections::BTreeMap,
   path::{Path, PathBuf},
 };
-use vekro_git::{MergeSide, MergeState};
+use ws_git::{MergeSide, MergeState};
 
 pub(crate) enum MergeEvent {
   Completed,
@@ -183,14 +183,14 @@ impl MergeDialog {
                 let reveal_file = menu_path.clone();
                 let menu = menu
                   .item(PopupMenuItem::new("Open with default app").on_click(move |_, window, cx| {
-                    if let Some(path) = vekro_git::workdir_file(&open_root, Path::new(open_file.as_str())).filter(|path| path.exists()) {
+                    if let Some(path) = ws_git::workdir_file(&open_root, Path::new(open_file.as_str())).filter(|path| path.exists()) {
                       cx.open_with_system(&path);
                     } else {
                       window.push_notification(Notification::error("This file is missing from the working tree."), cx);
                     }
                   }))
                   .item(PopupMenuItem::new("Reveal in Finder").on_click(move |_, _, cx| {
-                    if let Some(path) = vekro_git::workdir_file(&reveal_root, Path::new(reveal_file.as_str())) {
+                    if let Some(path) = ws_git::workdir_file(&reveal_root, Path::new(reveal_file.as_str())) {
                       cx.reveal_path(&path);
                     }
                   }));

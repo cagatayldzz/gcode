@@ -1,8 +1,8 @@
 use std::{fs, path::PathBuf};
-use vekro_git::{compare, compare_choices, merge_branch};
+use ws_git::{compare, compare_choices, merge_branch};
 
 fn repository(name: &str) -> PathBuf {
-  let dir = std::env::temp_dir().join(format!("vekro-git-compare-{name}-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-git-compare-{name}-{}", std::process::id()));
   let _ = fs::remove_dir_all(&dir);
   fs::create_dir_all(&dir).unwrap();
   let repository = git2::Repository::init_opts(&dir, git2::RepositoryInitOptions::new().initial_head("main")).unwrap();
@@ -25,14 +25,14 @@ fn commit_file(dir: &std::path::Path, file: &str, text: &str, message: &str, sec
 }
 
 fn checkout(dir: &std::path::Path, branch: &str) {
-  vekro_git::switch_branch(dir, branch).unwrap();
+  ws_git::switch_branch(dir, branch).unwrap();
 }
 
 /// `main` has one commit more than `feature` had when it branched off; `feature` has two of its own.
 fn diverged(name: &str) -> PathBuf {
   let dir = repository(name);
   commit_file(&dir, "a.txt", "one\n", "feat: base", 1_000);
-  vekro_git::create_branch(&dir, "feature").unwrap();
+  ws_git::create_branch(&dir, "feature").unwrap();
   commit_file(&dir, "b.txt", "b\n", "feat: b", 2_000);
   commit_file(&dir, "c.txt", "c\n", "feat: c", 3_000);
   checkout(&dir, "main");
@@ -66,9 +66,9 @@ fn the_choices_leave_out_the_current_branch_and_count_both_ways() {
 #[test]
 fn recently_used_branches_are_listed_newest_first_and_once() {
   let dir = diverged("recent");
-  vekro_git::create_branch(&dir, "zzz").unwrap();
+  ws_git::create_branch(&dir, "zzz").unwrap();
   checkout(&dir, "main");
-  vekro_git::create_branch(&dir, "aaa").unwrap();
+  ws_git::create_branch(&dir, "aaa").unwrap();
   checkout(&dir, "main");
   let choices = compare_choices(&dir).unwrap();
   assert_eq!(choices.recent.iter().map(|branch| branch.name.as_str()).collect::<Vec<_>>(), ["aaa", "zzz", "feature"], "newest checkout first");
@@ -92,7 +92,7 @@ fn merging_brings_the_other_branch_in() {
 fn a_conflicting_merge_changes_nothing_and_says_which_files() {
   let dir = repository("conflict");
   commit_file(&dir, "a.txt", "one\n", "feat: base", 1_000);
-  vekro_git::create_branch(&dir, "other").unwrap();
+  ws_git::create_branch(&dir, "other").unwrap();
   commit_file(&dir, "a.txt", "other\n", "feat: other", 2_000);
   checkout(&dir, "main");
   commit_file(&dir, "a.txt", "main\n", "feat: main", 3_000);
@@ -113,11 +113,11 @@ fn a_name_that_looks_like_an_option_is_refused() {
 
 #[test]
 fn a_pending_add_add_merge_supports_choosing_either_side_and_undo() {
-  use vekro_git::{start_merge, MergeOutcome, MergeSide};
+  use ws_git::{start_merge, MergeOutcome, MergeSide};
 
   let dir = repository("add-add");
   commit_file(&dir, "base.txt", "base\n", "base", 1_000);
-  vekro_git::create_branch(&dir, "other").unwrap();
+  ws_git::create_branch(&dir, "other").unwrap();
   commit_file(&dir, "conflict.txt", "theirs\n", "other", 2_000);
   checkout(&dir, "main");
   commit_file(&dir, "conflict.txt", "ours\n", "main", 3_000);
@@ -145,11 +145,11 @@ fn a_pending_add_add_merge_supports_choosing_either_side_and_undo() {
 
 #[test]
 fn aborting_a_pending_merge_restores_the_current_branch() {
-  use vekro_git::{start_merge, MergeOutcome};
+  use ws_git::{start_merge, MergeOutcome};
 
   let dir = repository("abort-pending");
   commit_file(&dir, "a.txt", "base\n", "base", 1_000);
-  vekro_git::create_branch(&dir, "other").unwrap();
+  ws_git::create_branch(&dir, "other").unwrap();
   commit_file(&dir, "a.txt", "other\n", "other", 2_000);
   checkout(&dir, "main");
   commit_file(&dir, "a.txt", "main\n", "main", 3_000);

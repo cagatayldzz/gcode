@@ -1,4 +1,4 @@
-use vekro_terminal::{encode_mouse, Modifiers, MouseAction, MouseButton, MouseEvent};
+use ws_terminal::{encode_mouse, Modifiers, MouseAction, MouseButton, MouseEvent};
 
 fn event(button: MouseButton, action: MouseAction, column: usize, line: usize) -> MouseEvent {
   MouseEvent { button, action, column, line, modifiers: Modifiers::default() }

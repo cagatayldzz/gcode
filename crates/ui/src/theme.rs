@@ -1,11 +1,11 @@
-//! Vekro's light and dark colors and fonts, switched with the system appearance.
+//! The app's light and dark colors and fonts, switched with the system appearance.
 //! The palettes use semantic colors from GitHub Primer (https://github.com/primer/primitives).
 
 use gpui_kit::{
   component::{highlighter::ThemeStyle, ActiveTheme as _, Theme, ThemeMode},
   *,
 };
-use vekro_storage::ThemeChoice;
+use ws_storage::ThemeChoice;
 
 /// The size of the text the interface draws itself. The kit's own parts (icons, dock tabs) are sized in `rem`,
 /// which stays at the theme's 16 px.
@@ -187,7 +187,7 @@ fn syntax_color(color: Hsla) -> Option<ThemeStyle> {
   serde_json::from_value(serde_json::json!({ "color": color })).ok()
 }
 
-/// Applies the chosen appearance (the system's, unless the user picked one) with Vekro's colors and fonts.
+/// Applies the chosen appearance (the system's, unless the user picked one) with the app's colors and fonts.
 pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut Window, cx: &mut App) {
   match choice {
     ThemeChoice::System => Theme::sync_system_appearance(Some(window), cx),

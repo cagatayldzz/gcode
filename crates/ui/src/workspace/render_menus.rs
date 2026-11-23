@@ -115,7 +115,7 @@ impl Workspace {
               .into_iter()
               .filter(|entry| lowered.is_empty() || entry.name.to_lowercase().contains(&lowered))
               .map(|entry| {
-                let vekro_git::BranchEntry { name, remote } = entry;
+                let ws_git::BranchEntry { name, remote } = entry;
                 let selected = name == current.as_ref() && remote.is_none();
                 let workspace = workspace.clone();
                 let menu_workspace = workspace.clone();

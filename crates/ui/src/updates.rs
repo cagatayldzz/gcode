@@ -1,4 +1,4 @@
-//! Vekro's own updates: the state every window shares, and the panel in Settings that shows it.
+//! The app's own updates: the state every window shares, and the panel in Settings that shows it.
 
 use crate::{
   settings::SettingsModel,
@@ -18,7 +18,7 @@ use gpui_kit::{
   *,
 };
 use std::time::SystemTime;
-use vekro_updater::{Release, Stage, Staged};
+use ws_updater::{Release, Stage, Staged};
 
 /// The version of the running application.
 pub(crate) const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -72,7 +72,7 @@ enum Message<T> {
 }
 
 impl SettingsModel {
-  /// Looks for a newer Vekro release.
+  /// Looks for a newer release.
   pub(crate) fn check_update(&mut self, cx: &mut Context<Self>) {
     if !UPDATES_ENABLED || self.updates.update.is_working() || matches!(self.updates.update, AppUpdate::Ready(_)) {
       return;
@@ -81,7 +81,7 @@ impl SettingsModel {
     cx.notify();
     Self::run_update_task(
       cx,
-      |_| vekro_updater::check(APP_VERSION),
+      |_| ws_updater::check(APP_VERSION),
       |_, _, _| {},
       |model, result, _| {
         model.updates.checked = Some(SystemTime::now());
@@ -107,7 +107,7 @@ impl SettingsModel {
       },
       _ => return,
     };
-    let current = match vekro_updater::current_app_bundle() {
+    let current = match ws_updater::current_app_bundle() {
       Ok(path) => path,
       Err(error) => {
         self.updates.update = AppUpdate::Failed(error.to_string());
@@ -121,7 +121,7 @@ impl SettingsModel {
     let staged_release = release.clone();
     Self::run_update_task(
       cx,
-      move |stage| vekro_updater::prepare(&release, &current, stage),
+      move |stage| ws_updater::prepare(&release, &current, stage),
       move |model, stage, _| model.updates.update = AppUpdate::Working(staged_release.clone(), stage),
       |model, result, _| match result {
         Ok(staged) => {
@@ -139,10 +139,10 @@ impl SettingsModel {
       return;
     }
     let Some(staged) = self.updates.staged.take() else { return };
-    match vekro_updater::current_app_bundle().and_then(|current| vekro_updater::install(&staged, &current)) {
+    match ws_updater::current_app_bundle().and_then(|current| ws_updater::install(&staged, &current)) {
       Ok(()) => cx.quit(),
       Err(error) => {
-        vekro_updater::discard(&staged);
+        ws_updater::discard(&staged);
         self.updates.update = AppUpdate::Failed(error.to_string());
         cx.notify();
       }
@@ -239,7 +239,7 @@ impl Render for UpdatePanel {
         .into_any_element(),
       AppUpdate::Checking => row().child(Spinner::new().small()).child(Label::new("Checking for updates…")).into_any_element(),
       AppUpdate::UpToDate => row()
-        .child(Label::new("Vekro is up to date").font_weight(FontWeight::SEMIBOLD))
+        .child(Label::new(format!("{} is up to date", ws_product::NAME)).font_weight(FontWeight::SEMIBOLD))
         .child(caption(match checked {
           Some(time) => format!("Version {APP_VERSION}, checked {}.", local_time(time)),
           None => format!("Version {APP_VERSION}."),
@@ -253,7 +253,7 @@ impl Render for UpdatePanel {
           .gap_2()
           .child(
             row()
-              .child(Label::new(format!("Vekro {} is available", release.version)).font_weight(FontWeight::SEMIBOLD))
+              .child(Label::new(format!("{} {} is available", ws_product::NAME, release.version)).font_weight(FontWeight::SEMIBOLD))
               .child(caption(format!("You have {APP_VERSION}.")))
               .when(!url.is_empty(), |line| {
                 line.child(Button::new("release-page").ghost().small().label("View on GitHub").on_click(move |_, _, cx| cx.open_url(&url)))
@@ -277,12 +277,12 @@ impl Render for UpdatePanel {
       AppUpdate::Working(release, stage) => row()
         .child(Spinner::new().small())
         .child(Label::new(match stage {
-          Stage::Downloading => format!("Downloading Vekro {}…", release.version),
+          Stage::Downloading => format!("Downloading {} {}…", ws_product::NAME, release.version),
           Stage::Verifying => "Verifying the download…".to_string(),
         }))
         .into_any_element(),
       AppUpdate::Ready(release) => row()
-        .child(Label::new(format!("Vekro {} is ready", release.version)).font_weight(FontWeight::SEMIBOLD))
+        .child(Label::new(format!("{} {} is ready", ws_product::NAME, release.version)).font_weight(FontWeight::SEMIBOLD))
         .child(caption("Verified: checksum, code signature and developer. Restarting installs it.".to_string()))
         .child(action("restart-update", "Restart to Update", true, SettingsModel::restart_to_update))
         .into_any_element(),

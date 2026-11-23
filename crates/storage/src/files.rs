@@ -12,7 +12,7 @@ use std::{
 /// A symbolic link is followed, so the link stays a link. The permissions of an existing file are kept.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
   let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-  let temporary = sibling(&target, ".vekro-tmp");
+  let temporary = sibling(&target, ".tmp");
   let result = (|| {
     let mut file = File::create(&temporary)?;
     if let Ok(metadata) = fs::metadata(&target) {

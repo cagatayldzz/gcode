@@ -18,7 +18,7 @@ use gpui_kit::{
   *,
 };
 use std::path::PathBuf;
-use vekro_hosting::Accounts;
+use ws_hosting::Accounts;
 
 /// Sent when a project is ready to be added to the list.
 pub(crate) struct ProjectReady(pub PathBuf);
@@ -149,8 +149,8 @@ impl ProjectSetup {
     cx.notify();
     let work = cx.background_executor().spawn(async move {
       match mode {
-        Mode::Clone => vekro_git::clone(&text, &location, credentials_for_url(&accounts, &text).as_ref()),
-        _ => vekro_git::create_project(&location, &text),
+        Mode::Clone => ws_git::clone(&text, &location, credentials_for_url(&accounts, &text).as_ref()),
+        _ => ws_git::create_project(&location, &text),
       }
     });
     cx.spawn(async move |this, cx| {
@@ -179,7 +179,7 @@ impl ProjectSetup {
     let text = self.input.read(cx).value();
     let name = match self.mode {
       Mode::New => Some(text.trim().to_string()).filter(|name| !name.is_empty()),
-      Mode::Clone => vekro_git::repository_name(&text),
+      Mode::Clone => ws_git::repository_name(&text),
       Mode::Import => None,
     }?;
     Some(self.location.join(name))

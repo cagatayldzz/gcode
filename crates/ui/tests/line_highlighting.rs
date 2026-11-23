@@ -4,7 +4,7 @@ mod outline;
 
 use gpui_kit::{component::highlighter::HighlightTheme, HighlightStyle};
 use std::ops::Range;
-use vekro_index::highlight::{Highlights, Language};
+use ws_index::highlight::{Highlights, Language};
 
 const ENV: &str = "# a comment\nTOKEN=abc/def\nexport MODE=production\nURL=https://www.example.com/path\n# OLD=https://old.example.com\n";
 

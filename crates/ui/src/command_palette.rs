@@ -86,7 +86,7 @@ fn commands() -> Vec<Entry> {
 }
 
 impl CommandPalette {
-  /// `projects` are the folders Vekro knows with their names; `open` is the one shown now.
+  /// `projects` are the folders the app knows with their names; `open` is the one shown now.
   pub fn new(projects: Vec<(PathBuf, String)>, open: Option<&Path>, window: &mut Window, cx: &mut Context<Self>) -> Self {
     let projects = projects
       .into_iter()

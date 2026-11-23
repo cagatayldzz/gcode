@@ -17,8 +17,8 @@ use std::{
   sync::atomic::AtomicBool,
   time::Instant,
 };
-use vekro_index::highlight::{Highlights, Language};
-use vekro_storage::Preferences;
+use ws_index::highlight::{Highlights, Language};
+use ws_storage::Preferences;
 
 const FOLDERS: usize = 16;
 const FILES_PER_FOLDER: usize = 32;
@@ -73,7 +73,7 @@ fn create_project(root: &Path) -> HashSet<PathBuf> {
     for file in 0..FILES_PER_FOLDER {
       fs::write(dir.join(format!("file_{file:02}.rs")), &source).unwrap();
     }
-    fs::write(dir.join("notes.md"), "Fixture for Vekro benchmarks.\n").unwrap();
+    fs::write(dir.join("notes.md"), "Fixture for the benchmarks.\n").unwrap();
     expanded.insert(dir);
   }
   let mut large = String::new();
@@ -145,7 +145,7 @@ fn benchmark(run: &mut Run, root: &Path, expanded: &HashSet<PathBuf>) {
   assert!(first.path.starts_with(root.join("module_00")));
   assert_eq!((first.line, first.column), (0, 8));
   assert!(first.preview[first.highlight.clone()].starts_with("benchmark_marker"));
-  assert_eq!(vekro_git::file_history(&root.join("timeline.rs"), 100).unwrap().len(), HISTORY_LENGTH / 8);
+  assert_eq!(ws_git::file_history(&root.join("timeline.rs"), 100).unwrap().len(), HISTORY_LENGTH / 8);
 
   run.measure("explorer/collapsed", || {}, || explorer::rows(black_box(root), &unexpanded));
   run.measure("explorer/expanded", || {}, || explorer::rows(black_box(root), expanded));
@@ -163,9 +163,9 @@ fn benchmark(run: &mut Run, root: &Path, expanded: &HashSet<PathBuf>) {
   run.measure("highlight/dotenv_classify_16k_lines", || {}, || Highlights::compute(Language::Dotenv, black_box(&env_text)).runs().len());
   run.measure("highlight/dotenv_draw_one_screenful", || {}, || outline::line_styles(black_box(&env_highlights), &screenful, &*syntax_theme));
   run.measure("minimap/24k_lines", || {}, || sample(black_box(&rope)));
-  run.measure("git/working_tree_summary", || {}, || vekro_git::summary(root).unwrap());
-  run.measure("git/file_history", || {}, || vekro_git::file_history(&root.join("timeline.rs"), 100).unwrap());
-  run.measure("git/file_diff", || {}, || vekro_git::file_diff(root, Path::new("timeline.rs")).unwrap());
+  run.measure("git/working_tree_summary", || {}, || ws_git::summary(root).unwrap());
+  run.measure("git/file_history", || {}, || ws_git::file_history(&root.join("timeline.rs"), 100).unwrap());
+  run.measure("git/file_diff", || {}, || ws_git::file_diff(root, Path::new("timeline.rs")).unwrap());
   run.measure(
     "files/copy_large_file",
     || {
@@ -202,7 +202,7 @@ fn main() {
   let first = args.next();
   if first.as_deref() == Some("--fixture") {
     assert!(args.next().is_none(), "--fixture does not take a path");
-    let fixture = tempfile::Builder::new().prefix("vekro-bench-").tempdir().unwrap();
+    let fixture = tempfile::Builder::new().prefix("bench-").tempdir().unwrap();
     let project = fixture.path().join("project");
     create_project(&project);
     create_history(&project);
@@ -218,8 +218,8 @@ fn main() {
   let samples = if verify {
     0
   } else {
-    let value = std::env::var("VEKRO_BENCH_SAMPLES").unwrap_or_else(|_| "20".to_owned());
-    value.parse::<usize>().ok().filter(|count| (1..=1000).contains(count)).expect("VEKRO_BENCH_SAMPLES must be between 1 and 1000")
+    let value = std::env::var(ws_product::env_name("BENCH_SAMPLES")).unwrap_or_else(|_| "20".to_owned());
+    value.parse::<usize>().ok().filter(|count| (1..=1000).contains(count)).expect("<prefix>_BENCH_SAMPLES must be between 1 and 1000")
   };
   let fixture = tempfile::tempdir().unwrap();
   let expanded = create_project(fixture.path());

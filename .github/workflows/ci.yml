@@ -30,9 +30,9 @@ jobs:
           shared-key: core
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Lint
-        run: cargo clippy --locked -p vekro-terminal -p vekro-git -p vekro-storage -p vekro-opencommit -p vekro-hosting -p vekro-version -p vekro-updater -p vekro-index --all-targets -- -D warnings
+        run: cargo clippy --locked -p ws-terminal -p ws-git -p ws-storage -p ws-opencommit -p ws-hosting -p ws-version -p ws-updater -p ws-index --all-targets -- -D warnings
       - name: Test
-        run: cargo test --locked -p vekro-terminal -p vekro-git -p vekro-storage -p vekro-opencommit -p vekro-hosting -p vekro-version -p vekro-updater -p vekro-index
+        run: cargo test --locked -p ws-terminal -p ws-git -p ws-storage -p ws-opencommit -p ws-hosting -p ws-version -p ws-updater -p ws-index
 
   interface:
     runs-on: macos-26
@@ -45,6 +45,6 @@ jobs:
           shared-key: interface
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check the interface crates
-        run: cargo check --locked -p vekro-ui -p vekro-app
+        run: cargo check --locked -p ws-ui -p ws-app
       - name: Open and draw the window headlessly
-        run: cargo test --locked -p vekro-ui --test window_render
+        run: cargo test --locked -p ws-ui --test window_render

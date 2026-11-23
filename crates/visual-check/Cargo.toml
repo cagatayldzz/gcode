@@ -1,5 +1,5 @@
 [package]
-name = "vekro-visual-check"
+name = "ws-visual-check"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

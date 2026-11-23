@@ -2,7 +2,7 @@
 //! them along), stashed changes waiting on a branch, renaming and deleting.
 
 use super::*;
-use vekro_git::Changes;
+use ws_git::Changes;
 
 /// A button of a dialog that closes it and then does something.
 fn dialog_button(id: &'static str, label: &'static str, primary: bool, action: impl Fn(&mut Window, &mut App) + 'static) -> Button {
@@ -68,10 +68,10 @@ impl Workspace {
       let (root, name) = (root.clone(), name.clone());
       async move {
         let result = match changes {
-          Some(changes) => vekro_git::switch_branch_with(&root, &name, changes),
-          None => vekro_git::switch_branch(&root, &name),
+          Some(changes) => ws_git::switch_branch_with(&root, &name, changes),
+          None => ws_git::switch_branch(&root, &name),
         };
-        let stashed = result.is_ok() && vekro_git::has_stash(&root, &name);
+        let stashed = result.is_ok() && ws_git::has_stash(&root, &name);
         (result, stashed)
       }
     });
@@ -129,9 +129,9 @@ impl Workspace {
       let (root, branch) = (root.clone(), branch.clone());
       async move {
         if restore {
-          vekro_git::restore_stash(&root, &branch)
+          ws_git::restore_stash(&root, &branch)
         } else {
-          vekro_git::discard_stash(&root, &branch)
+          ws_git::discard_stash(&root, &branch)
         }
       }
     });
@@ -164,7 +164,7 @@ impl Workspace {
       cx,
       move |this, new_name, window, cx| {
         let root = this.projects.active.clone().ok_or("Open a project first.")?;
-        vekro_git::rename_branch(&root, &name, new_name)?;
+        ws_git::rename_branch(&root, &name, new_name)?;
         this.refresh_project();
         window.push_notification(Notification::info(format!("Renamed {name} to {}.", new_name.trim())), cx);
         Ok(())
@@ -182,7 +182,7 @@ impl Workspace {
       window.push_notification(Notification::error("The branch you are on cannot be deleted. Switch to another branch first."), cx);
       return;
     }
-    let upstream = if remote.is_none() { vekro_git::upstream_remote(&root, &name) } else { None };
+    let upstream = if remote.is_none() { ws_git::upstream_remote(&root, &name) } else { None };
     let workspace = cx.entity();
     let muted = cx.theme().muted_foreground;
     window.open_dialog(cx, move |dialog, _, _| {
@@ -229,11 +229,11 @@ impl Workspace {
       let (root, name) = (root.clone(), name.clone());
       async move {
         if local {
-          vekro_git::delete_branch(&root, &name)?;
+          ws_git::delete_branch(&root, &name)?;
         }
         if let Some(remote) = remote {
           let credentials = credentials_for_repository(&accounts, &root);
-          vekro_git::delete_remote_branch(&root, &remote, &name, credentials.as_ref(), |_| {}).map_err(|error| {
+          ws_git::delete_remote_branch(&root, &remote, &name, credentials.as_ref(), |_| {}).map_err(|error| {
             if local {
               format!("Deleted {name} here, but not on the remote: {error}")
             } else {
@@ -281,12 +281,12 @@ impl Workspace {
   }
 
   fn revert_commit(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-    self.run_commit_action("Reverted", id, window, cx, vekro_git::revert_commit);
+    self.run_commit_action("Reverted", id, window, cx, ws_git::revert_commit);
   }
 
   /// Copies a commit onto another branch and leaves that branch checked out.
   pub(super) fn cherry_pick_commit(&mut self, id: String, branch: String, window: &mut Window, cx: &mut Context<Self>) {
-    self.run_commit_action(&format!("Cherry-picked onto {branch} as"), id, window, cx, move |root, id| vekro_git::cherry_pick(root, id, &branch));
+    self.run_commit_action(&format!("Cherry-picked onto {branch} as"), id, window, cx, move |root, id| ws_git::cherry_pick(root, id, &branch));
   }
 
   fn run_commit_action(
@@ -329,7 +329,7 @@ impl Workspace {
       cx,
       move |this, name, window, cx| {
         let root = this.projects.active.clone().ok_or("Open a project first.")?;
-        vekro_git::branch_from_commit(&root, &id, name)?;
+        ws_git::branch_from_commit(&root, &id, name)?;
         this.refresh_project();
         this.load_history(cx);
         window.push_notification(Notification::info(format!("Created and switched to {}.", name.trim())), cx);
@@ -354,9 +354,9 @@ impl Workspace {
       let (root, files) = (root.clone(), files.clone());
       async move {
         if summary.trim().is_empty() {
-          (summary, description) = vekro_git::head_message(&root).ok_or("There is no commit to amend.")?;
+          (summary, description) = ws_git::head_message(&root).ok_or("There is no commit to amend.")?;
         }
-        vekro_git::amend_commit(&root, &files, &summary, &description)
+        ws_git::amend_commit(&root, &files, &summary, &description)
       }
     });
     cx.spawn_in(window, async move |this, cx| {
@@ -384,7 +384,7 @@ impl Workspace {
   /// Adds rules to the repository's `.gitignore`.
   pub(super) fn ignore_patterns(&mut self, patterns: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
-    match vekro_git::add_to_gitignore(&root, &patterns) {
+    match ws_git::add_to_gitignore(&root, &patterns) {
       Ok(()) => {
         self.refresh_project();
         window.push_notification(Notification::info(format!("Added {} to .gitignore.", patterns.join(", "))), cx);

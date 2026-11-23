@@ -1,6 +1,6 @@
 # Getting started
 
-Vekro is a native macOS window that keeps **projects, a code editor, terminals and Git** together. One window shows one
+gcode is a native macOS window that keeps **projects, a code editor, terminals and Git** together. One window shows one
 project at a time, and switching projects never stops the shells of the others.
 
 ::: tip Requirements
@@ -9,8 +9,8 @@ macOS 15 or later on Apple Silicon. Intel Macs, Linux and Windows are not suppor
 
 ## Install
 
-Download the latest `Vekro-<tag>-macos-arm64.zip` from [GitHub Releases](https://github.com/cagatayldzz/vekro/releases),
-unzip it and move `Vekro.app` to Applications. Releases are signed and notarized, and Vekro can update itself
+Download the latest `gcode-<tag>-macos-arm64.zip` from [GitHub Releases](https://github.com/cagatayldzz/vekro/releases),
+unzip it and move `gcode.app` to Applications. Releases are signed and notarized, and gcode can update itself
 (see [Settings → Updates](./settings.md#updates)).
 
 To run it from source instead, see [Development → Setup](../development/index.md):
@@ -24,7 +24,7 @@ bun run dev
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ ● ● ●  [📁▾]  │ vekro ●  │ wfhub │ appforge │ +              title bar     │
+│ ● ● ●  [📁▾]  │ atlas ●  │ wfhub │ appforge │ +              title bar     │
 ├────┬───────────────────┬─────────────────────────────────────────────────┤
 │ ▤  │  SIDEBAR          │  MAIN AREA                                      │
 │ 🔍 │  ───────────────  │  ┌ main.rs ─┬ lib.rs ─┬ …           editor tabs  │
@@ -34,7 +34,7 @@ bun run dev
 │    │  Search           │  │   }                                          │
 │    │  Git (changes /   │  │                                              │
 │    │       history)    │  ├──────────────────────────────────────────────┤
-│ D  │                   │  │ main · 3 changed     ~/dev/vekro   Ln 12, Col 5│
+│ D  │                   │  │ main · 3 changed     ~/dev/atlas   Ln 12, Col 5│
 └────┴───────────────────┴──┴──────────────────────────────────────────────┘
  activity bar   sidebar          main area                   status bar
 ```

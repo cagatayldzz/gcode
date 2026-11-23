@@ -1,11 +1,11 @@
 [package]
-name = "vekro-ui"
+name = "ws-ui"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
-description = "Vekro interface views built with GPUI Kit"
+description = "Interface views built with GPUI Kit"
 
 [lints]
 workspace = true
@@ -14,13 +14,14 @@ workspace = true
 doctest = false
 
 [dependencies]
-vekro-storage.workspace = true
-vekro-index.workspace = true
-vekro-terminal.workspace = true
-vekro-git.workspace = true
-vekro-opencommit.workspace = true
-vekro-hosting.workspace = true
-vekro-updater.workspace = true
+ws-product.workspace = true
+ws-storage.workspace = true
+ws-index.workspace = true
+ws-terminal.workspace = true
+ws-git.workspace = true
+ws-opencommit.workspace = true
+ws-hosting.workspace = true
+ws-updater.workspace = true
 gpui-kit.workspace = true
 gpui-kit-assets.workspace = true
 futures.workspace = true

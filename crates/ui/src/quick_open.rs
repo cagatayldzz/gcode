@@ -39,7 +39,7 @@ impl QuickOpen {
     let index_root = root.clone();
     let load = cx.spawn(async move |this, cx| {
       let work = cx.background_executor().spawn(async move {
-        let index = vekro_index::ProjectIndex::open(&vekro_storage::index_dir(), &index_root).index;
+        let index = ws_index::ProjectIndex::open(&ws_storage::index_dir(), &index_root).index;
         index.files().iter().map(|file| SharedString::from(file.path.to_string_lossy().into_owned())).collect::<Vec<_>>()
       });
       let files = work.await;
@@ -68,7 +68,7 @@ impl QuickOpen {
     let query = self.query.clone();
     self.search = Some(cx.spawn(async move |this, cx| {
       let work = cx.background_executor().spawn(async move {
-        let found = vekro_index::fuzzy::rank(&query, files.iter().map(|path| path.as_ref()), RESULT_LIMIT);
+        let found = ws_index::fuzzy::rank(&query, files.iter().map(|path| path.as_ref()), RESULT_LIMIT);
         found.into_iter().map(|index| files[index].clone()).collect::<Vec<_>>()
       });
       let results = work.await;

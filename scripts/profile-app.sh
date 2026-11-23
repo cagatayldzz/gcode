@@ -6,7 +6,7 @@ pid=${1:-}
 duration=${2:-60}
 
 if [[ ! "$pid" =~ ^[1-9][0-9]*$ || ! "$duration" =~ ^[1-9][0-9]*$ || $# -gt 2 ]]; then
-  printf 'Usage: bash scripts/profile-vekro.sh PID [SECONDS]\n' >&2
+  printf 'Usage: bash scripts/profile-app.sh PID [SECONDS]\n' >&2
   exit 2
 fi
 

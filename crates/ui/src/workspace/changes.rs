@@ -35,7 +35,7 @@ impl Workspace {
   /// Opens a changed file itself, not its diff, in the editor.
   pub(crate) fn open_change_in_editor(&mut self, file: &Path, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
-    match vekro_git::workdir_file(&root, file).filter(|path| path.is_file()) {
+    match ws_git::workdir_file(&root, file).filter(|path| path.is_file()) {
       Some(path) => self.reveal_file(root, path, window, cx),
       None => window.push_notification(Notification::error(format!("{} is not on the disk.", file.display())), cx),
     }
@@ -43,7 +43,7 @@ impl Workspace {
 
   pub(super) fn show_change_in_finder(root: PathBuf, file: PathBuf, window: &mut Window, cx: &mut App) {
     let work = cx.background_executor().spawn(async move {
-      let path = vekro_git::workdir_file(&root, &file).ok_or("The repository's working folder is unavailable.")?;
+      let path = ws_git::workdir_file(&root, &file).ok_or("The repository's working folder is unavailable.")?;
       let mut command = std::process::Command::new("/usr/bin/open");
       if path.exists() {
         command.arg("-R").arg(path);
@@ -117,8 +117,8 @@ impl Workspace {
       let mut discarded = Vec::new();
       let mut failures = Vec::new();
       for file in files {
-        match vekro_git::discard_changes(&work_root, &file) {
-          Ok(()) => discarded.push((vekro_git::workdir_file(&work_root, &file), file)),
+        match ws_git::discard_changes(&work_root, &file) {
+          Ok(()) => discarded.push((ws_git::workdir_file(&work_root, &file), file)),
           Err(error) => failures.push(format!("{}: {error}", file.display())),
         }
       }
@@ -176,8 +176,8 @@ impl Workspace {
     let work = cx.background_executor().spawn({
       let (root, files) = (root.clone(), files.clone());
       async move {
-        let id = vekro_git::commit(&root, &files, &summary, &description)?;
-        let pushed = push.then(|| vekro_git::push(&root, credentials_for_repository(&accounts, &root).as_ref(), |_| {}));
+        let id = ws_git::commit(&root, &files, &summary, &description)?;
+        let pushed = push.then(|| ws_git::push(&root, credentials_for_repository(&accounts, &root).as_ref(), |_| {}));
         Ok::<_, String>((id, pushed))
       }
     });
@@ -192,7 +192,7 @@ impl Workspace {
             this.excluded.clear();
             // The diff of a file that was just committed has nothing left to show.
             if let Some(open) = this.selected_change.clone().filter(|open| files.contains(open)) {
-              if let Some(path) = vekro_git::workdir_file(&root, &open) {
+              if let Some(path) = ws_git::workdir_file(&root, &open) {
                 this.editor_panel.update(cx, |editor, cx| editor.forget(&path, cx));
               }
               this.selected_change = None;

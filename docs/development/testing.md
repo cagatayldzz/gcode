@@ -9,7 +9,7 @@
 
 - Tests live in `crates/<crate>/tests/` with descriptive names that read as a sentence.
 - Tests that create files or repositories use **temporary directories** (and remove them).
-- Tests that touch the data directory use temporary directories; `VEKRO_DATA_DIR` overrides the location.
+- Tests that touch the data directory use temporary directories; `GCODE_DATA_DIR` overrides the location.
 - Plain-Rust crates are tested **without a window**; that is why logic is kept out of `ui` whenever it can be.
 
 ## By crate
@@ -33,11 +33,11 @@ fn pull_merges_when_both_sides_have_new_commits() {
   commit_file(&remote.other, "b.txt", "b", "teammate");
   git(&remote.other, &["push"]);
   commit_file(&remote.mine, "c.txt", "c", "mine");
-  vekro_git::fetch(&remote.mine, None, |_| {}).unwrap();
+  ws_git::fetch(&remote.mine, None, |_| {}).unwrap();
 
-  vekro_git::pull(&remote.mine, None, |_| {}).unwrap();
+  ws_git::pull(&remote.mine, None, |_| {}).unwrap();
 
-  let sync = vekro_git::summary(&remote.mine).unwrap().sync.unwrap();
+  let sync = ws_git::summary(&remote.mine).unwrap().sync.unwrap();
   assert_eq!((sync.ahead, sync.behind), (2, 0));         // my commit + the merge commit
 }
 ```
@@ -78,4 +78,4 @@ check` and CI both do.
 | Release workflow | the whole workspace's clippy and tests on the release runner |
 
 For routine changes: `cargo check --locked -p <package>` and `cargo test --locked -p <package>`, then `bun run check`. None of it bundles or
-opens Vekro.
+opens gcode.

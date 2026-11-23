@@ -13,13 +13,13 @@ Speed is a feature. This page is the toolbox: a benchmark suite for operations, 
 ## Benchmark suite
 
 ```sh
-cargo bench --locked -p vekro-ui --bench performance | tee /tmp/vekro-baseline.csv
-VEKRO_BENCH_SAMPLES=50 cargo bench --locked -p vekro-ui --bench performance -- minimap/
-cargo test --locked -p vekro-ui --bench performance -- --verify
+cargo bench --locked -p ws-ui --bench performance | tee /tmp/baseline.csv
+GCODE_BENCH_SAMPLES=50 cargo bench --locked -p ws-ui --bench performance -- minimap/
+cargo test --locked -p ws-ui --bench performance -- --verify
 ```
 
 The benchmark reports **median and 95th-percentile wall time in microseconds**. It warms each case up three times and runs 20 samples by
-default (`VEKRO_BENCH_SAMPLES`). It uses a generated project and local Git history; fixture creation and resetting files between samples stay
+default (`GCODE_BENCH_SAMPLES`). It uses a generated project and local Git history; fixture creation and resetting files between samples stay
 outside the timed sections.
 
 | Group | Covers |
@@ -38,14 +38,14 @@ outside the timed sections.
 Generate a scratch fixture; the command prints the directory containing `project` and `other-project`:
 
 ```sh
-cargo bench --locked -p vekro-ui --bench performance -- --fixture
+cargo bench --locked -p ws-ui --bench performance -- --fixture
 ```
 
-Run an optimized Vekro build with a scratch `VEKRO_DATA_DIR`, add both fixture projects, find Vekro's PID in Activity Monitor and record one
+Run an optimized gcode build with a scratch `GCODE_DATA_DIR`, add both fixture projects, find gcode's PID in Activity Monitor and record one
 trace per scenario. Keep the CSVs and Instruments traces **outside the repository**.
 
 ```sh
-bash scripts/profile-vekro.sh PID 90 > /tmp/vekro-idle.csv
+bash scripts/profile-app.sh PID 90 > /tmp/idle.csv
 ```
 
 The sampler records the CPU percentage reported by `ps` and resident memory in KiB once per second. Note initial, peak and settled memory, and

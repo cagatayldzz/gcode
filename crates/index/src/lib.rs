@@ -1,4 +1,4 @@
-//! What Vekro works out about a project ahead of time, so that opening a project or a file only has to read the result:
+//! What the app works out about a project ahead of time, so that opening a project or a file only has to read the result:
 //!
 //! - [`ProjectIndex`]: every file the project's Git ignore rules let through, kept on disk and checked with a few `stat` calls
 //!   when the project is opened again;

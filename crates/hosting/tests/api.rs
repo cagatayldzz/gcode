@@ -4,7 +4,7 @@ use std::{
   sync::mpsc,
   thread,
 };
-use vekro_hosting::{
+use ws_hosting::{
   check_access, create_pull_request, default_branch, pull_requests, repositories, verify, Account, Connection, NewPullRequest, Provider, RepoRef,
   TokenAccess,
 };
@@ -99,7 +99,7 @@ fn github_verifies_lists_and_opens_pull_requests() {
   let github = connection(Provider::GitHub, &base, None);
   assert_eq!(verify(&github).unwrap(), "octocat");
   let first = requests.recv().unwrap();
-  assert!(first.headers.contains("authorization: bearer pat") && first.headers.contains("user-agent: vekro"));
+  assert!(first.headers.contains("authorization: bearer pat") && first.headers.contains(&format!("user-agent: {}", ws_product::slug())));
 
   let found = repositories(&github).unwrap();
   assert_eq!((found[0].name.as_str(), found[0].clone_url.as_str(), found[0].private), ("octo/app", "https://h/octo/app.git", true));
@@ -277,7 +277,7 @@ fn a_refused_request_names_the_permission_the_service_needs() {
 
 #[test]
 fn permissions_are_probed_without_changing_anything() {
-  use vekro_hosting::verify_permissions;
+  use ws_hosting::verify_permissions;
   // A token that may push and open pull requests: the push advertisement is given, the empty pull request is "unprocessable".
   let (base, requests) = serve(|method, target| match (method, target) {
     ("GET", t) if t.starts_with("/o/r.git/info/refs?service=git-receive-pack") => (200, "001e# service=git-receive-pack\n".into()),
@@ -311,15 +311,62 @@ fn permissions_are_probed_without_changing_anything() {
   assert!(report.missing(Provider::GitHub).is_empty());
 }
 
-fn report_of(push: Option<bool>, pull_requests: Option<bool>) -> vekro_hosting::PermissionReport {
-  vekro_hosting::PermissionReport { push, pull_requests }
+fn report_of(push: Option<bool>, pull_requests: Option<bool>) -> ws_hosting::PermissionReport {
+  ws_hosting::PermissionReport { push, pull_requests }
 }
 
 #[test]
 fn permission_problems_are_told_from_other_failures() {
-  use vekro_hosting::is_permission_problem;
+  use ws_hosting::is_permission_problem;
   assert!(is_permission_problem("GitHub refused the request: the token lacks a permission. It needs X."));
   assert!(is_permission_problem("GitHub rejected the token. Check that it is correct."));
   assert!(!is_permission_problem("Could not reach GitHub: connection refused"));
   assert!(!is_permission_problem("GitHub could not find it."));
+}
+
+#[test]
+fn a_repository_is_renamed_on_each_service_and_the_name_it_ends_up_with_is_returned() {
+  use ws_hosting::rename_repository;
+
+  let (base, requests) = serve(|method, target| match (method, target) {
+    ("PATCH", "/api/v3/repos/octo/app") => (200, r#"{"name":"new-name"}"#.into()),
+    ("PUT", "/api/v4/projects/group%2Fsub%2Fapp") => (200, r#"{"name":"New Name","path":"New-Name"}"#.into()),
+    ("PATCH", t) if t.starts_with("/org/_apis/git/repositories/Proj/app") || t.starts_with("/org/Proj/_apis/git/repositories/app") => {
+      (200, r#"{"name":"New Name"}"#.into())
+    }
+    _ => (404, r#"{"message":"Not Found"}"#.into()),
+  });
+
+  let github = connection(Provider::GitHub, &base, None);
+  assert_eq!(rename_repository(&github, &github_repo(), "new name").unwrap(), "new-name", "GitHub's own spelling comes back");
+  let request = requests.recv().unwrap();
+  assert_eq!((request.method.as_str(), request.target.as_str()), ("PATCH", "/api/v3/repos/octo/app"));
+  assert!(request.body.contains(r#""name":"new name""#), "{}", request.body);
+
+  let gitlab = connection(Provider::GitLab, &base, None);
+  let repository = RepoRef { provider: Provider::GitLab, namespace: "group/sub".into(), name: "app".into(), project: None };
+  assert_eq!(rename_repository(&gitlab, &repository, "New Name").unwrap(), "New-Name", "GitLab's address uses the path");
+  let request = requests.recv().unwrap();
+  assert_eq!(request.method, "PUT");
+  assert!(request.body.contains(r#""path":"New-Name""#) && request.body.contains(r#""name":"New Name""#), "{}", request.body);
+
+  let azure = connection(Provider::AzureDevOps, &base, Some("org"));
+  let repository = RepoRef { provider: Provider::AzureDevOps, namespace: "org".into(), name: "app".into(), project: Some("Proj".into()) };
+  assert_eq!(rename_repository(&azure, &repository, "New Name").unwrap(), "New Name");
+  assert_eq!(requests.recv().unwrap().method, "PATCH");
+}
+
+#[test]
+fn renaming_a_repository_refuses_unusable_names_and_reports_the_services_refusal() {
+  use ws_hosting::rename_repository;
+
+  let (base, requests) = serve(|_, _| (403, r#"{"message":"Must have admin rights to Repository."}"#.into()));
+  let github = connection(Provider::GitHub, &base, None);
+
+  assert!(rename_repository(&github, &github_repo(), "  ").is_err());
+  assert!(rename_repository(&github, &github_repo(), "a/b").is_err());
+  assert!(requests.try_recv().is_err(), "nothing was sent for an unusable name");
+
+  let error = rename_repository(&github, &github_repo(), "fine").unwrap_err();
+  assert!(error.contains("admin rights") || error.contains("permission"), "{error}");
 }

@@ -1,10 +1,10 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'Vekro',
-  description: 'User and developer documentation for the Vekro macOS app.',
+  title: 'gcode',
+  description: 'User and developer documentation for the gcode macOS app.',
   lang: 'en',
-  base: `${(process.env.VEKRO_DOCS_BASE ?? '/vekro').replace(/\/$/, '')}/`,
+  base: `${(process.env.DOCS_BASE ?? '/').replace(/\/$/, '')}/`,
   cleanUrls: true,
   // Not a dot-directory: the Pages artifact upload skips hidden folders and would publish nothing.
   outDir: '../docs-site',

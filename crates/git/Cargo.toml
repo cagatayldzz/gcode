@@ -1,11 +1,11 @@
 [package]
-name = "vekro-git"
+name = "ws-git"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
-description = "Vekro Git access through libgit2"
+description = "Git access through libgit2"
 
 [lints]
 workspace = true

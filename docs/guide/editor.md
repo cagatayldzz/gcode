@@ -27,7 +27,7 @@ Click a file to open it in a tab. The tabs sit in a row on top, and the shown on
 
 - **Tabs** — click to show, **×** to close. A click on a file that is already open shows its tab. The Explorer selects the file of the
   shown tab.
-- **Saving** — `⌘S` writes the shown file; a `•` after the name means unsaved changes. If the file changed on disk after Vekro read
+- **Saving** — `⌘S` writes the shown file; a `•` after the name means unsaved changes. If the file changed on disk after gcode read
   it, the first save is refused and the next one overwrites.
 - **Closing keeps your text** — closing a tab keeps its unsaved text in memory; opening the file again brings it back. Text is only
   written by saving. Each project keeps its own tabs.
@@ -36,7 +36,7 @@ Click a file to open it in a tab. The tabs sit in a row on top, and the shown on
 
 ### Syntax highlighting
 
-Highlighting comes from tree-sitter grammars through GPUI Kit, plus a few line-based languages Vekro colors itself.
+Highlighting comes from tree-sitter grammars through GPUI Kit, plus a few line-based languages gcode colors itself.
 
 | Source | Languages |
 | --- | --- |
@@ -67,6 +67,6 @@ Drag the sidebar's edge to resize it (200–960 px). It keeps that width when th
 The thin **status bar** under the editor appears in the Explorer view only, not in the Git view or under the terminals:
 
 ```text
- main · 3 changed        ~/Developer/vekro          Ln 12, Col 5  Spaces: 2  UTF-8  LF  Rust
+ main · 3 changed        ~/Developer/atlas          Ln 12, Col 5  Spaces: 2  UTF-8  LF  Rust
  └ branch & changes      └ project folder           └ cursor, indentation, encoding, line ending, language
 ```

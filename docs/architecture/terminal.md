@@ -1,6 +1,6 @@
 # Terminals
 
-The terminal stack has two halves with a clean seam between them: **`vekro-terminal`** (no interface) runs the shell and models the
+The terminal stack has two halves with a clean seam between them: **`ws-terminal`** (no interface) runs the shell and models the
 screen; **`Terminal`** in `crates/ui/src/terminal.rs` draws it and turns input into bytes.
 
 ```text

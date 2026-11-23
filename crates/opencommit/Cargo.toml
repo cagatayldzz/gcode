@@ -1,11 +1,11 @@
 [package]
-name = "vekro-opencommit"
+name = "ws-opencommit"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
-description = "Vekro commit message generation, compatible with the OpenCommit configuration"
+description = "Commit message generation, compatible with the OpenCommit configuration"
 
 [lints]
 workspace = true
@@ -14,5 +14,6 @@ workspace = true
 doctest = false
 
 [dependencies]
+ws-product.workspace = true
 serde_json.workspace = true
 ureq.workspace = true

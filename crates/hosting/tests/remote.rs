@@ -1,4 +1,4 @@
-use vekro_hosting::{remote_host, Account, Provider, RepoRef};
+use ws_hosting::{remote_host, Account, Provider, RepoRef};
 
 fn account(provider: Provider, host: &str, organization: Option<&str>) -> Account {
   Account { provider, host: host.into(), organization: organization.map(str::to_string), username: "me".into(), issue: None }
@@ -65,7 +65,7 @@ fn account_addresses_work_with_and_without_a_scheme() {
 }
 
 mod web {
-  use vekro_hosting::{web_repository, Account, Provider};
+  use ws_hosting::{web_repository, Account, Provider};
 
   fn url(remote: &str, accounts: &[Account]) -> Option<(String, String)> {
     web_repository(remote, accounts).map(|found| (found.service, found.url))
@@ -109,4 +109,16 @@ mod web {
     assert_eq!(url("/Users/me/project.git", &[]), None);
     assert_eq!(url("https://github.com/lonely", &[]), None);
   }
+}
+
+#[test]
+fn a_remote_url_is_renamed_in_every_form_it_can_take() {
+  use ws_hosting::renamed_url;
+
+  assert_eq!(renamed_url("https://github.com/octo/app.git", "app", "tool").as_deref(), Some("https://github.com/octo/tool.git"));
+  assert_eq!(renamed_url("https://github.com/octo/app", "APP", "tool").as_deref(), Some("https://github.com/octo/tool"));
+  assert_eq!(renamed_url("git@github.com:octo/app.git", "app", "tool").as_deref(), Some("git@github.com:octo/tool.git"));
+  assert_eq!(renamed_url(" https://gitlab.com/g/s/app.git/ ", "app", "tool").as_deref(), Some("https://gitlab.com/g/s/tool.git/"));
+  assert_eq!(renamed_url("https://dev.azure.com/org/Proj/_git/app", "app", "tool").as_deref(), Some("https://dev.azure.com/org/Proj/_git/tool"));
+  assert_eq!(renamed_url("https://github.com/octo/other.git", "app", "tool"), None, "another repository is left alone");
 }

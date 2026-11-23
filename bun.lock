@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "vekro",
+      "name": "workspace",
       "devDependencies": {
         "vitepress": "1.6.4",
       },

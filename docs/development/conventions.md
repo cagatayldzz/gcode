@@ -9,14 +9,15 @@ agents; this page explains the *why*.
 - 2 spaces, LF, final newline (`.editorconfig` and `rustfmt.toml` match). Run `cargo fmt --all` after Rust changes.
 - **No `unsafe`** (`unsafe_code = "deny"`).
 - A public project: do **not** name other applications in comments, tests or docs. Describe the behavior itself.
+- **Never write the product's name in code**: not in identifiers, crate names, file names, strings or tests. It lives in `product.toml`; Rust reads it through `ws-product` (`ws_product::NAME`, `env_name("DATA_DIR")`) and scripts through `scripts/product.sh`. Comments say "the app".
 
 ## Layout rules
 
 ```text
- apps/vekro ─► app ─► ui ─► terminal, git, storage, index, hosting, opencommit, updater
+ apps/desktop ─► app ─► ui ─► terminal, git, storage, index, hosting, opencommit, updater
 ```
 
-- Keep `apps/vekro` a thin entry point; put application logic in `crates/*`.
+- Keep `apps/desktop` a thin entry point; put application logic in `crates/*`.
 - `terminal`, `git`, `storage`, `index` (and the other library crates) **never depend on the interface**.
 - Update the documentation when the architecture changes: crate boundaries, the window layout, the files in the data directory
   (`docs/architecture/`).
@@ -38,7 +39,7 @@ and `ScrollableElement`, over hand-built ones. Read the relevant part of the Kit
 | State changes and focus requests in handlers, `defer`, `defer_in` | State changes or focus requests inside `render` |
 | One command = one `Action` shared by buttons, menus and keys; bind keys in `crates/app` | Parallel code paths per entry point |
 | Show actionable failures in the interface (a notification) | Only logging errors |
-| Never change the theme's `font_size` (the Kit sizes icons and dock parts in `rem`) — set Vekro's own text size with `FONT_SIZE` | Rescaling the theme |
+| Never change the theme's `font_size` (the Kit sizes icons and dock parts in `rem`) — set gcode's own text size with `FONT_SIZE` | Rescaling the theme |
 
 ### Speed is a feature
 
@@ -53,7 +54,7 @@ never block the interface thread on slow work, and keep dependencies optimized i
 
 ## Privacy
 
-Do not commit screenshots or logs that show a user's name, machine name, home path or terminal history. Use a scratch `VEKRO_DATA_DIR` for
+Do not commit screenshots or logs that show a user's name, machine name, home path or terminal history. Use a scratch `GCODE_DATA_DIR` for
 any run you intend to show. Tokens are never written to files or logs.
 
 ## Tests

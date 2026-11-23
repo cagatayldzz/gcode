@@ -59,7 +59,7 @@ impl Matcher {
   /// project index (the saved one when nothing changed, which needs no walk of the tree); without it the tree is walked.
   fn files(&self, root: &Path, index_dir: Option<&Path>) -> Vec<PathBuf> {
     let all: Vec<PathBuf> = match index_dir {
-      Some(dir) => vekro_index::ProjectIndex::open(dir, root).index.paths().collect(),
+      Some(dir) => ws_index::ProjectIndex::open(dir, root).index.paths().collect(),
       None => ignore::WalkBuilder::new(root)
         .hidden(false)
         .git_ignore(true)

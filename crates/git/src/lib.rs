@@ -1,4 +1,4 @@
-//! Git access for Vekro. Never depends on the interface.
+//! Git access for the app. Never depends on the interface.
 
 use git2::{build::CheckoutBuilder, DiffFormat, DiffOptions, Repository, Status, StatusOptions};
 use std::path::{Path, PathBuf};
@@ -187,7 +187,7 @@ pub fn quick_status(path: &Path) -> Option<(usize, bool)> {
   Some(summary(path)?.status())
 }
 
-/// The folder name `git clone` would pick for `url`: `https://github.com/a/vekro.git` gives `vekro`.
+/// The folder name `git clone` would pick for `url`: `https://github.com/a/project.git` gives `project`.
 pub fn repository_name(url: &str) -> Option<String> {
   let trimmed = url.trim().trim_end_matches('/');
   let last = trimmed.rsplit(['/', ':']).next()?;
@@ -528,7 +528,7 @@ impl std::fmt::Debug for Credentials {
 
 /// The credential helper `git` is given: it answers a `get` with the user name and password from the environment.
 pub const CREDENTIAL_HELPER: &str =
-  "!f() { test \"$1\" = get && printf 'username=%s\\npassword=%s\\n' \"$VEKRO_GIT_USERNAME\" \"$VEKRO_GIT_PASSWORD\"; }; f";
+  "!f() { test \"$1\" = get && printf 'username=%s\\npassword=%s\\n' \"$WS_GIT_USERNAME\" \"$WS_GIT_PASSWORD\"; }; f";
 
 /// The options that make `git` use `credentials` for the command: the user's own helpers are replaced for this command only.
 fn credential_options(command: &mut std::process::Command, credentials: Option<&Credentials>) {
@@ -536,8 +536,8 @@ fn credential_options(command: &mut std::process::Command, credentials: Option<&
   command
     .args(["-c", "credential.helper=", "-c"])
     .arg(format!("credential.helper={CREDENTIAL_HELPER}"))
-    .env("VEKRO_GIT_USERNAME", &credentials.username)
-    .env("VEKRO_GIT_PASSWORD", &credentials.password);
+    .env("WS_GIT_USERNAME", &credentials.username)
+    .env("WS_GIT_PASSWORD", &credentials.password);
 }
 
 /// Runs the `git` program in `path` with `--progress` and hands each line it reports (git redraws progress lines with a carriage

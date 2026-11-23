@@ -8,9 +8,11 @@ for variable in APPLE_CERTIFICATE_BASE64 APPLE_CERTIFICATE_PASSWORD APPLE_ID APP
   test -n "${!variable:-}" || { echo "Missing release secret: $variable" >&2; exit 1; }
 done
 
-app_dir="$project_dir/dist/Vekro.app"
-test -d "$app_dir" || { echo "Build Vekro.app before notarizing." >&2; exit 1; }
-signing_dir="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/vekro-signing.XXXXXX")"
+product_name="$("$project_dir/scripts/product.sh" name)"
+product_slug="$("$project_dir/scripts/product.sh" slug)"
+app_dir="$project_dir/dist/$product_name.app"
+test -d "$app_dir" || { echo "Build $product_name.app before notarizing." >&2; exit 1; }
+signing_dir="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/signing.XXXXXX")"
 keychain_path="$signing_dir/signing.keychain-db"
 original_keychains=()
 while IFS= read -r line; do
@@ -47,7 +49,7 @@ identity="$(security find-identity -v -p codesigning "$keychain_path" | \
 [[ "$identity" =~ ^[[:xdigit:]]{40}$ ]] || { echo "Expected one valid Developer ID Application identity for APPLE_TEAM_ID." >&2; exit 1; }
 
 # Seal the app with hardened runtime and a secure timestamp.
-helper="$app_dir/Contents/MacOS/vekro-apple-intelligence"
+helper="$app_dir/Contents/MacOS/$product_slug-apple-intelligence"
 if [[ -x "$helper" ]]; then
   codesign --force --sign "$identity" --keychain "$keychain_path" --options runtime --timestamp "$helper"
 fi
@@ -66,4 +68,4 @@ fi
 xcrun stapler staple "$app_dir"
 xcrun stapler validate "$app_dir"
 spctl --assess --type execute --verbose=2 "$app_dir"
-echo "Vekro.app is signed, notarized, and verified for distribution."
+echo "$product_name.app is signed, notarized, and verified for distribution."

@@ -7,7 +7,7 @@ impl Workspace {
   /// Adds the repositories directly inside the projects folder that are not listed yet, and says how many.
   pub(super) fn add_projects_from_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let folder = self.new_project_dir(cx);
-    let found = vekro_git::find_repositories(&folder);
+    let found = ws_git::find_repositories(&folder);
     let added = self.projects.add_all(found.iter().cloned());
     let message = match (added, found.len()) {
       (_, 0) => format!("No Git repositories in {}.", folder.display()),
@@ -177,7 +177,7 @@ impl Workspace {
     cx.notify();
   }
 
-  /// Asks before taking a project out of Vekro: its shells stop, its folder stays on disk.
+  /// Asks before taking a project out of the app: its shells stop, its folder stays on disk.
   pub(crate) fn confirm_remove_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
     let Some(project) = self.projects.projects.iter().find(|project| project.path == path) else { return };
     let (title, workspace) = (SharedString::from(format!("Remove {}?", project.name())), cx.entity());
@@ -264,7 +264,7 @@ impl Workspace {
         }
       }
       if let Some(url) = &chosen.remote {
-        match vekro_git::set_remote_url(&path, url) {
+        match ws_git::set_remote_url(&path, url) {
           Ok(()) => {
             if this.projects.active.as_ref() == Some(&path) {
               this.refresh_project();
@@ -395,7 +395,7 @@ impl Workspace {
       return;
     };
     let work = cx.background_executor().spawn(async move {
-      vekro_index::ProjectIndex::open(&vekro_storage::index_dir(), &root);
+      ws_index::ProjectIndex::open(&ws_storage::index_dir(), &root);
     });
     self.index_task = cx.spawn(async move |_, _| work.await);
   }
@@ -404,7 +404,7 @@ impl Workspace {
   pub(super) fn refresh_project(&mut self) {
     match &self.projects.active {
       Some(root) => {
-        self.git = vekro_git::summary(root);
+        self.git = ws_git::summary(root);
         self.rows = explorer::rows(root, &self.expanded);
       }
       None => {
@@ -450,7 +450,7 @@ impl Workspace {
     let expanded = self.expanded.clone();
     let work = cx.background_executor().spawn({
       let (root, expanded) = (root.clone(), expanded.clone());
-      async move { (vekro_git::summary(&root), explorer::rows(&root, &expanded)) }
+      async move { (ws_git::summary(&root), explorer::rows(&root, &expanded)) }
     });
     cx.spawn(async move |this, cx| {
       let (git, rows) = work.await;

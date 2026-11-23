@@ -1,4 +1,4 @@
-use vekro_opencommit::{estimate_tokens, parse_message, split_diff, system_prompt, Config};
+use ws_opencommit::{estimate_tokens, parse_message, split_diff, system_prompt, Config};
 
 #[test]
 fn the_default_prompt_asks_for_one_conventional_line_without_scope() {

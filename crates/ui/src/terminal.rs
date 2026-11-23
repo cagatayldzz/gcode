@@ -26,7 +26,7 @@ use std::{
   time::Duration,
 };
 use unicode_width::UnicodeWidthChar as _;
-use vekro_terminal::{
+use ws_terminal::{
   dropped_paths, encode_key, encode_mouse, paste_bytes, CursorShape, Modes, Modifiers as TermModifiers, MouseAction, MouseButton as TermButton,
   MouseEvent as TermMouse, Palette, Rgb, Session, SessionEvent, SessionOptions, Snapshot,
 };

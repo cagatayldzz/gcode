@@ -7868,117 +7868,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
-name = "vekro"
-version = "0.1.0"
-dependencies = [
- "vekro-app",
-]
-
-[[package]]
-name = "vekro-app"
-version = "0.1.0"
-dependencies = [
- "gpui-kit",
- "vekro-storage",
- "vekro-ui",
-]
-
-[[package]]
-name = "vekro-git"
-version = "0.1.0"
-dependencies = [
- "git2",
-]
-
-[[package]]
-name = "vekro-hosting"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "ureq",
- "vekro-storage",
-]
-
-[[package]]
-name = "vekro-index"
-version = "0.1.0"
-dependencies = [
- "ignore",
- "tempfile",
-]
-
-[[package]]
-name = "vekro-opencommit"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "ureq",
-]
-
-[[package]]
-name = "vekro-storage"
-version = "0.1.0"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
-name = "vekro-terminal"
-version = "0.1.0"
-dependencies = [
- "alacritty_terminal",
- "rustix",
- "unicode-width",
-]
-
-[[package]]
-name = "vekro-ui"
-version = "0.1.0"
-dependencies = [
- "futures",
- "git2",
- "globset",
- "gpui-kit",
- "gpui-kit-assets",
- "ignore",
- "objc2-foundation 0.3.2",
- "regex",
- "rustix",
- "serde_json",
- "tempfile",
- "tree-sitter",
- "tree-sitter-kotlin-ng",
- "tree-sitter-swift",
- "unicode-width",
- "vekro-git",
- "vekro-hosting",
- "vekro-index",
- "vekro-opencommit",
- "vekro-storage",
- "vekro-terminal",
- "vekro-updater",
-]
-
-[[package]]
-name = "vekro-updater"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "vekro-version",
-]
-
-[[package]]
-name = "vekro-version"
-version = "0.1.0"
-
-[[package]]
-name = "vekro-visual-check"
-version = "0.1.0"
-dependencies = [
- "image",
-]
-
-[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9143,6 +9032,127 @@ name = "writeable"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
+
+[[package]]
+name = "ws-app"
+version = "0.1.0"
+dependencies = [
+ "gpui-kit",
+ "ws-storage",
+ "ws-ui",
+]
+
+[[package]]
+name = "ws-desktop"
+version = "0.1.0"
+dependencies = [
+ "ws-app",
+]
+
+[[package]]
+name = "ws-git"
+version = "0.1.0"
+dependencies = [
+ "git2",
+]
+
+[[package]]
+name = "ws-hosting"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "ureq",
+ "ws-product",
+ "ws-storage",
+]
+
+[[package]]
+name = "ws-index"
+version = "0.1.0"
+dependencies = [
+ "ignore",
+ "tempfile",
+]
+
+[[package]]
+name = "ws-opencommit"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "ureq",
+ "ws-product",
+]
+
+[[package]]
+name = "ws-product"
+version = "0.1.0"
+
+[[package]]
+name = "ws-storage"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "ws-product",
+]
+
+[[package]]
+name = "ws-terminal"
+version = "0.1.0"
+dependencies = [
+ "alacritty_terminal",
+ "rustix",
+ "unicode-width",
+ "ws-product",
+]
+
+[[package]]
+name = "ws-ui"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "git2",
+ "globset",
+ "gpui-kit",
+ "gpui-kit-assets",
+ "ignore",
+ "objc2-foundation 0.3.2",
+ "regex",
+ "rustix",
+ "serde_json",
+ "tempfile",
+ "tree-sitter",
+ "tree-sitter-kotlin-ng",
+ "tree-sitter-swift",
+ "unicode-width",
+ "ws-git",
+ "ws-hosting",
+ "ws-index",
+ "ws-opencommit",
+ "ws-product",
+ "ws-storage",
+ "ws-terminal",
+ "ws-updater",
+]
+
+[[package]]
+name = "ws-updater"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "ws-product",
+ "ws-version",
+]
+
+[[package]]
+name = "ws-version"
+version = "0.1.0"
+
+[[package]]
+name = "ws-visual-check"
+version = "0.1.0"
+dependencies = [
+ "image",
+]
 
 [[package]]
 name = "x11"

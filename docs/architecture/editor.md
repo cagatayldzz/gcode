@@ -1,6 +1,6 @@
 # Editor & performance
 
-> **Opening a file must feel instant.** This page explains how Vekro keeps that promise, and how highlighting and previews fit in.
+> **Opening a file must feel instant.** This page explains how gcode keeps that promise, and how highlighting and previews fit in.
 
 ## Opening files quickly
 
@@ -36,16 +36,16 @@ Two systems cover all languages:
    │      └─► tree-sitter grammar via GPUI Kit's LanguageRegistry
    │
    └─ "dotenv" "gitignore" "dockerfile"
-          └─► vekro_index::highlight::Highlights::compute(language, text)
+          └─► ws_index::highlight::Highlights::compute(language, text)
               the colors of the whole text are worked out ONCE as runs that cover it
               (newlines included); drawing only slices the runs
 ```
 
-- **Grammars** come from GPUI Kit's features (`tree-sitter-rust`, …). Vekro adds two registrations in `crates/ui/src/syntax.rs`: the Swift
+- **Grammars** come from GPUI Kit's features (`tree-sitter-rust`, …). gcode adds two registrations in `crates/ui/src/syntax.rs`: the Swift
   highlight query (Kit registers the grammar with an empty one), and **Kotlin**, whose grammar crate (`tree-sitter-kotlin-ng`) ships no
-  query, so `crates/ui/src/syntax/kotlin.scm` is written for Vekro. In that grammar `true`, `false` and `null` are plain identifiers, so
+  query, so `crates/ui/src/syntax/kotlin.scm` is written for gcode. In that grammar `true`, `false` and `null` are plain identifiers, so
   they are matched by text predicates.
-- **Line-based languages** are classified by `vekro-index` with no interface dependency, which is why they are unit-tested alone.
+- **Line-based languages** are classified by `ws-index` with no interface dependency, which is why they are unit-tested alone.
 - A **language label** for the status bar comes from `language_label` (for example `"kotlin" → "Kotlin"`).
 
 ### Adding a language
@@ -71,7 +71,7 @@ the editor's scroll position, so dragging it never blocks typing.
 ## Image previews
 
 SVG and ICNS previews are decoded **off the interface thread**. For an SVG in Changes, Preview renders the last-commit and working-tree
-versions side by side on demand (`vekro_git::file_versions`, capped at 16 MB per image).
+versions side by side on demand (`ws_git::file_versions`, capped at 16 MB per image).
 
 ## Lists that stay smooth
 

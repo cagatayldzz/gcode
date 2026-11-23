@@ -34,7 +34,7 @@ struct FileHeaderLayout {
 }
 
 #[derive(Action, Clone, PartialEq)]
-#[action(namespace = vekro, no_json)]
+#[action(namespace = app, no_json)]
 pub(crate) struct OpenChangedFile(pub SharedString);
 
 pub(crate) struct AllChanges {
@@ -65,7 +65,7 @@ impl AllChanges {
     }
     let previous = self.patch.clone();
     let work = cx.background_executor().spawn(async move {
-      let patch = vekro_git::all_changes_diff(&root)?;
+      let patch = ws_git::all_changes_diff(&root)?;
       if previous.as_deref() == Some(patch.as_str()) {
         return Ok(None);
       }

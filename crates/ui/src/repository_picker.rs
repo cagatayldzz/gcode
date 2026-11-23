@@ -18,7 +18,7 @@ use gpui_kit::{
   },
   *,
 };
-use vekro_hosting::{Account, KeychainStore, Repository, TokenStore as _};
+use ws_hosting::{Account, KeychainStore, Repository, TokenStore as _};
 
 /// The tallest the list gets before it scrolls.
 const LIST_MAX_HEIGHT: Pixels = px(240.);
@@ -68,7 +68,7 @@ impl RepositoryPicker {
       let token = keychain
         .get(&account.key())
         .ok_or_else(|| "The token is not in the Keychain any more. Disconnect the account in Settings and connect it again.".to_string())?;
-      vekro_hosting::repositories(&vekro_hosting::Connection { account, token })
+      ws_hosting::repositories(&ws_hosting::Connection { account, token })
     });
     cx.spawn(async move |this, cx| {
       let result = work.await;

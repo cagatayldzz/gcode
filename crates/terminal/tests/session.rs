@@ -2,7 +2,7 @@ use std::{
   sync::mpsc,
   time::{Duration, Instant},
 };
-use vekro_terminal::{Palette, Session, SessionEvent, SessionOptions};
+use ws_terminal::{Palette, Session, SessionEvent, SessionOptions};
 
 fn run(script: &str) -> (Session, mpsc::Receiver<SessionEvent>) {
   let (sender, receiver) = mpsc::channel();
@@ -25,7 +25,7 @@ fn wait_for_exit(receiver: &mpsc::Receiver<SessionEvent>) {
 }
 
 /// Waits until the screen satisfies `ready`; the output and the exit notice race each other.
-fn wait_for_screen(session: &Session, ready: impl Fn(&vekro_terminal::Snapshot) -> bool) {
+fn wait_for_screen(session: &Session, ready: impl Fn(&ws_terminal::Snapshot) -> bool) {
   let deadline = Instant::now() + Duration::from_secs(5);
   while Instant::now() < deadline {
     if ready(&session.snapshot(&Palette::light())) {
@@ -89,17 +89,17 @@ fn ansi_colors_follow_the_theme_and_true_colors_remain_unchanged() {
     let red = snapshot.lines[0].iter().find(|span| span.text.contains("red")).unwrap();
     let custom = snapshot.lines[0].iter().find(|span| span.text.contains("custom")).unwrap();
     assert_eq!(red.foreground, palette.ansi[1]);
-    assert_eq!(custom.foreground, vekro_terminal::Rgb::new(12, 34, 56));
-    assert_eq!(custom.background, Some(vekro_terminal::Rgb::new(23, 45, 67)));
+    assert_eq!(custom.foreground, ws_terminal::Rgb::new(12, 34, 56));
+    assert_eq!(custom.background, Some(ws_terminal::Rgb::new(23, 45, 67)));
   }
 }
 
 #[test]
-fn child_program_identifies_vekro_as_its_terminal() {
+fn child_program_identifies_the_app_as_its_terminal() {
   let (session, receiver) = run("printf '%s:%s' \"$TERM_PROGRAM\" \"$TERM_PROGRAM_VERSION\"");
   wait_for_exit(&receiver);
-  wait_for_screen(&session, |snapshot| snapshot.text().contains("Vekro:"));
-  assert!(session.snapshot(&Palette::light()).text().contains("Vekro:"));
+  wait_for_screen(&session, |snapshot| snapshot.text().contains(&format!("{}:", ws_product::NAME)));
+  assert!(session.snapshot(&Palette::light()).text().contains(&format!("{}:", ws_product::NAME)));
 }
 
 #[cfg(unix)]

@@ -21,9 +21,9 @@ use gpui_kit::{
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
-use vekro_hosting::Accounts;
-use vekro_opencommit::{config_path, Config};
-use vekro_storage::{data_dir, Preferences, Profile, ThemeChoice, FONT_SIZES};
+use ws_hosting::Accounts;
+use ws_opencommit::{config_path, Config};
+use ws_storage::{data_dir, Preferences, Profile, ThemeChoice, FONT_SIZES};
 
 /// The settings of one profile, shared by every window that shows it. Changing `preferences` and notifying makes each of those
 /// windows save them and redraw.
@@ -35,7 +35,7 @@ pub(crate) struct SettingsModel {
   pub opencommit: Config,
   /// The connected hosting accounts (`accounts.json`); their tokens are in the Keychain.
   pub accounts: Accounts,
-  /// Vekro's own updates.
+  /// The app's own updates.
   pub updates: UpdateState,
   /// The accounts whose permissions are being checked, by key.
   pub rechecking: Vec<String>,
@@ -231,7 +231,7 @@ pub(crate) fn settings_view(
   let store = Store(model);
   let (theme_get, theme_set, layout_store, folder_store, add_all_store, commit_store, updates_get, updates_set) =
     (store.clone(), store.clone(), store.clone(), store.clone(), store.clone(), store.clone(), store.clone(), store.clone());
-  Settings::new("vekro-settings").with_group_variant(GroupBoxVariant::Outline).sidebar_width(px(180.)).sidebar_style(&StyleRefinement::default().bg(background)).pages(vec![
+  Settings::new("settings").with_group_variant(GroupBoxVariant::Outline).sidebar_width(px(180.)).sidebar_style(&StyleRefinement::default().bg(background)).pages(vec![
     SettingPage::new("General").default_open(first_page == "General").resettable(false).groups(vec![
       SettingGroup::new().title("Appearance").item(
         SettingItem::new(
@@ -367,7 +367,7 @@ pub(crate) fn settings_view(
     SettingPage::new("Accounts").default_open(first_page == "Accounts").resettable(false).group(
       SettingGroup::new()
         .title("GitHub, GitLab and Azure DevOps")
-        .description("A connected account lets Vekro list your repositories to clone, list and open pull requests, and gives Git the token for that host over HTTPS. Tokens are kept in the macOS Keychain.")
+        .description(format!("A connected account lets {} list your repositories to clone, list and open pull requests, and gives Git the token for that host over HTTPS. Tokens are kept in the macOS Keychain.", ws_product::NAME))
         .item(SettingItem::render(move |_, _, _| accounts.clone())),
     ),
     SettingPage::new("OpenCommit").resettable(false).group(
@@ -385,7 +385,7 @@ pub(crate) fn settings_view(
     // One titled group: with two, the Kit adds an arrow and a submenu to the page in the list on the left.
     SettingPage::new("Updates").resettable(false).group(
       SettingGroup::new()
-        .title("Vekro")
+        .title(ws_product::NAME)
         .item(SettingItem::render(move |_, _, _| updates.clone()))
         .item(
           SettingItem::new(
@@ -395,16 +395,16 @@ pub(crate) fn settings_view(
               move |value: bool, cx: &mut App| updates_set.update(cx, |preferences| preferences.check_updates = value),
             ),
           )
-          .description("Vekro asks GitHub (api.github.com) for the latest release of its repository. Nothing about you or your projects is sent. An update is only downloaded when you choose to."),
+          .description(format!("{} asks GitHub (api.github.com) for the latest release of its repository. Nothing about you or your projects is sent. An update is only downloaded when you choose to.", ws_product::NAME)),
         ),
     ),
     SettingPage::new("About").resettable(false).group(
       SettingGroup::new()
-        .title("Vekro")
+        .title(ws_product::NAME)
         .item(SettingItem::new("Version", SettingField::render(|_, _, _| Label::new(env!("CARGO_PKG_VERSION")).text_sm())))
         .item(SettingItem::new(
           "Repository",
-          SettingField::render(|_, _, cx| Label::new(vekro_updater::repository_slug().unwrap_or("—")).text_sm().text_color(cx.theme().muted_foreground)),
+          SettingField::render(|_, _, cx| Label::new(ws_updater::repository_slug().unwrap_or("—")).text_sm().text_color(cx.theme().muted_foreground)),
         ))
         .item(SettingItem::new(
           "Data folder",

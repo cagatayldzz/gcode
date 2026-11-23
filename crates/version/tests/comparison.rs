@@ -1,4 +1,4 @@
-use vekro_version::is_newer;
+use ws_version::is_newer;
 
 #[test]
 fn a_higher_component_is_newer() {

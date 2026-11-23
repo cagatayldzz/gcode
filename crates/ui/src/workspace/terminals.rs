@@ -280,7 +280,7 @@ impl Workspace {
     }
     let picker = cx.new(|cx| MentionPicker::new(choices, window, cx));
     self._dialog_subscription = Some(cx.subscribe_in(&picker, window, move |this, _, chosen: &ProjectsChosen, window, cx| {
-      let text = vekro_terminal::dropped_paths(chosen.0.iter().map(PathBuf::as_path));
+      let text = ws_terminal::dropped_paths(chosen.0.iter().map(PathBuf::as_path));
       terminal.update(cx, |terminal, cx| terminal.insert_text(&text, cx));
       window.close_dialog(cx);
       this.focus_pane(&terminal, window, cx);

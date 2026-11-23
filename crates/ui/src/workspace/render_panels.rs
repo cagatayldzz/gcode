@@ -137,7 +137,7 @@ impl Workspace {
       .projects
       .iter()
       .find(|project| self.projects.active.as_ref() == Some(&project.path))
-      .map_or_else(|| SharedString::from("Vekro"), |project| SharedString::from(project.name()));
+      .map_or_else(|| SharedString::from(ws_product::NAME), |project| SharedString::from(project.name()));
     let action =
       |id: &'static str, icon: &'static str, tooltip: &'static str| Button::new(id).ghost().xsmall().icon(Icon::empty().path(icon)).tooltip(tooltip);
     let header = h_flex()

@@ -14,7 +14,7 @@ use gpui_kit::{
   },
   *,
 };
-use vekro_storage::Project;
+use ws_storage::Project;
 
 /// The blue fill of a chosen avatar, tab or option. The kit's own primary style inverts the text color,
 /// which is black on white in a dark theme.

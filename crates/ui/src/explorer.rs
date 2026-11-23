@@ -24,12 +24,12 @@ const HIDDEN: [&str; 2] = [".git", ".DS_Store"];
 /// folders before files, each group sorted by name.
 pub(crate) fn rows(root: &Path, expanded: &HashSet<PathBuf>) -> Vec<Row> {
   let mut out = Vec::new();
-  let rules = vekro_git::IgnoreRules::open(root);
+  let rules = ws_git::IgnoreRules::open(root);
   collect(root, 0, false, rules.as_ref(), expanded, &mut out);
   out
 }
 
-fn collect(dir: &Path, depth: usize, inherited: bool, rules: Option<&vekro_git::IgnoreRules>, expanded: &HashSet<PathBuf>, out: &mut Vec<Row>) {
+fn collect(dir: &Path, depth: usize, inherited: bool, rules: Option<&ws_git::IgnoreRules>, expanded: &HashSet<PathBuf>, out: &mut Vec<Row>) {
   let Ok(entries) = fs::read_dir(dir) else { return };
   let mut children: Vec<(bool, String, Row)> = entries
     .filter_map(Result::ok)

@@ -1,4 +1,4 @@
-//! Commit message generation for Vekro, compatible with [OpenCommit](https://github.com/di-sukharev/opencommit).
+//! Commit message generation for the app, compatible with [OpenCommit](https://github.com/di-sukharev/opencommit).
 //!
 //! The settings live in the same `~/.opencommit` file the `oco` command uses, so an API key that is already there keeps
 //! working. Messages use an OpenAI-compatible chat API or Apple Intelligence. Never depends on the interface.

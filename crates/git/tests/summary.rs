@@ -1,8 +1,8 @@
 use std::{fs, path::PathBuf};
-use vekro_git::summary;
+use ws_git::summary;
 
 fn temp_dir(name: &str) -> PathBuf {
-  let dir = std::env::temp_dir().join(format!("vekro-git-{name}-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-git-{name}-{}", std::process::id()));
   let _ = fs::remove_dir_all(&dir);
   fs::create_dir_all(&dir).unwrap();
   dir
@@ -28,38 +28,38 @@ fn a_new_repository_names_its_branch_and_counts_untracked_files() {
 
 #[test]
 fn repository_names_come_from_the_last_url_segment() {
-  use vekro_git::repository_name;
-  assert_eq!(repository_name("https://github.com/cagatayldzz/vekro.git"), Some("vekro".into()));
-  assert_eq!(repository_name("git@github.com:cagatayldzz/vekro.git"), Some("vekro".into()));
-  assert_eq!(repository_name(" https://github.com/cagatayldzz/vekro/ "), Some("vekro".into()));
+  use ws_git::repository_name;
+  assert_eq!(repository_name("https://github.com/owner/project.git"), Some("project".into()));
+  assert_eq!(repository_name("git@github.com:owner/project.git"), Some("project".into()));
+  assert_eq!(repository_name(" https://github.com/owner/project/ "), Some("project".into()));
   assert_eq!(repository_name(""), None);
 }
 
 #[test]
 fn a_created_project_is_a_repository_on_main_and_cannot_be_created_twice() {
   let parent = temp_dir("create");
-  let path = vekro_git::create_project(&parent, "demo").unwrap();
+  let path = ws_git::create_project(&parent, "demo").unwrap();
   assert_eq!(summary(&path).unwrap().branch, "main");
-  assert!(vekro_git::create_project(&parent, "demo").is_err());
-  assert!(vekro_git::create_project(&parent, "a/b").is_err());
+  assert!(ws_git::create_project(&parent, "demo").is_err());
+  assert!(ws_git::create_project(&parent, "a/b").is_err());
   fs::remove_dir_all(parent).unwrap();
 }
 
 #[test]
 fn cloning_copies_a_repository_and_reports_a_missing_one() {
   let parent = temp_dir("clone");
-  let source = vekro_git::create_project(&parent, "source").unwrap();
+  let source = ws_git::create_project(&parent, "source").unwrap();
   let destination = parent.join("elsewhere");
   fs::create_dir_all(&destination).unwrap();
-  let cloned = vekro_git::clone(source.to_str().unwrap(), &destination, None).unwrap();
+  let cloned = ws_git::clone(source.to_str().unwrap(), &destination, None).unwrap();
   assert_eq!(cloned, destination.join("source"));
-  assert!(vekro_git::clone(parent.join("missing").to_str().unwrap(), &destination, None).is_err());
+  assert!(ws_git::clone(parent.join("missing").to_str().unwrap(), &destination, None).is_err());
   fs::remove_dir_all(parent).unwrap();
 }
 
 #[test]
 fn changes_list_new_modified_and_deleted_files_with_a_diff_for_each() {
-  use vekro_git::{file_diff, ChangeKind};
+  use ws_git::{file_diff, ChangeKind};
   let dir = temp_dir("changes");
   let repository = git2::Repository::init_opts(&dir, git2::RepositoryInitOptions::new().initial_head("main")).unwrap();
   fs::write(dir.join("kept.txt"), "one\n").unwrap();
@@ -90,13 +90,13 @@ fn changes_list_new_modified_and_deleted_files_with_a_diff_for_each() {
 #[test]
 fn repositories_directly_inside_a_folder_are_found_by_name() {
   let parent = temp_dir("find");
-  vekro_git::create_project(&parent, "beta").unwrap();
-  vekro_git::create_project(&parent, "Alpha").unwrap();
+  ws_git::create_project(&parent, "beta").unwrap();
+  ws_git::create_project(&parent, "Alpha").unwrap();
   fs::create_dir_all(parent.join("plain-folder")).unwrap();
   fs::write(parent.join("a-file.txt"), "x").unwrap();
-  let found: Vec<_> = vekro_git::find_repositories(&parent).iter().map(|path| path.file_name().unwrap().to_str().unwrap().to_string()).collect();
+  let found: Vec<_> = ws_git::find_repositories(&parent).iter().map(|path| path.file_name().unwrap().to_str().unwrap().to_string()).collect();
   assert_eq!(found, ["Alpha", "beta"]);
-  assert!(vekro_git::find_repositories(&parent.join("missing")).is_empty());
+  assert!(ws_git::find_repositories(&parent.join("missing")).is_empty());
   fs::remove_dir_all(parent).unwrap();
 }
 
@@ -117,7 +117,7 @@ fn committed_repository(name: &str) -> PathBuf {
 
 #[test]
 fn discarding_restores_a_modified_or_deleted_file_and_leaves_the_others_alone() {
-  use vekro_git::discard_changes;
+  use ws_git::discard_changes;
   let dir = committed_repository("discard-tracked");
   fs::write(dir.join("kept.txt"), "edited").unwrap();
   fs::write(dir.join("other.txt"), "edited too").unwrap();
@@ -134,7 +134,7 @@ fn discarding_restores_a_modified_or_deleted_file_and_leaves_the_others_alone() 
 
 #[test]
 fn discarding_a_new_file_deletes_it_even_when_it_was_staged() {
-  use vekro_git::discard_changes;
+  use ws_git::discard_changes;
   let dir = committed_repository("discard-new");
   fs::write(dir.join("fresh.txt"), "new").unwrap();
   fs::write(dir.join("staged.txt"), "new").unwrap();
@@ -154,7 +154,7 @@ fn discarding_a_new_file_deletes_it_even_when_it_was_staged() {
 #[test]
 fn a_changed_file_is_found_by_its_repository_relative_path() {
   let dir = committed_repository("workdir-file");
-  let found = vekro_git::workdir_file(&dir, std::path::Path::new("kept.txt")).unwrap();
+  let found = ws_git::workdir_file(&dir, std::path::Path::new("kept.txt")).unwrap();
   assert!(found.ends_with("kept.txt") && found.exists());
   fs::remove_dir_all(dir).unwrap();
 }
@@ -168,7 +168,7 @@ fn configure_author(dir: &PathBuf) {
 
 #[test]
 fn committing_takes_only_the_chosen_files() {
-  use vekro_git::commit;
+  use ws_git::commit;
   let dir = committed_repository("commit-chosen");
   configure_author(&dir);
   fs::write(dir.join("kept.txt"), "edited").unwrap();
@@ -190,7 +190,7 @@ fn committing_takes_only_the_chosen_files() {
 
 #[test]
 fn a_file_staged_but_not_chosen_stays_out_of_the_commit() {
-  use vekro_git::commit;
+  use ws_git::commit;
   let dir = committed_repository("commit-staged");
   configure_author(&dir);
   fs::write(dir.join("kept.txt"), "edited").unwrap();
@@ -210,7 +210,7 @@ fn a_file_staged_but_not_chosen_stays_out_of_the_commit() {
 
 #[test]
 fn committing_handles_deleted_files_the_first_commit_and_bad_input() {
-  use vekro_git::commit;
+  use ws_git::commit;
   let dir = committed_repository("commit-edges");
   configure_author(&dir);
   fs::remove_file(dir.join("other.txt")).unwrap();
@@ -232,7 +232,7 @@ fn committing_handles_deleted_files_the_first_commit_and_bad_input() {
 
 #[test]
 fn changing_the_remote_address_keeps_the_remote_and_adds_origin_when_missing() {
-  use vekro_git::{remote_url, set_remote_url};
+  use ws_git::{remote_url, set_remote_url};
   let dir = temp_dir("set-remote");
   assert!(set_remote_url(&dir, "https://github.com/a/b.git").is_err());
   git2::Repository::init_opts(&dir, git2::RepositoryInitOptions::new().initial_head("main")).unwrap();

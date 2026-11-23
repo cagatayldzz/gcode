@@ -1,6 +1,6 @@
 # Hosting & accounts
 
-`vekro-hosting` knows three services — **GitHub**, **GitLab** and **Azure DevOps** — and nothing about the interface.
+`ws-hosting` knows three services — **GitHub**, **GitLab** and **Azure DevOps** — and nothing about the interface.
 
 ## Types
 
@@ -36,11 +36,11 @@ the Keychain runs on a background thread.
 
 For `clone`, `push`, `fetch` and `pull` of an HTTPS remote, `connections::credentials_for_repository` finds the account for the remote's host
 and gives the `git` program the user name and token **through environment variables** read by a one-command credential helper
-(`vekro_git::CREDENTIAL_HELPER`):
+(`ws_git::CREDENTIAL_HELPER`):
 
 ```text
- VEKRO_GIT_USERNAME ─┐
- VEKRO_GIT_PASSWORD ─┴─►  credential helper (one shell command)  ──►  git
+ WS_GIT_USERNAME ─┐
+ WS_GIT_PASSWORD ─┴─►  credential helper (one shell command)  ──►  git
                           so they appear in NO command line, file or log
 ```
 

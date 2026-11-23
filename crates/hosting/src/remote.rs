@@ -60,6 +60,16 @@ impl RepoRef {
   }
 }
 
+/// The remote URL with the repository's name changed from `old` to `new`, keeping its form (`https`, `ssh`, `git@host:…`, a
+/// trailing `.git` or slash). `None` when the URL's last segment is not `old`.
+pub fn renamed_url(url: &str, old: &str, new: &str) -> Option<String> {
+  let url = url.trim();
+  let (core, slash) = url.strip_suffix('/').map_or((url, ""), |core| (core, "/"));
+  let (core, git) = core.strip_suffix(".git").map_or((core, ""), |core| (core, ".git"));
+  let start = core.rfind(['/', ':'])? + 1;
+  core[start..].eq_ignore_ascii_case(old).then(|| format!("{}{new}{git}{slash}", &core[..start]))
+}
+
 /// The host and the path segments of a remote URL, without a trailing `.git` and any user name or port.
 fn split_remote(url: &str) -> Option<(String, Vec<String>)> {
   let url = url.trim();

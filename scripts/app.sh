@@ -1,7 +1,7 @@
 #!/bin/bash
 # Usage:
-#   scripts/app.sh --dev                     debug build, then launch dist/Vekro.app
-#   scripts/app.sh [debug|release] --build   build dist/Vekro.app (default: debug)
+#   scripts/app.sh --dev                     debug build, then launch dist/<name>.app
+#   scripts/app.sh [debug|release] --build   build dist/<name>.app (default: debug)
 #   scripts/app.sh --check                   scripts and their tests, formatting, clippy and tests
 
 set -euo pipefail
@@ -11,8 +11,12 @@ project_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$project_dir"
 
 usage="Usage: scripts/app.sh --dev | [debug|release] --build | --check | --icon"
-resources="$project_dir/apps/vekro/macos"
-app_dir="$project_dir/dist/Vekro.app"
+resources="$project_dir/apps/desktop/macos"
+# The product's name comes from product.toml and appears nowhere else in the build.
+product_name="$("$project_dir/scripts/product.sh" name)"
+product_slug="$("$project_dir/scripts/product.sh" slug)"
+product_bundle_id="$("$project_dir/scripts/product.sh" bundle_id)"
+app_dir="$project_dir/dist/$product_name.app"
 
 fail() {
   echo "$1" >&2
@@ -87,27 +91,27 @@ SVG
   echo "Ready: $resources/AppIcon.icns and $resources/DevIcon.icns"
 }
 
-# Build the binary, wrap it in dist/Vekro.app and sign it.
+# Build the binary, wrap it in dist/<name>.app and sign it.
 compile() {
   local profile_flags=()
   [[ "$configuration" == release ]] && profile_flags=(--release)
 
-  cargo build --locked ${profile_flags[@]+"${profile_flags[@]}"} -p vekro
+  cargo build --locked ${profile_flags[@]+"${profile_flags[@]}"} -p ws-desktop
 }
 
 bundle() {
   rm -rf "$app_dir"
   mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
-  cp "$project_dir/target/$configuration/Vekro" "$app_dir/Contents/MacOS/Vekro"
+  cp "$project_dir/target/$configuration/ws-desktop" "$app_dir/Contents/MacOS/$product_name"
   if [[ "$(uname -m)" == arm64 ]]; then
     xcrun --sdk macosx swiftc -parse-as-library -O -target arm64-apple-macosx15.0 \
-      "$project_dir/crates/opencommit/AppleIntelligence.swift" -o "$app_dir/Contents/MacOS/vekro-apple-intelligence"
+      "$project_dir/crates/opencommit/AppleIntelligence.swift" -o "$app_dir/Contents/MacOS/$product_slug-apple-intelligence"
   fi
-  cp "$resources/Info.plist" "$app_dir/Contents/Info.plist"
+  sed -e "s#@NAME@#$product_name#g" -e "s#@BUNDLE_ID@#$product_bundle_id#g" "$resources/Info.plist" >"$app_dir/Contents/Info.plist"
   if [[ "$configuration" == debug ]]; then
     cp "$resources/DevIcon.icns" "$app_dir/Contents/Resources/DevIcon.icns"
     /usr/libexec/PlistBuddy -c 'Set :CFBundleIconFile DevIcon' "$app_dir/Contents/Info.plist"
-    /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.cagatayldzz.vekro.dev' "$app_dir/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $product_bundle_id.dev" "$app_dir/Contents/Info.plist"
   else
     cp "$resources/AppIcon.icns" "$app_dir/Contents/Resources/AppIcon.icns"
   fi
@@ -115,7 +119,7 @@ bundle() {
 
 # Local development signature. Distribution requires Developer ID + notarization.
 sign() {
-  local output helper="$app_dir/Contents/MacOS/vekro-apple-intelligence"
+  local output helper="$app_dir/Contents/MacOS/$product_slug-apple-intelligence"
   if [[ -x "$helper" ]]; then
     output="$(codesign --force --sign - "$helper" 2>&1)" || fail "$output"
   fi
@@ -124,14 +128,14 @@ sign() {
 
 # `open` only brings an already running instance forward, so quit the running development app first: politely, then by force.
 stop_running_app() {
-  local identifier="com.cagatayldzz.vekro.dev" attempt
-  pgrep -f "$app_dir/Contents/MacOS/Vekro" >/dev/null 2>&1 || return 0
+  local identifier="$product_bundle_id.dev" attempt
+  pgrep -f "$app_dir/Contents/MacOS/$product_name" >/dev/null 2>&1 || return 0
   osascript -e "tell application id \"$identifier\" to quit" >/dev/null 2>&1 || true
   for attempt in 1 2 3 4 5 6 7 8 9 10; do
-    pgrep -f "$app_dir/Contents/MacOS/Vekro" >/dev/null 2>&1 || return 0
+    pgrep -f "$app_dir/Contents/MacOS/$product_name" >/dev/null 2>&1 || return 0
     sleep 0.3
   done
-  pkill -f "$app_dir/Contents/MacOS/Vekro" >/dev/null 2>&1 || true
+  pkill -f "$app_dir/Contents/MacOS/$product_name" >/dev/null 2>&1 || true
   sleep 0.5
 }
 

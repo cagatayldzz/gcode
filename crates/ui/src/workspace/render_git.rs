@@ -237,7 +237,7 @@ impl Workspace {
   }
 
   /// The changed files whose path contains the filter text (all of them without one).
-  fn visible_changes(&self, query: &str) -> Vec<&vekro_git::Change> {
+  fn visible_changes(&self, query: &str) -> Vec<&ws_git::Change> {
     let Some(git) = self.git.as_ref() else { return Vec::new() };
     git.changes.iter().filter(|change| query.is_empty() || change.path.to_string_lossy().to_lowercase().contains(query)).collect()
   }
@@ -245,7 +245,7 @@ impl Workspace {
   /// One line of the Changes list: a checkbox, the file name with its folder, and the kind of change. Its height is fixed
   /// ([`CHANGE_ROW_HEIGHT`]) because the list is virtualized, and its width is the list's own: a virtual list lays its rows out
   /// at their content width, so a percentage would leave short rows narrow and long ones unclipped.
-  fn change_row(&self, change: &vekro_git::Change, width: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
+  fn change_row(&self, change: &ws_git::Change, width: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     let workspace = cx.entity();
@@ -312,7 +312,7 @@ impl Workspace {
           })),
       )
       .context_menu({
-        let (workspace, deleted) = (workspace.clone(), change.kind == vekro_git::ChangeKind::Deleted);
+        let (workspace, deleted) = (workspace.clone(), change.kind == ws_git::ChangeKind::Deleted);
         let root = root.clone();
         let busy = self.committing || self.discarding;
         let ignore_folder = file.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
@@ -387,7 +387,7 @@ impl Workspace {
     let shown = self.visible_changes(&query).len();
     let changes_list = v_virtual_list(workspace.clone(), "git-changes", self.change_sizes(shown), |this, range, _, cx| {
       let query = this.changes_filter.read(cx).value().trim().to_lowercase();
-      let changes: Vec<vekro_git::Change> =
+      let changes: Vec<ws_git::Change> =
         this.visible_changes(&query).get(range).map(|rows| rows.iter().map(|change| (*change).clone()).collect()).unwrap_or_default();
       let width = this.changes_scroll.bounds().size.width;
       changes.iter().map(|change| this.change_row(change, width, cx)).collect()
@@ -468,7 +468,7 @@ impl Workspace {
                     .on_click(move |_, window, cx| amend_workspace.update(cx, |this, cx| this.amend_commit(window, cx))),
                 )
                 .submenu("Add Co-author", window, cx, move |submenu, _, _| {
-                  let people = vekro_git::recent_authors(&author_root, 500, 12);
+                  let people = ws_git::recent_authors(&author_root, 500, 12);
                   if people.is_empty() {
                     return submenu.item(PopupMenuItem::new("No other authors in this repository").disabled(true));
                   }
@@ -677,7 +677,7 @@ impl Workspace {
                 .on_click(move |_, window, cx| branch_workspace.update(cx, |this, cx| this.branch_from_commit(branch_id.clone(), window, cx))),
             )
             .submenu("Cherry-pick Commit to", window, cx, move |submenu, _, _| {
-              let branches = vekro_git::branch_entries(&pick_root).unwrap_or_default();
+              let branches = ws_git::branch_entries(&pick_root).unwrap_or_default();
               branches.into_iter().filter(|entry| entry.remote.is_none() && entry.name != pick_current).fold(submenu, |submenu, entry| {
                 let (workspace, id, branch) = (pick_workspace.clone(), pick_id.clone(), entry.name.clone());
                 submenu.item(

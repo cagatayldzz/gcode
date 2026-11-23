@@ -1,7 +1,7 @@
-use vekro_storage::{WindowMode, WindowPlacement};
+use ws_storage::{WindowMode, WindowPlacement};
 
 fn temp_file(name: &str) -> std::path::PathBuf {
-  std::env::temp_dir().join(format!("vekro-window-{name}-{}", std::process::id())).join("window.json")
+  std::env::temp_dir().join(format!("ws-window-{name}-{}", std::process::id())).join("window.json")
 }
 
 #[test]

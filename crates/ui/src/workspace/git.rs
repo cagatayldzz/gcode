@@ -44,16 +44,16 @@ impl Workspace {
       async move {
         let credentials = credentials_for_repository(&accounts, &root);
         if sync.behind > 0 {
-          vekro_git::pull(&root, credentials.as_ref(), |line| report(0., 1., line))
+          ws_git::pull(&root, credentials.as_ref(), |line| report(0., 1., line))
         } else if sync.ahead > 0 || !sync.upstream {
-          let pushed = vekro_git::push(&root, credentials.as_ref(), |line| report(0., 0.85, line))?;
+          let pushed = ws_git::push(&root, credentials.as_ref(), |line| report(0., 0.85, line))?;
           report(0.85, 0.15, "Connecting…");
           fetching_after_push.store(true, Ordering::Relaxed);
-          vekro_git::fetch(&root, credentials.as_ref(), |line| report(0.85, 0.15, line))
+          ws_git::fetch(&root, credentials.as_ref(), |line| report(0.85, 0.15, line))
             .map_err(|error| format!("Push succeeded, but fetching failed: {error}"))?;
           Ok(pushed)
         } else {
-          vekro_git::fetch(&root, credentials.as_ref(), |line| report(0., 1., line))
+          ws_git::fetch(&root, credentials.as_ref(), |line| report(0., 1., line))
         }
       }
     });
@@ -137,7 +137,7 @@ impl Workspace {
     let limit = self.history_limit;
     let work = cx.background_executor().spawn({
       let root = root.clone();
-      async move { vekro_git::history(&root, limit) }
+      async move { ws_git::history(&root, limit) }
     });
     cx.spawn(async move |this, cx| {
       let found = work.await.unwrap_or_default();
@@ -166,7 +166,7 @@ impl Workspace {
   /// Takes the last commit back, keeping its changes: they return to the Changes view with the commit's message in the commit box.
   pub(super) fn undo_commit(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
-    let work = cx.background_executor().spawn(async move { vekro_git::undo_commit(&root, &id) });
+    let work = cx.background_executor().spawn(async move { ws_git::undo_commit(&root, &id) });
     cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
@@ -200,7 +200,7 @@ impl Workspace {
       cx,
       move |this, name, window, cx| {
         let root = this.projects.active.clone().ok_or("Open a project first.")?;
-        vekro_git::create_tag(&root, &id, name)?;
+        ws_git::create_tag(&root, &id, name)?;
         this.load_history(cx);
         window.push_notification(Notification::info(format!("Tagged {short} as {}. The tag is local until you push it.", name.trim())), cx);
         Ok(())
@@ -234,7 +234,7 @@ impl Workspace {
     self.compare_choices = None;
     self.compare_epoch += 1;
     let epoch = self.compare_epoch;
-    let work = cx.background_executor().spawn(async move { vekro_git::compare_choices(&root) });
+    let work = cx.background_executor().spawn(async move { ws_git::compare_choices(&root) });
     cx.spawn(async move |this, cx| {
       let found = work.await;
       let _ = this.update(cx, |this, cx| {
@@ -287,7 +287,7 @@ impl Workspace {
     let epoch = self.compare_epoch;
     let work = cx.background_executor().spawn({
       let name = name.clone();
-      async move { vekro_git::compare(&root, &name) }
+      async move { ws_git::compare(&root, &name) }
     });
     cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
@@ -364,9 +364,9 @@ impl Workspace {
       let current = git.branch.clone();
       async move {
         if pending {
-          vekro_git::read_merge(&root).map(vekro_git::MergeOutcome::Conflicted)
+          ws_git::read_merge(&root).map(ws_git::MergeOutcome::Conflicted)
         } else {
-          vekro_git::start_merge(&root, branch.as_deref().unwrap_or_default(), &current)
+          ws_git::start_merge(&root, branch.as_deref().unwrap_or_default(), &current)
         }
       }
     });
@@ -380,8 +380,8 @@ impl Workspace {
         }
         this.refresh_project();
         match result {
-          Ok(vekro_git::MergeOutcome::Finished) => this.merge_completed(branch.as_deref(), window, cx),
-          Ok(vekro_git::MergeOutcome::Conflicted(state)) => {
+          Ok(ws_git::MergeOutcome::Finished) => this.merge_completed(branch.as_deref(), window, cx),
+          Ok(ws_git::MergeOutcome::Conflicted(state)) => {
             if let Some((_, dialog, _)) = this.merge_dialog.as_ref().filter(|(path, dialog, _)| path == &root && dialog.read(cx).same_merge(&state)) {
               dialog.update(cx, |dialog, cx| dialog.set_state(state, cx));
               Self::show_merge_dialog(dialog.clone(), window, cx);
@@ -469,7 +469,7 @@ impl Workspace {
       let (connection, repository) = accounts
         .for_remote(&url, &accounts.keychain())
         .ok_or("The token for this account is not in the Keychain. Connect the account again in Settings → Accounts.")?;
-      vekro_hosting::pull_requests(&connection, &repository)
+      ws_hosting::pull_requests(&connection, &repository)
     });
     cx.spawn(async move |this, cx| {
       let result = work.await;
@@ -497,7 +497,7 @@ impl Workspace {
       source: git.branch.clone(),
       unpushed: sync.ahead,
       published: sync.upstream,
-      suggested_title: vekro_git::head_summary(&root).unwrap_or_else(|| git.branch.clone()),
+      suggested_title: ws_git::head_summary(&root).unwrap_or_else(|| git.branch.clone()),
     };
     let accounts = self.settings.read(cx).accounts.clone();
     let form = cx.new(|cx| PullRequestForm::new(accounts, target, window, cx));
@@ -522,7 +522,7 @@ impl Workspace {
     if open {
       self.branch_tab = BranchTab::Branches;
       if let Some(root) = &self.projects.active {
-        self.branches = vekro_git::branch_entries(root).unwrap_or_default();
+        self.branches = ws_git::branch_entries(root).unwrap_or_default();
       }
       self.branch_filter.update(cx, |input, cx| input.set_value("", window, cx));
       let focus = self.branch_filter.read(cx).focus_handle(cx);
@@ -543,7 +543,7 @@ impl Workspace {
       cx,
       move |this, name, window, cx| {
         let root = this.projects.active.clone().ok_or("Open a project first.")?;
-        vekro_git::create_branch(&root, name)?;
+        ws_git::create_branch(&root, name)?;
         this.refresh_project();
         window.push_notification(Notification::info(format!("Created and switched to {}.", name.trim())), cx);
         Ok(())
@@ -586,7 +586,7 @@ impl Workspace {
     let work = cx.background_executor().spawn(async move {
       paths
         .into_iter()
-        .filter_map(|path| vekro_git::quick_status(&path).map(|(changed, push)| (path, ProjectStatus { changed, push })))
+        .filter_map(|path| ws_git::quick_status(&path).map(|(changed, push)| (path, ProjectStatus { changed, push })))
         .collect::<HashMap<_, _>>()
     });
     cx.spawn(async move |this, cx| {

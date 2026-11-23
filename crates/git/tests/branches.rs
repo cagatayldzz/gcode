@@ -1,8 +1,8 @@
 use std::{fs, path::PathBuf};
-use vekro_git::{branches, create_branch, diff_files, summary, switch_branch};
+use ws_git::{branches, create_branch, diff_files, summary, switch_branch};
 
 fn repository(name: &str) -> PathBuf {
-  let dir = std::env::temp_dir().join(format!("vekro-git-branches-{name}-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-git-branches-{name}-{}", std::process::id()));
   let _ = fs::remove_dir_all(&dir);
   fs::create_dir_all(&dir).unwrap();
   let repository = git2::Repository::init_opts(&dir, git2::RepositoryInitOptions::new().initial_head("main")).unwrap();
@@ -28,7 +28,7 @@ fn the_file_timeline_tracks_only_the_selected_literal_path() {
   let dir = repository("file-history");
   let target = dir.join("notes[1].md");
   let other = dir.join("notes1.md");
-  assert!(vekro_git::file_history(&target, 10).unwrap().is_empty());
+  assert!(ws_git::file_history(&target, 10).unwrap().is_empty());
   fs::write(&target, "first version").unwrap();
   fs::write(&other, "other file").unwrap();
   commit_all(&dir, "initial");
@@ -37,11 +37,11 @@ fn the_file_timeline_tracks_only_the_selected_literal_path() {
   fs::write(&target, "second version").unwrap();
   commit_all(&dir, "edit selected file");
 
-  let history = vekro_git::file_history(&target, 10).unwrap();
+  let history = ws_git::file_history(&target, 10).unwrap();
   let mut summaries: Vec<_> = history.iter().map(|commit| commit.summary.as_str()).collect();
   summaries.sort_unstable();
   assert_eq!(summaries, ["edit selected file", "initial"]);
-  assert_eq!(vekro_git::file_history(&target, 1).unwrap().len(), 1);
+  assert_eq!(ws_git::file_history(&target, 1).unwrap().len(), 1);
   fs::remove_dir_all(dir).unwrap();
 }
 
@@ -133,18 +133,18 @@ fn the_diff_of_several_files_names_each_of_them() {
 
 #[test]
 fn pushing_publishes_a_branch_that_has_no_upstream_yet() {
-  let remote = std::env::temp_dir().join(format!("vekro-git-branches-remote-{}", std::process::id()));
+  let remote = std::env::temp_dir().join(format!("ws-git-branches-remote-{}", std::process::id()));
   let _ = fs::remove_dir_all(&remote);
   git2::Repository::init_bare(&remote).unwrap();
   let dir = repository("push");
   fs::write(dir.join("a.txt"), "a").unwrap();
   commit_all(&dir, "first");
   git2::Repository::open(&dir).unwrap().remote("origin", remote.to_str().unwrap()).unwrap();
-  vekro_git::push(&dir, None, |_| {}).unwrap();
+  ws_git::push(&dir, None, |_| {}).unwrap();
   assert!(git2::Repository::open_bare(&remote).unwrap().find_reference("refs/heads/main").is_ok());
   fs::write(dir.join("b.txt"), "b").unwrap();
   commit_all(&dir, "second");
-  vekro_git::push(&dir, None, |_| {}).unwrap();
+  ws_git::push(&dir, None, |_| {}).unwrap();
   fs::remove_dir_all(dir).unwrap();
   fs::remove_dir_all(remote).unwrap();
 }
@@ -154,12 +154,12 @@ fn pushing_without_a_remote_reports_git_s_message() {
   let dir = repository("noremote");
   fs::write(dir.join("a.txt"), "a").unwrap();
   commit_all(&dir, "first");
-  assert!(!vekro_git::push(&dir, None, |_| {}).unwrap_err().is_empty());
+  assert!(!ws_git::push(&dir, None, |_| {}).unwrap_err().is_empty());
   fs::remove_dir_all(dir).unwrap();
 }
 
 fn remote_pair(name: &str) -> (PathBuf, PathBuf) {
-  let remote = std::env::temp_dir().join(format!("vekro-git-sync-{name}-remote-{}", std::process::id()));
+  let remote = std::env::temp_dir().join(format!("ws-git-sync-{name}-remote-{}", std::process::id()));
   let _ = fs::remove_dir_all(&remote);
   git2::Repository::init_opts(&remote, git2::RepositoryInitOptions::new().bare(true).initial_head("main")).unwrap();
   let dir = repository(&format!("sync-{name}"));
@@ -183,7 +183,7 @@ fn a_branch_not_yet_pushed_has_no_upstream_and_then_counts_commits_ahead() {
   let (dir, remote) = remote_pair("ahead");
   let before = summary(&dir).unwrap().sync.unwrap();
   assert_eq!((before.remote.as_str(), before.upstream, before.ahead, before.behind), ("origin", false, 0, 0));
-  vekro_git::push(&dir, None, |_| {}).unwrap();
+  ws_git::push(&dir, None, |_| {}).unwrap();
   let pushed = summary(&dir).unwrap().sync.unwrap();
   assert!(pushed.upstream && pushed.ahead == 0);
   fs::write(dir.join("b.txt"), "b").unwrap();
@@ -196,26 +196,26 @@ fn a_branch_not_yet_pushed_has_no_upstream_and_then_counts_commits_ahead() {
 #[test]
 fn fetching_shows_new_remote_commits_as_behind_and_pulling_catches_up() {
   let (dir, remote) = remote_pair("behind");
-  vekro_git::push(&dir, None, |_| {}).unwrap();
+  ws_git::push(&dir, None, |_| {}).unwrap();
   // Another clone pushes a commit.
-  let parent = std::env::temp_dir().join(format!("vekro-git-sync-parent2-{}", std::process::id()));
+  let parent = std::env::temp_dir().join(format!("ws-git-sync-parent2-{}", std::process::id()));
   let _ = fs::remove_dir_all(&parent);
   fs::create_dir_all(&parent).unwrap();
-  let second = vekro_git::clone(remote.to_str().unwrap(), &parent, None).unwrap();
+  let second = ws_git::clone(remote.to_str().unwrap(), &parent, None).unwrap();
   let repository = git2::Repository::open(&second).unwrap();
   let mut config = repository.config().unwrap();
   config.set_str("user.name", "Test").unwrap();
   config.set_str("user.email", "test@example.com").unwrap();
   fs::write(second.join("c.txt"), "c").unwrap();
   commit_all(&second, "from elsewhere");
-  vekro_git::push(&second, None, |_| {}).unwrap();
+  ws_git::push(&second, None, |_| {}).unwrap();
 
   assert_eq!(summary(&dir).unwrap().sync.unwrap().behind, 0);
-  vekro_git::fetch(&dir, None, |_| {}).unwrap();
+  ws_git::fetch(&dir, None, |_| {}).unwrap();
   let fetched = summary(&dir).unwrap().sync.unwrap();
   assert_eq!(fetched.behind, 1);
   assert!(fetched.last_fetched.is_some());
-  vekro_git::pull(&dir, None, |_| {}).unwrap();
+  ws_git::pull(&dir, None, |_| {}).unwrap();
   assert_eq!(summary(&dir).unwrap().sync.unwrap().behind, 0);
   assert!(dir.join("c.txt").exists());
   for path in [dir, remote, parent] {
@@ -227,7 +227,7 @@ fn fetching_shows_new_remote_commits_as_behind_and_pulling_catches_up() {
 fn a_push_reports_git_s_progress_while_it_runs() {
   let (dir, remote) = remote_pair("progress");
   let mut lines = Vec::new();
-  vekro_git::push(&dir, None, |line| lines.push(line.to_string())).unwrap();
+  ws_git::push(&dir, None, |line| lines.push(line.to_string())).unwrap();
   assert!(!lines.is_empty(), "no progress was reported");
   assert!(lines.iter().all(|line| !line.contains('\r') && !line.is_empty()));
   fs::remove_dir_all(dir).unwrap();
@@ -237,10 +237,10 @@ fn a_push_reports_git_s_progress_while_it_runs() {
 #[test]
 fn the_remote_url_and_the_last_commit_summary_are_read() {
   let (dir, remote) = remote_pair("url");
-  assert_eq!(vekro_git::remote_url(&dir).as_deref(), remote.to_str());
-  assert_eq!(vekro_git::head_summary(&dir).as_deref(), Some("first"));
+  assert_eq!(ws_git::remote_url(&dir).as_deref(), remote.to_str());
+  assert_eq!(ws_git::head_summary(&dir).as_deref(), Some("first"));
   let plain = repository("nourl");
-  assert_eq!(vekro_git::remote_url(&plain), None);
+  assert_eq!(ws_git::remote_url(&plain), None);
   fs::remove_dir_all(dir).unwrap();
   fs::remove_dir_all(remote).unwrap();
   fs::remove_dir_all(plain).unwrap();
@@ -248,19 +248,19 @@ fn the_remote_url_and_the_last_commit_summary_are_read() {
 
 #[test]
 fn credentials_reach_git_through_the_helper_and_stay_out_of_debug_output() {
-  let credentials = vekro_git::Credentials { username: "user".into(), password: "s3cret".into() };
+  let credentials = ws_git::Credentials { username: "user".into(), password: "s3cret".into() };
   assert!(!format!("{credentials:?}").contains("s3cret"));
   // A local remote needs no login, so a push with credentials must simply work: the helper is only asked when a server wants it.
   let (dir, remote) = remote_pair("credentials");
-  vekro_git::push(&dir, Some(&credentials), |_| {}).unwrap();
+  ws_git::push(&dir, Some(&credentials), |_| {}).unwrap();
   assert!(git2::Repository::open_bare(&remote).unwrap().find_reference("refs/heads/main").is_ok());
   // Git itself asks the helper: `git credential fill` for a host answers with the user name and password.
   let mut child = std::process::Command::new("git")
     .args(["-c", "credential.helper=", "-c"])
-    .arg(format!("credential.helper={}", vekro_git::CREDENTIAL_HELPER))
+    .arg(format!("credential.helper={}", ws_git::CREDENTIAL_HELPER))
     .args(["credential", "fill"])
-    .env("VEKRO_GIT_USERNAME", "user")
-    .env("VEKRO_GIT_PASSWORD", "s3cret")
+    .env("WS_GIT_USERNAME", "user")
+    .env("WS_GIT_PASSWORD", "s3cret")
     .env("GIT_TERMINAL_PROMPT", "0")
     .stdin(std::process::Stdio::piped())
     .stdout(std::process::Stdio::piped())
@@ -300,14 +300,14 @@ fn a_refused_token_is_followed_by_the_users_own_login_and_the_message_says_both_
   fs::write(dir.join("a.txt"), "a").unwrap();
   commit_all(&dir, "first");
   git2::Repository::open(&dir).unwrap().remote("origin", &url).unwrap();
-  let credentials = vekro_git::Credentials { username: "me".into(), password: "tok".into() };
+  let credentials = ws_git::Credentials { username: "me".into(), password: "tok".into() };
 
-  let error = vekro_git::push(&dir, Some(&credentials), |_| {}).unwrap_err();
+  let error = ws_git::push(&dir, Some(&credentials), |_| {}).unwrap_err();
   assert!(error.contains("403") && error.contains("refused the token of the connected account") && error.contains("own Git login"), "{error}");
   assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 2, "the token was tried, then the user's own login");
 
   // Without a connected account there is only one attempt and the plain message.
-  let error = vekro_git::push(&dir, None, |_| {}).unwrap_err();
+  let error = ws_git::push(&dir, None, |_| {}).unwrap_err();
   assert!(error.contains("403") && !error.contains("connected account"), "{error}");
   assert_eq!(seen.load(std::sync::atomic::Ordering::SeqCst), 3);
   fs::remove_dir_all(dir).unwrap();
@@ -315,7 +315,7 @@ fn a_refused_token_is_followed_by_the_users_own_login_and_the_message_says_both_
 
 /// A bare remote whose pre-receive hook says `output` and refuses the push, the way a host refuses a commit.
 fn refusing_remote(name: &str, output: &str) -> PathBuf {
-  let remote = std::env::temp_dir().join(format!("vekro-git-hook-{name}-{}", std::process::id()));
+  let remote = std::env::temp_dir().join(format!("ws-git-hook-{name}-{}", std::process::id()));
   let _ = fs::remove_dir_all(&remote);
   git2::Repository::init_opts(&remote, git2::RepositoryInitOptions::new().bare(true).initial_head("main")).unwrap();
   let hook = remote.join("hooks/pre-receive");
@@ -337,10 +337,10 @@ fn a_rejected_push_gives_the_reason_not_git_s_last_line() {
   fs::write(dir.join("a.txt"), "a").unwrap();
   commit_all(&dir, "first");
   git2::Repository::open(&dir).unwrap().remote("origin", remote.to_str().unwrap()).unwrap();
-  let error = vekro_git::push(&dir, None, |_| {}).unwrap_err();
+  let error = ws_git::push(&dir, None, |_| {}).unwrap_err();
   assert!(error.contains("[remote rejected]") && error.contains("protected branch: no pushes today"), "{error}");
   assert!(!error.contains("failed to push some refs") && !error.contains("Resolving deltas"), "{error}");
-  assert!(!error.contains(vekro_git::WORKFLOWS_REFUSED));
+  assert!(!error.contains(ws_git::WORKFLOWS_REFUSED));
   fs::remove_dir_all(dir).unwrap();
   fs::remove_dir_all(remote).unwrap();
 }
@@ -355,23 +355,23 @@ fn a_push_refused_for_workflow_files_says_which_permission_is_missing() {
   fs::write(dir.join("a.txt"), "a").unwrap();
   commit_all(&dir, "first");
   git2::Repository::open(&dir).unwrap().remote("origin", remote.to_str().unwrap()).unwrap();
-  let error = vekro_git::push(&dir, None, |_| {}).unwrap_err();
-  assert!(error.contains(vekro_git::WORKFLOWS_REFUSED) && error.contains("`workflow` scope") && error.contains(".github/workflows"), "{error}");
+  let error = ws_git::push(&dir, None, |_| {}).unwrap_err();
+  assert!(error.contains(ws_git::WORKFLOWS_REFUSED) && error.contains("`workflow` scope") && error.contains(".github/workflows"), "{error}");
   fs::remove_dir_all(dir).unwrap();
   fs::remove_dir_all(remote).unwrap();
 }
 
 #[test]
 fn the_quick_status_counts_changes_and_says_whether_a_push_is_waiting() {
-  assert_eq!(vekro_git::quick_status(&std::env::temp_dir().join("vekro-git-not-a-repository-folder")), None);
+  assert_eq!(ws_git::quick_status(&std::env::temp_dir().join("ws-git-not-a-repository-folder")), None);
   let (dir, remote) = remote_pair("quick");
-  assert_eq!(vekro_git::quick_status(&dir), Some((0, true)), "an unpublished branch is waiting to be pushed");
-  vekro_git::push(&dir, None, |_| {}).unwrap();
-  assert_eq!(vekro_git::quick_status(&dir), Some((0, false)));
+  assert_eq!(ws_git::quick_status(&dir), Some((0, true)), "an unpublished branch is waiting to be pushed");
+  ws_git::push(&dir, None, |_| {}).unwrap();
+  assert_eq!(ws_git::quick_status(&dir), Some((0, false)));
   fs::write(dir.join("b.txt"), "b").unwrap();
-  assert_eq!(vekro_git::quick_status(&dir), Some((1, false)), "a change is not a commit to push");
+  assert_eq!(ws_git::quick_status(&dir), Some((1, false)), "a change is not a commit to push");
   commit_all(&dir, "second");
-  assert_eq!(vekro_git::quick_status(&dir), Some((0, true)));
+  assert_eq!(ws_git::quick_status(&dir), Some((0, true)));
   fs::remove_dir_all(dir).unwrap();
   fs::remove_dir_all(remote).unwrap();
 }
@@ -381,7 +381,7 @@ fn a_repository_without_a_remote_never_waits_for_a_push() {
   let dir = repository("quick-local");
   fs::write(dir.join("a.txt"), "a").unwrap();
   commit_all(&dir, "first");
-  assert_eq!(vekro_git::quick_status(&dir), Some((0, false)));
+  assert_eq!(ws_git::quick_status(&dir), Some((0, false)));
   fs::remove_dir_all(dir).unwrap();
 }
 
@@ -391,19 +391,19 @@ fn preview_versions_read_added_modified_and_deleted_files() {
   let file = std::path::Path::new("preview.png");
   fs::write(dir.join(file), b"original").unwrap();
 
-  let added = vekro_git::file_versions(&dir, file, 16).unwrap();
+  let added = ws_git::file_versions(&dir, file, 16).unwrap();
   assert_eq!(added.original, None);
   assert_eq!(added.current.as_deref(), Some(b"original".as_slice()));
 
   commit_all(&dir, "Add preview");
   fs::write(dir.join(file), b"updated").unwrap();
-  let modified = vekro_git::file_versions(&dir, file, 16).unwrap();
+  let modified = ws_git::file_versions(&dir, file, 16).unwrap();
   assert_eq!(modified.original.as_deref(), Some(b"original".as_slice()));
   assert_eq!(modified.current.as_deref(), Some(b"updated".as_slice()));
-  assert!(vekro_git::file_versions(&dir, file, 7).is_err());
+  assert!(ws_git::file_versions(&dir, file, 7).is_err());
 
   fs::remove_file(dir.join(file)).unwrap();
-  let deleted = vekro_git::file_versions(&dir, file, 16).unwrap();
+  let deleted = ws_git::file_versions(&dir, file, 16).unwrap();
   assert_eq!(deleted.original.as_deref(), Some(b"original".as_slice()));
   assert_eq!(deleted.current, None);
   fs::remove_dir_all(dir).unwrap();
@@ -424,7 +424,7 @@ fn the_working_tree_patch_includes_staged_unstaged_and_untracked_files() {
   fs::remove_file(dir.join("unstaged.txt")).unwrap();
   fs::write(dir.join("untracked.txt"), "untracked change\n").unwrap();
 
-  let patch = vekro_git::all_changes_diff(&dir).unwrap();
+  let patch = ws_git::all_changes_diff(&dir).unwrap();
   assert!(patch.contains("diff --git a/staged.txt b/staged.txt"));
   assert!(patch.contains("+staged change"));
   assert!(patch.contains("diff --git a/unstaged.txt b/unstaged.txt"));

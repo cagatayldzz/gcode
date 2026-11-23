@@ -1,5 +1,5 @@
 use std::fs;
-use vekro_hosting::{Account, Accounts, MemoryStore, Provider, TokenStore};
+use ws_hosting::{Account, Accounts, MemoryStore, Provider, TokenStore};
 
 fn github(username: &str) -> Account {
   Account { provider: Provider::GitHub, host: "github.com".into(), organization: None, username: username.into(), issue: None }
@@ -7,7 +7,7 @@ fn github(username: &str) -> Account {
 
 #[test]
 fn accounts_survive_a_save_and_load_and_never_hold_a_token() {
-  let dir = std::env::temp_dir().join(format!("vekro-hosting-accounts-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-hosting-accounts-{}", std::process::id()));
   fs::create_dir_all(&dir).unwrap();
   let file = dir.join("accounts.json");
   let mut accounts = Accounts::default();
@@ -63,13 +63,13 @@ fn a_remote_finds_the_account_and_token_for_its_host() {
 
 #[test]
 fn git_logins_use_the_token_as_the_password() {
-  let connection = |provider, username: &str| vekro_hosting::Connection {
+  let connection = |provider, username: &str| ws_hosting::Connection {
     account: Account { provider, host: "h".into(), organization: None, username: username.into(), issue: None },
     token: "tok".into(),
   };
   assert_eq!(connection(Provider::GitHub, "octo").git_login(), ("octo".to_string(), "tok".to_string()));
   assert_eq!(connection(Provider::GitLab, "gl").git_login(), ("oauth2".to_string(), "tok".to_string()));
-  assert_eq!(connection(Provider::AzureDevOps, "").git_login().0, "vekro");
+  assert_eq!(connection(Provider::AzureDevOps, "").git_login().0, ws_product::slug());
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn each_service_has_a_page_where_the_token_is_edited() {
 
 #[test]
 fn accounts_loaded_for_a_profile_keep_its_keychain_namespace() {
-  let dir = std::env::temp_dir().join(format!("vekro-hosting-namespace-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-hosting-namespace-{}", std::process::id()));
   fs::create_dir_all(&dir).unwrap();
   let file = dir.join("accounts.json");
   let mut accounts = Accounts::default();
@@ -111,7 +111,7 @@ fn accounts_loaded_for_a_profile_keep_its_keychain_namespace() {
   accounts.save(&file).unwrap();
   let scoped = Accounts::load_in(&file, Some("work".into()));
   assert_eq!(scoped.items, accounts.items);
-  assert_eq!(scoped.keychain(), vekro_hosting::KeychainStore::new(Some("work".into())));
+  assert_eq!(scoped.keychain(), ws_hosting::KeychainStore::new(Some("work".into())));
   assert_ne!(scoped.keychain(), Accounts::load(&file).keychain());
   // A profile that does not exist yet still has its namespace.
   assert_eq!(Accounts::load_in(&dir.join("missing.json"), Some("work".into())).namespace.as_deref(), Some("work"));

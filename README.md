@@ -1,11 +1,11 @@
-# <img src="apps/vekro/macos/icon.svg" alt="" width="48" align="absmiddle"> Vekro
+# <img src="apps/desktop/macos/icon.svg" alt="" width="48" align="absmiddle"> gcode
 
-Vekro brings your projects, a code editor, terminals, and Git together in one native macOS
+gcode brings your projects, a code editor, terminals, and Git together in one native macOS
 window. Built with Rust and [GPUI Kit](https://gpui-kit.com).
 
 | Light · Editor | Dark · Git changes |
 | --- | --- |
-| ![Vekro in Light mode with the file explorer and a Rust file open in the editor](docs/images/workspace-light.png) | ![Vekro in Dark mode with changed files, commit controls, and an inline diff](docs/images/workspace-dark.png) |
+| ![gcode in Light mode with the file explorer and a Rust file open in the editor](docs/images/workspace-light.png) | ![gcode in Dark mode with changed files, commit controls, and an inline diff](docs/images/workspace-dark.png) |
 
 - **Projects** — Create a repository, clone by URL, or import a local folder. Group projects by category, star favorites, and switch between them while their terminals keep running.
 - **Editor** — Browse the file tree, edit files in tabs with syntax highlighting, and preview SVG and ICNS images. Press `⌘S` to save.
@@ -16,7 +16,7 @@ window. Built with Rust and [GPUI Kit](https://gpui-kit.com).
 
 ## Get started
 
-Vekro supports macOS 15 or later on Apple Silicon. See [GitHub Releases](https://github.com/cagatayldzz/vekro/releases) for downloads, or follow the [development guide](docs/development/index.md) to run it from source.
+gcode supports macOS 15 or later on Apple Silicon. See [GitHub Releases](https://github.com/cagatayldzz/vekro/releases) for downloads, or follow the [development guide](docs/development/index.md) to run it from source.
 
 ```sh
 bun install

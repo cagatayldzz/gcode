@@ -15,7 +15,7 @@ use gpui_kit::{
   },
   *,
 };
-use vekro_storage::{Profile, ProfileList, WindowMode, WindowPlacement};
+use ws_storage::{Profile, ProfileList, WindowMode, WindowPlacement};
 
 /// The profiles, loaded when first needed. Every change is written to `profiles.json` at once.
 struct ProfilesGlobal(ProfileList);
@@ -50,7 +50,7 @@ pub(crate) fn update_profiles<T>(cx: &mut App, change: impl FnOnce(&mut ProfileL
   result
 }
 
-/// The profile of a window, if it is a Vekro window that can be read right now (not the one being updated).
+/// The profile of a window, if it is an app window that can be read right now (not the one being updated).
 fn window_profile(handle: AnyWindowHandle, cx: &App) -> Option<Profile> {
   // The window's root is the Kit's `Root`, which holds the workspace as its view.
   let root = handle.downcast::<gpui_kit::base::Root>()?;
@@ -92,7 +92,7 @@ pub fn open_window(profile: Profile, cx: &mut App) {
   };
   update_profiles(cx, |list| list.set_last(&profile.id));
   let (handle, workspace) = gpui_kit::open_window(options, cx, move |window, cx| cx.new(|cx| Workspace::new(profile.clone(), window, cx)))
-    .expect("Failed to open the Vekro window");
+    .expect("Failed to open the window");
   // The keyboard starts in the window, so its shortcuts work before anything is clicked.
   let _ = handle.update(cx, |_, window, cx| {
     workspace.update(cx, |workspace, cx| workspace.warm_index(cx));

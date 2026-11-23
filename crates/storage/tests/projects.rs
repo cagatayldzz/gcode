@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use vekro_storage::ProjectList;
+use ws_storage::ProjectList;
 
 #[test]
 fn adding_a_project_twice_keeps_one_entry_and_activates_it() {
@@ -22,7 +22,7 @@ fn removing_the_active_project_activates_the_first_remaining() {
 
 #[test]
 fn the_list_survives_a_save_and_load() {
-  let dir = std::env::temp_dir().join(format!("vekro-projects-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-projects-{}", std::process::id()));
   let file = dir.join("projects.json");
   let mut list = ProjectList::default();
   list.add(PathBuf::from("/work/a"));
@@ -47,7 +47,7 @@ fn adding_many_skips_listed_projects_and_keeps_the_open_one() {
 
 #[test]
 fn dropping_a_project_on_another_starts_an_unnamed_category_and_survives_a_save() {
-  let dir = std::env::temp_dir().join(format!("vekro-categories-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-categories-{}", std::process::id()));
   let file = dir.join("projects.json");
   let (a, b, c) = (PathBuf::from("/work/a"), PathBuf::from("/work/b"), PathBuf::from("/work/c"));
   let mut list = ProjectList::default();
@@ -98,7 +98,7 @@ fn renaming_and_deleting_a_category_keeps_the_projects() {
 
 #[test]
 fn a_project_keeps_its_name_icon_and_color_across_a_save() {
-  let dir = std::env::temp_dir().join(format!("vekro-appearance-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-appearance-{}", std::process::id()));
   let file = dir.join("projects.json");
   let a = PathBuf::from("/work/atlas");
   let mut list = ProjectList::default();
@@ -112,13 +112,13 @@ fn a_project_keeps_its_name_icon_and_color_across_a_save() {
 
   // The folder's own name, or nothing, goes back to the default.
   list.set_appearance(&a, "atlas", None, None);
-  assert_eq!(list.projects[0], vekro_storage::Project::new(a));
+  assert_eq!(list.projects[0], ws_storage::Project::new(a));
   std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
 fn a_list_of_plain_paths_from_an_older_version_still_loads() {
-  let dir = std::env::temp_dir().join(format!("vekro-legacy-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-legacy-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let file = dir.join("projects.json");
   std::fs::write(&file, r#"{"projects": ["/work/a", "/work/b"], "active": "/work/b"}"#).unwrap();
@@ -155,7 +155,7 @@ fn projects_and_categories_move_within_their_own_group() {
 
 #[test]
 fn only_projects_whose_folder_is_gone_are_reported_missing() {
-  let dir = std::env::temp_dir().join(format!("vekro-missing-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-missing-{}", std::process::id()));
   let (kept, gone) = (dir.join("kept"), dir.join("gone"));
   std::fs::create_dir_all(&kept).unwrap();
   std::fs::create_dir_all(&gone).unwrap();
@@ -213,7 +213,7 @@ fn favorites_are_starred_listed_in_order_and_survive_a_save() {
   list.set_favorite(&PathBuf::from("/work/missing"), true);
   assert_eq!(list.favorites().map(|project| project.path.clone()).collect::<Vec<_>>(), [PathBuf::from("/work/a"), PathBuf::from("/work/c")]);
 
-  let dir = std::env::temp_dir().join(format!("vekro-projects-favorites-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-projects-favorites-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let file = dir.join("projects.json");
   list.save(&file).unwrap();

@@ -1,5 +1,5 @@
 use image::{DynamicImage, Rgba, RgbaImage};
-use vekro_visual_check::{pixel, window_point};
+use ws_visual_check::{pixel, window_point};
 
 #[test]
 fn reads_pixels_and_rejects_points_outside_the_image() {

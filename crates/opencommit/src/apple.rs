@@ -17,7 +17,7 @@ fn complete(helper: &Path, instructions: &str, prompt: &str) -> Result<String, S
     .stdout(Stdio::piped())
     .stderr(Stdio::piped())
     .spawn()
-    .map_err(|error| format!("Could not start Apple Intelligence. Launch Vekro from its macOS app bundle. {error}"))?;
+    .map_err(|error| format!("Could not start Apple Intelligence. Launch {} from its macOS app bundle. {error}", ws_product::NAME))?;
   let sent = child.stdin.take().expect("child input is piped").write_all(input.as_bytes());
   let output = child.wait_with_output().map_err(|error| format!("Could not read the Apple Intelligence response: {error}"))?;
   if !output.status.success() {
@@ -39,7 +39,7 @@ fn complete(helper: &Path, instructions: &str, prompt: &str) -> Result<String, S
 pub(crate) fn generate(instructions: &str, diff: &str) -> Result<String, String> {
   let helper = std::env::current_exe()
     .map_err(|error| format!("Could not locate the Apple Intelligence helper: {error}"))?
-    .with_file_name("vekro-apple-intelligence");
+    .with_file_name(format!("{}-apple-intelligence", ws_product::slug()));
   let budget = PROMPT_BUDGET
     .checked_sub(instructions.len())
     .filter(|budget| *budget >= 512)

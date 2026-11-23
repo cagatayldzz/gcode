@@ -3,7 +3,7 @@
 use super::*;
 
 impl Workspace {
-  /// Tells the user once that a newer Vekro is available, in the window they are using.
+  /// Tells the user once that a newer version is available, in the window they are using.
   pub(super) fn announce_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     if !window.is_window_active() {
       return;
@@ -19,7 +19,7 @@ impl Workspace {
     };
     if let Some((tag, version)) = announce {
       self.settings.update(cx, |model, _| model.updates.announced = Some(tag));
-      window.push_notification(Notification::info(format!("Vekro {version} is available. Download it in Settings → Updates.")), cx);
+      window.push_notification(Notification::info(format!("{} {version} is available. Download it in Settings → Updates.", ws_product::NAME)), cx);
     }
   }
 
@@ -45,7 +45,7 @@ impl Workspace {
     }
   }
 
-  /// The blue Update button at the right of the title bar, shown while a newer Vekro is available. It downloads the update
+  /// The blue Update button at the right of the title bar, shown while a newer version is available. It downloads the update
   /// (the button turns into a loader) and restarts into it.
   pub(super) fn render_update_button(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     let (update, restarting) = {
@@ -123,7 +123,7 @@ impl Workspace {
     let keychain = self.settings.read(cx).accounts.keychain();
     let work = cx.background_executor().spawn({
       let key = key.clone();
-      async move { vekro_hosting::TokenStore::delete(&keychain, &key) }
+      async move { ws_hosting::TokenStore::delete(&keychain, &key) }
     });
     self.settings.update(cx, |model, cx| {
       model.accounts.items.retain(|account| account.key() != key);
@@ -146,7 +146,7 @@ impl Workspace {
     };
     let form = cx.new(|cx| CommitSettings::new(config, instructions, window, cx));
     self._dialog_subscription = Some(cx.subscribe_in(&form, window, |this, _, saved: &CommitSettingsSaved, window, cx| {
-      if let Err(error) = saved.config.save(&vekro_opencommit::config_path()) {
+      if let Err(error) = saved.config.save(&ws_opencommit::config_path()) {
         window.push_notification(Notification::error(format!("Could not save the OpenCommit settings: {error}")), cx);
         return;
       }
@@ -185,7 +185,7 @@ impl Workspace {
     cx.notify();
     let work = cx.background_executor().spawn({
       let root = root.clone();
-      async move { vekro_opencommit::generate(&config, &instructions, &vekro_git::diff_files(&root, &files)?) }
+      async move { ws_opencommit::generate(&config, &instructions, &ws_git::diff_files(&root, &files)?) }
     });
     cx.spawn_in(window, async move |this, cx| {
       let result = work.await;

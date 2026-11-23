@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["apps/*", "crates/*"]
-default-members = ["apps/vekro"]
+default-members = ["apps/desktop"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,11 +12,12 @@ license = "UNLICENSED"
 repository = "https://github.com/cagatayldzz/vekro"
 
 [workspace.dependencies]
-vekro-terminal = { path = "crates/terminal" }
-vekro-storage = { path = "crates/storage" }
-vekro-index = { path = "crates/index" }
-vekro-app = { path = "crates/app" }
-vekro-ui = { path = "crates/ui" }
+ws-product = { path = "crates/product" }
+ws-terminal = { path = "crates/terminal" }
+ws-storage = { path = "crates/storage" }
+ws-index = { path = "crates/index" }
+ws-app = { path = "crates/app" }
+ws-ui = { path = "crates/ui" }
 alacritty_terminal = "0.26.0"
 gpui-kit = { version = "0.10.0", features = [
   "gpui-fast",
@@ -39,11 +40,11 @@ gpui-kit-assets = "0.10.0"
 futures = "0.3.34"
 serde_json = "1.0.154"
 git2 = { version = "0.21.0", default-features = false }
-vekro-git = { path = "crates/git" }
-vekro-opencommit = { path = "crates/opencommit" }
-vekro-hosting = { path = "crates/hosting" }
-vekro-version = { path = "crates/version" }
-vekro-updater = { path = "crates/updater" }
+ws-git = { path = "crates/git" }
+ws-opencommit = { path = "crates/opencommit" }
+ws-hosting = { path = "crates/hosting" }
+ws-version = { path = "crates/version" }
+ws-updater = { path = "crates/updater" }
 ureq = { version = "3.5.2", features = ["json"] }
 
 [workspace.lints.rust]
@@ -58,7 +59,7 @@ unimplemented = "deny"
 strip = "debuginfo"
 
 # Dependencies (the editor's syntax highlighting above all) are slow without optimization, so they are optimized
-# in development builds too. Only Vekro's own crates stay unoptimized, which keeps rebuilds quick.
+# in development builds too. Only the workspace's own crates stay unoptimized, which keeps rebuilds quick.
 [profile.dev.package."*"]
 debug = false
 opt-level = 3

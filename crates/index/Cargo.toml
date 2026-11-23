@@ -1,11 +1,11 @@
 [package]
-name = "vekro-index"
+name = "ws-index"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
-description = "Vekro project index and precomputed highlighting"
+description = "Project index and precomputed highlighting"
 
 [lints]
 workspace = true

@@ -48,7 +48,7 @@ impl ImageChanges {
   }
 
   fn load(root: &Path, file: &Path, decode: impl Fn(Vec<u8>) -> Result<Arc<RenderImage>, String>) -> Result<Self, String> {
-    let versions = vekro_git::file_versions(root, file, MAX_IMAGE_BYTES)?;
+    let versions = ws_git::file_versions(root, file, MAX_IMAGE_BYTES)?;
     Ok(Self { original: versions.original.map(&decode).transpose()?, current: versions.current.map(decode).transpose()? })
   }
 
@@ -133,7 +133,7 @@ impl ChangeView {
     let previous = matches!(self.diff, Load::Ready(_)).then(|| self.patch.clone());
     let renderer = cx.svg_renderer();
     let work = cx.background_executor().spawn(async move {
-      let patch = vekro_git::file_diff(&root, &file)?;
+      let patch = ws_git::file_diff(&root, &file)?;
       if previous.as_deref() == Some(patch.as_str()) {
         return Ok(None);
       }

@@ -20,7 +20,7 @@ use gpui_kit::{
   *,
 };
 use std::{path::PathBuf, rc::Rc};
-use vekro_git::{ChangeKind, CommitDetail};
+use ws_git::{ChangeKind, CommitDetail};
 
 /// The fixed height of a changed file's line: the virtualized list needs every row's height before it draws.
 const FILE_ROW_HEIGHT: Pixels = px(32.);
@@ -87,7 +87,7 @@ impl CommitView {
     self.epoch += 1;
     let epoch = self.epoch;
     cx.notify();
-    let work = cx.background_executor().spawn(async move { vekro_git::commit_detail(&root, &id) });
+    let work = cx.background_executor().spawn(async move { ws_git::commit_detail(&root, &id) });
     cx.spawn(async move |this, cx| {
       let result = work.await;
       let _ = this.update(cx, |this, cx| {
@@ -119,7 +119,7 @@ impl CommitView {
     self.epoch += 1;
     let (epoch, root, id) = (self.epoch, self.root.clone(), self.id.clone());
     cx.notify();
-    let work = cx.background_executor().spawn(async move { vekro_git::commit_file_diff(&root, &id, &file) });
+    let work = cx.background_executor().spawn(async move { ws_git::commit_file_diff(&root, &id, &file) });
     cx.spawn(async move |this, cx| {
       let result = work.await;
       let _ = this.update(cx, |this, cx| {
@@ -137,7 +137,7 @@ impl CommitView {
     .detach();
   }
 
-  fn file_row(&self, change: &vekro_git::Change, width: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
+  fn file_row(&self, change: &ws_git::Change, width: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let theme = cx.theme().clone();
     let file = change.path.clone();
@@ -358,7 +358,7 @@ impl Render for CommitView {
               let Load::Ready(detail) = &this.detail else {
                 return Vec::new();
               };
-              let files: Vec<vekro_git::Change> = detail.files.get(range).map(<[vekro_git::Change]>::to_vec).unwrap_or_default();
+              let files: Vec<ws_git::Change> = detail.files.get(range).map(<[ws_git::Change]>::to_vec).unwrap_or_default();
               let width = this.files_scroll.bounds().size.width;
               files.iter().map(|change| this.file_row(change, width, cx)).collect()
             })

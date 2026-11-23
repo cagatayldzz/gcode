@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: Vekro
+  name: gcode
   text: Projects, editor, terminals and Git — one native macOS window
   tagline: Built with Rust and GPUI Kit. Fast to open, safe with your repositories.
   actions:
@@ -47,9 +47,9 @@ features:
 
 | I want to… | Read |
 | --- | --- |
-| use Vekro | [User guide](/guide/) |
+| use gcode | [User guide](/guide/) |
 | understand the code and where things live | [Architecture](/architecture/) and the [code map](/architecture/code-map) |
 | build it, test it, ship it | [Development](/development/) |
 | follow the project's rules | [Conventions](/development/conventions) |
 
-![Vekro in Light mode with the file explorer and a Rust file open in the editor](./images/workspace-light.png)
+![gcode in Light mode with the file explorer and a Rust file open in the editor](./images/workspace-light.png)

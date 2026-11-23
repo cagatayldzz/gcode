@@ -118,7 +118,7 @@ impl Workspace {
 
   pub(super) fn open_changed_file(&mut self, action: &OpenChangedFile, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
-    let Some(path) = vekro_git::workdir_file(&root, Path::new(action.0.as_str())) else {
+    let Some(path) = ws_git::workdir_file(&root, Path::new(action.0.as_str())) else {
       window.push_notification(Notification::error("Could not locate the file in the working tree."), cx);
       return;
     };

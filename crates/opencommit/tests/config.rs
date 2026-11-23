@@ -1,8 +1,8 @@
 use std::{fs, path::PathBuf};
-use vekro_opencommit::{Config, Provider, DEFAULT_INSTRUCTIONS, DEFAULT_MAX_INPUT_TOKENS, DEFAULT_MODEL};
+use ws_opencommit::{Config, Provider, DEFAULT_INSTRUCTIONS, DEFAULT_MAX_INPUT_TOKENS, DEFAULT_MODEL};
 
 fn temp_file(name: &str) -> PathBuf {
-  let dir = std::env::temp_dir().join(format!("vekro-opencommit-{name}-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-opencommit-{name}-{}", std::process::id()));
   let _ = fs::remove_dir_all(&dir);
   fs::create_dir_all(&dir).unwrap();
   dir.join(".opencommit")
@@ -97,6 +97,18 @@ fn selecting_apple_intelligence_preserves_the_cli_provider_and_api_key() {
   config.provider = Provider::OpenAiCompatible;
   config.save(&path).unwrap();
   assert_eq!(Config::load(&path), config);
-  assert!(!fs::read_to_string(&path).unwrap().contains("VEKRO_COMMIT_PROVIDER"));
+  assert!(!fs::read_to_string(&path).unwrap().contains("APP_COMMIT_PROVIDER"));
   assert!(Config::default().needs_api_key());
+}
+
+#[test]
+fn the_provider_written_under_the_previous_name_still_counts_until_the_current_key_is_saved() {
+  let legacy_key = format!("{}_COMMIT_PROVIDER", ws_product::LEGACY_NAME.to_uppercase());
+  let path = temp_file("legacy-provider");
+  fs::write(&path, format!("{legacy_key}=apple-intelligence\n")).unwrap();
+  assert_eq!(Config::load(&path).provider, Provider::AppleIntelligence);
+
+  // Once the current key is in the file it decides, wherever the old line is.
+  fs::write(&path, format!("APP_COMMIT_PROVIDER=\n{legacy_key}=apple-intelligence\n")).unwrap();
+  assert_eq!(Config::load(&path).provider, Provider::OpenAiCompatible);
 }

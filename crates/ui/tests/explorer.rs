@@ -5,7 +5,7 @@ mod explorer;
 
 #[test]
 fn folders_come_first_and_only_expanded_folders_show_their_children() {
-  let root = std::env::temp_dir().join(format!("vekro-explorer-{}", std::process::id()));
+  let root = std::env::temp_dir().join(format!("ws-explorer-{}", std::process::id()));
   let _ = fs::remove_dir_all(&root);
   fs::create_dir_all(root.join("src")).unwrap();
   fs::create_dir_all(root.join(".git")).unwrap();
@@ -23,7 +23,7 @@ fn folders_come_first_and_only_expanded_folders_show_their_children() {
 
 #[test]
 fn creating_an_entry_makes_subfolders_and_refuses_to_leave_or_replace() {
-  let root = std::env::temp_dir().join(format!("vekro-explorer-create-{}", std::process::id()));
+  let root = std::env::temp_dir().join(format!("ws-explorer-create-{}", std::process::id()));
   let _ = fs::remove_dir_all(&root);
   fs::create_dir_all(&root).unwrap();
 

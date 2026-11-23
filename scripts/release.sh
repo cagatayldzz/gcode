@@ -3,7 +3,7 @@
 #   scripts/release.sh            request a release: dispatches the Release workflow for the default branch
 #   scripts/release.sh prepare    (CI) choose the next version from commits and stamp the build inputs
 #   scripts/release.sh notes      (CI) write dist/RELEASE_NOTES.md from commit titles
-#   scripts/release.sh package    (CI, macOS) zip dist/Vekro.app as dist/Vekro-<tag>-macos-arm64.zip
+#   scripts/release.sh package    (CI, macOS) zip dist/<name>.app as dist/<name>-<tag>-macos-arm64.zip
 #   scripts/release.sh finalize   (CI) check the assets and write dist/SHA256SUMS.txt
 #
 # The version follows Conventional Commits: a breaking change is major, `feat` is minor, anything else is patch.
@@ -13,6 +13,8 @@ set -euo pipefail
 
 usage="Usage: scripts/release.sh [prepare|notes|package|finalize]"
 release_targets=("macos-arm64.zip")
+# The product's name, from product.toml.
+product_name="$("$(dirname "${BASH_SOURCE[0]}")/product.sh" name)"
 sections=("New Features" "Bug Fixes" "Documentation" "Chores")
 
 fail() {
@@ -55,7 +57,7 @@ artifact_names() {
   local tag="${1:-}" suffix
   [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "Invalid release tag."
   for suffix in "${release_targets[@]}"; do
-    echo "Vekro-$tag-$suffix"
+    echo "$product_name-$tag-$suffix"
   done
 }
 
@@ -125,16 +127,16 @@ stamp_version() {
     inside && !done && /^version = / { print "version = \"" v "\""; done = 1; next }
     { print }'
 
-  grep -Eq '^name = "vekro(-[a-z]+)*"$' "$root/Cargo.lock" || fail "Could not stamp the Vekro packages in Cargo.lock."
+  grep -Eq '^name = "ws-[a-z-]+"$' "$root/Cargo.lock" || fail "Could not stamp the workspace packages in Cargo.lock."
   rewrite "$root/Cargo.lock" -v v="$version" '
-    /^name = "vekro(-[a-z]+)*"$/ { ours = 1; print; next }
+    /^name = "ws-[a-z-]+"$/ { ours = 1; print; next }
     ours && /^version = / { print "version = \"" v "\""; ours = 0; next }
     { ours = 0; print }'
 
   grep -q '^  "version": ' "$root/package.json" || fail "Could not stamp package.json."
   sed -E -i.bak "s/^(  \"version\": \")[^\"]+/\1$version/" "$root/package.json"
 
-  local plist="$root/apps/vekro/macos/Info.plist"
+  local plist="$root/apps/desktop/macos/Info.plist"
   sed -E -i.bak \
     -e "s#(<key>CFBundleShortVersionString</key><string>)[^<]+#\1$version#" \
     -e "s#(<key>CFBundleVersion</key><string>)[^<]+#\1$build#" "$plist"
@@ -222,8 +224,8 @@ package() {
   local tag="${RELEASE_TAG:-}"
   artifact_names "$tag" >/dev/null
   [[ "$(uname -s)/$(uname -m)" == Darwin/arm64 ]] || fail "Unsupported release host: $(uname -s)/$(uname -m)"
-  [[ -x dist/Vekro.app/Contents/MacOS/Vekro ]] || fail "Build and notarize the macOS application first."
-  ditto -c -k --sequesterRsrc --keepParent dist/Vekro.app "dist/Vekro-$tag-macos-arm64.zip"
+  [[ -x "dist/$product_name.app/Contents/MacOS/$product_name" ]] || fail "Build and notarize the macOS application first."
+  ditto -c -k --sequesterRsrc --keepParent "dist/$product_name.app" "dist/$product_name-$tag-macos-arm64.zip"
 }
 
 finalize() {

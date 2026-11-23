@@ -27,7 +27,7 @@ use std::{
   sync::Arc,
   time::{Duration, SystemTime},
 };
-use vekro_index::highlight::{Highlights, Language};
+use ws_index::highlight::{Highlights, Language};
 
 /// Files larger than this are not opened: the editor reads the whole text.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -234,7 +234,7 @@ enum TabCommand {
 }
 
 #[derive(Action, Clone, PartialEq)]
-#[action(namespace = vekro, no_json)]
+#[action(namespace = app, no_json)]
 struct EditorTabAction(TabCommand, PathBuf);
 
 #[derive(Clone, Copy, PartialEq)]
@@ -246,7 +246,7 @@ pub(crate) enum FileLocationCommand {
 }
 
 #[derive(Action, Clone, PartialEq)]
-#[action(namespace = vekro, no_json)]
+#[action(namespace = app, no_json)]
 pub(crate) struct FileLocation(pub FileLocationCommand, pub PathBuf);
 
 /// What the editor area shows now, sent when it changes so the sidebar can select the same file.
@@ -769,7 +769,7 @@ impl EditorPanel {
       file.overwrite_armed = true;
       return Err(io::Error::other("The file changed on disk since it was opened. Save again to overwrite it."));
     }
-    vekro_storage::write_atomic(path, file.state.read(cx).value().to_string().as_bytes())?;
+    ws_storage::write_atomic(path, file.state.read(cx).value().to_string().as_bytes())?;
     file.disk = disk_stamp(path);
     file.overwrite_armed = false;
     file.dirty = false;

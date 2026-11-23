@@ -1,4 +1,4 @@
-; Highlights for Kotlin (tree-sitter-kotlin-ng), written for Vekro: the grammar ships no query.
+; Highlights for Kotlin (tree-sitter-kotlin-ng), written for the app: the grammar ships no query.
 
 [(line_comment) (block_comment)] @comment
 (shebang) @comment

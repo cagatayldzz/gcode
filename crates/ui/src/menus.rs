@@ -5,7 +5,7 @@ use crate::{
   SwitchProfile, ToggleAgents, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::*;
-use vekro_storage::Profile;
+use ws_storage::Profile;
 
 fn profile_item(profile: &Profile) -> MenuItem {
   MenuItem::action(profile.name.clone(), SwitchProfile { id: profile.id.clone() })
@@ -24,11 +24,11 @@ pub fn menus(host: Option<&str>, profiles: &[Profile], current: &str) -> Vec<Men
     None => "View on Host".to_string(),
   };
   vec![
-    Menu::new("Vekro").items([
+    Menu::new(ws_product::NAME).items([
       MenuItem::action("Settings…", OpenSettings),
       MenuItem::action("Check for Updates…", CheckForUpdates),
       MenuItem::separator(),
-      MenuItem::action("Quit Vekro", Quit),
+      MenuItem::action(format!("Quit {}", ws_product::NAME), Quit),
     ]),
     Menu::new("File").items([
       MenuItem::action("Add Project…", AddProject),

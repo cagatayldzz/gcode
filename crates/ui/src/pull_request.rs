@@ -13,7 +13,7 @@ use gpui_kit::{
   },
   *,
 };
-use vekro_hosting::{Accounts, NewPullRequest, PullRequest};
+use ws_hosting::{Accounts, NewPullRequest, PullRequest};
 
 /// What the form tells the window: the pull request was opened, or the service refused the token.
 pub(crate) enum PullRequestEvent {
@@ -75,7 +75,7 @@ impl PullRequestForm {
     let url = target.remote_url;
     let work = cx.background_executor().spawn(async move {
       let (connection, repository) = accounts.for_remote(&url, &accounts.keychain()).ok_or("No connected account serves this repository.")?;
-      vekro_hosting::default_branch(&connection, &repository)
+      ws_hosting::default_branch(&connection, &repository)
     });
     cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
@@ -118,7 +118,7 @@ impl PullRequestForm {
       let (connection, repository) = accounts
         .for_remote(&url, &accounts.keychain())
         .ok_or("The account for this repository is not connected any more. Connect it again in Settings → Accounts.")?;
-      vekro_hosting::create_pull_request(&connection, &repository, &new)
+      ws_hosting::create_pull_request(&connection, &repository, &new)
     });
     cx.spawn(async move |this, cx| {
       let result = work.await;
@@ -127,7 +127,7 @@ impl PullRequestForm {
         match result {
           Ok(request) => cx.emit(PullRequestEvent::Opened(request)),
           Err(message) => {
-            if vekro_hosting::is_permission_problem(&message) {
+            if ws_hosting::is_permission_problem(&message) {
               cx.emit(PullRequestEvent::Refused);
             }
             this.error = Some(message.into());

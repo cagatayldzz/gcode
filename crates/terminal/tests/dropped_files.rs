@@ -1,5 +1,5 @@
 use std::{path::Path, process::Command};
-use vekro_terminal::{dropped_paths, paste_bytes};
+use ws_terminal::{dropped_paths, paste_bytes};
 
 #[test]
 fn dropped_file_paths_survive_shell_parsing_without_executing_their_contents() {

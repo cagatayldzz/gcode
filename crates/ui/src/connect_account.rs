@@ -16,7 +16,7 @@ use gpui_kit::{
   },
   *,
 };
-use vekro_hosting::{Account, Connection, KeychainStore, Provider, TokenStore as _};
+use ws_hosting::{Account, Connection, KeychainStore, Provider, TokenStore as _};
 
 /// Sent when the account was verified and its token is in the Keychain, with what is wrong or unknown about the token's permissions.
 pub(crate) struct AccountConnected(pub Account, pub Vec<String>, pub Option<String>);
@@ -91,10 +91,10 @@ impl ConnectAccount {
     cx.notify();
     let keychain = self.keychain.clone();
     let work = cx.background_executor().spawn(async move {
-      let username = vekro_hosting::verify(&Connection { account: account.clone(), token: token.clone() })?;
+      let username = ws_hosting::verify(&Connection { account: account.clone(), token: token.clone() })?;
       let verified = Account { username, ..account };
       keychain.set(&verified.key(), &token)?;
-      let access = vekro_hosting::check_access(&Connection { account: verified.clone(), token });
+      let access = ws_hosting::check_access(&Connection { account: verified.clone(), token });
       Ok::<_, String>((verified, access.warnings(provider), access.unchecked(provider)))
     });
     cx.spawn(async move |this, cx| {

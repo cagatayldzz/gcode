@@ -4,7 +4,7 @@ The last button of the activity bar (`⇧⌘A`) opens the **AI view**. It fills 
 the same time — but it is organized around coding agents instead of shells.
 
 ```text
- ┌ ✦ Codex ─┬ ✦ Claude ─┬ ▾ ┬ project: vekro ─┐
+ ┌ ✦ Codex ─┬ ✦ Claude ─┬ ▾ ┬ project: atlas ─┐
  ├──────────┴───────────┴───┴─────────────────┤
  │  an interactive agent running in the         │
  │  project folder                              │

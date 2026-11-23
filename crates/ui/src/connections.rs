@@ -15,7 +15,7 @@ use gpui_kit::{
   *,
 };
 use std::path::Path;
-use vekro_hosting::{Account, Accounts, Provider};
+use ws_hosting::{Account, Accounts, Provider};
 
 /// The icon of a hosting service.
 pub(crate) fn provider_icon(provider: Provider) -> &'static str {
@@ -28,18 +28,18 @@ pub(crate) fn provider_icon(provider: Provider) -> &'static str {
 
 /// The login Git gets for an HTTPS address: the connected account that serves its host. `None` for an SSH address (the user's
 /// own keys apply) or when no account serves the host. Reads the Keychain, so call it off the interface thread.
-pub(crate) fn credentials_for_url(accounts: &Accounts, url: &str) -> Option<vekro_git::Credentials> {
+pub(crate) fn credentials_for_url(accounts: &Accounts, url: &str) -> Option<ws_git::Credentials> {
   if !url.starts_with("http") {
     return None;
   }
   let (connection, _) = accounts.for_remote(url, &accounts.keychain())?;
   let (username, password) = connection.git_login();
-  Some(vekro_git::Credentials { username, password })
+  Some(ws_git::Credentials { username, password })
 }
 
 /// The login Git gets for the remote of the repository at `root` (see [`credentials_for_url`]).
-pub(crate) fn credentials_for_repository(accounts: &Accounts, root: &Path) -> Option<vekro_git::Credentials> {
-  credentials_for_url(accounts, &vekro_git::remote_url(root)?)
+pub(crate) fn credentials_for_repository(accounts: &Accounts, root: &Path) -> Option<ws_git::Credentials> {
+  credentials_for_url(accounts, &ws_git::remote_url(root)?)
 }
 
 /// The accounts in Settings: one row each with a button to disconnect it, and a button to connect another.

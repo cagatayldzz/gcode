@@ -40,7 +40,7 @@ sibling takes its place, an empty tab goes) and, if the project has no shell lef
 
 ## The refresh loop
 
-`vekro_git::summary` reads the branch and changed files with libgit2. `Workspace::refresh_in_background` runs it — together with reading
+`ws_git::summary` reads the branch and changed files with libgit2. `Workspace::refresh_in_background` runs it — together with reading
 the folder tree — on a background thread:
 
 ```text

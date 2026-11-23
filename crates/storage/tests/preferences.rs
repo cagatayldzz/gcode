@@ -1,9 +1,9 @@
 use std::path::PathBuf;
-use vekro_storage::{ActivityBarLayout, Preferences, ThemeChoice};
+use ws_storage::{ActivityBarLayout, Preferences, ThemeChoice};
 
 #[test]
 fn preferences_survive_a_save_and_load() {
-  let dir = std::env::temp_dir().join(format!("vekro-preferences-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-preferences-{}", std::process::id()));
   let file = dir.join("preferences.json");
   let saved = Preferences {
     theme: ThemeChoice::Dark,
@@ -21,7 +21,7 @@ fn preferences_survive_a_save_and_load() {
 
 #[test]
 fn missing_or_damaged_preferences_give_the_defaults() {
-  let dir = std::env::temp_dir().join(format!("vekro-preferences-bad-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-preferences-bad-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   std::fs::write(dir.join("preferences.json"), "{ not json").unwrap();
   assert_eq!(Preferences::load(&dir.join("preferences.json")), Preferences::default());
@@ -31,7 +31,7 @@ fn missing_or_damaged_preferences_give_the_defaults() {
 
 #[test]
 fn font_sizes_default_and_stay_within_their_range() {
-  let dir = std::env::temp_dir().join(format!("vekro-preferences-size-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-preferences-size-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let file = dir.join("preferences.json");
   assert_eq!(Preferences::default().code_font_size, 13);
@@ -50,7 +50,7 @@ fn font_sizes_default_and_stay_within_their_range() {
 
 #[test]
 fn commit_instructions_distinguish_the_built_in_text_from_none_at_all() {
-  let dir = std::env::temp_dir().join(format!("vekro-preferences-instructions-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-preferences-instructions-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let file = dir.join("preferences.json");
   assert_eq!(Preferences::default().commit_instructions, None);
@@ -65,7 +65,7 @@ fn commit_instructions_distinguish_the_built_in_text_from_none_at_all() {
 
 #[test]
 fn update_checks_are_on_unless_turned_off() {
-  let dir = std::env::temp_dir().join(format!("vekro-preferences-updates-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-preferences-updates-{}", std::process::id()));
   std::fs::create_dir_all(&dir).unwrap();
   let file = dir.join("preferences.json");
   assert!(Preferences::default().check_updates);

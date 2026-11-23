@@ -103,7 +103,7 @@ pub struct Preferences {
   pub explorer_font_size: u32,
   /// The instructions the commit message generator follows besides its rules; `None` is the built-in text, `Some("")` none at all.
   pub commit_instructions: Option<String>,
-  /// Ask GitHub for a newer Vekro release when the app starts.
+  /// Ask GitHub for a newer release when the app starts.
   pub check_updates: bool,
   /// The order of the activity bar's buttons and which of them are hidden.
   pub activity_bar: ActivityBarLayout,

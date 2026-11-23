@@ -1,0 +1,12 @@
+[package]
+name = "ws-product"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "The product's name, read from product.toml"
+build = "build.rs"
+
+[lints]
+workspace = true

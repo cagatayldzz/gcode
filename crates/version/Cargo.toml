@@ -1,5 +1,5 @@
 [package]
-name = "vekro-version"
+name = "ws-version"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

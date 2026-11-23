@@ -6,7 +6,7 @@ use gpui_kit::{
   px, HighlightStyle, Hsla, SharedString, UnderlineStyle,
 };
 use std::{ops::Range, sync::Arc};
-use vekro_index::highlight::{Highlights, Language, Role};
+use ws_index::highlight::{Highlights, Language, Role};
 
 const MAX_SAMPLES: usize = 640;
 const MAX_COLUMNS: usize = 100;

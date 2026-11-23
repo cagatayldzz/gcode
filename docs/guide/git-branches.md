@@ -75,7 +75,7 @@ If the working tree has changes, choosing another branch asks what to do with th
 | **Leave My Changes** | Everything (untracked files included) is stashed under the branch you are leaving. The stash is named after that branch, and a newer stash of the same branch replaces the older one only after it was created. |
 | **Bring My Changes** | The changes are stashed, the branch is switched, and they are applied on the new branch. **If they collide** with that branch, they stay safely in the stash and the message says so. Nothing is lost. |
 
-When you switch to a branch that has changes stashed on it, Vekro asks **Restore / Discard / Not Now**.
+When you switch to a branch that has changes stashed on it, gcode asks **Restore / Discard / Not Now**.
 
 Without changes, the switch happens immediately. A plain safe checkout never overwrites anything: when files are in the way the
 message says *"Your changes would be overwritten by switching to …"*.
@@ -116,4 +116,4 @@ While a merge is in progress, committing, switching branches and syncing are dis
 
 ## Stashes, in short
 
-Vekro uses Git's stash for **Leave/Bring My Changes**, naming each entry `!!Vekro<branch>`. Your own stashes are never touched.
+gcode uses Git's stash for **Leave/Bring My Changes**, naming each entry `!!app-stash<branch>`. Your own stashes are never touched.

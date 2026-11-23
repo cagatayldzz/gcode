@@ -1,8 +1,8 @@
 use std::{fs, path::PathBuf};
-use vekro_storage::{Profile, ProfileList, DEFAULT_PROFILE};
+use ws_storage::{Profile, ProfileList, DEFAULT_PROFILE};
 
 fn scratch(name: &str) -> PathBuf {
-  let dir = std::env::temp_dir().join(format!("vekro-profiles-{name}-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-profiles-{name}-{}", std::process::id()));
   let _ = fs::remove_dir_all(&dir);
   fs::create_dir_all(&dir).unwrap();
   dir

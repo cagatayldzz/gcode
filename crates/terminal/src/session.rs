@@ -553,8 +553,8 @@ impl Drop for Session {
 /// The environment every shell starts with.
 fn child_environment() -> HashMap<String, String> {
   let mut environment = HashMap::from([
-    // Do not advertise the terminal that launched Vekro to child programs.
-    ("TERM_PROGRAM".to_owned(), "Vekro".to_owned()),
+    // Do not advertise the terminal that launched the app to child programs.
+    ("TERM_PROGRAM".to_owned(), ws_product::NAME.to_owned()),
     ("TERM_PROGRAM_VERSION".to_owned(), env!("CARGO_PKG_VERSION").to_owned()),
     // Remote hosts rarely know the `alacritty` terminfo entry that the emulator library prefers.
     ("TERM".to_owned(), "xterm-256color".to_owned()),

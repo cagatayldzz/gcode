@@ -39,4 +39,4 @@ runs:
       with:
         name: release-macos-${{ inputs.arch }}
         if-no-files-found: error
-        path: dist/Vekro-*.zip
+        path: dist/*-macos-arm64.zip

@@ -24,7 +24,7 @@ pub(crate) fn register_highlights() {
     swift.highlights = tree_sitter_swift::HIGHLIGHTS_QUERY.into();
     registry.register("swift", &swift);
   }
-  // GPUI Kit has no Kotlin grammar: the grammar crate comes with Vekro, and so does the highlight query.
+  // GPUI Kit has no Kotlin grammar: the grammar crate comes with the app, and so does the highlight query.
   registry.register(
     "kotlin",
     &LanguageConfig::new("kotlin", tree_sitter_kotlin_ng::LANGUAGE.into(), Vec::new(), include_str!("syntax/kotlin.scm"), "", ""),

@@ -1,5 +1,5 @@
 use std::ops::Range;
-use vekro_index::highlight::{Highlights, Language, Role, Run};
+use ws_index::highlight::{Highlights, Language, Role, Run};
 
 const ENV: &str = "# a comment\nNEXT_PUBLIC_TOKEN=abc/def+ghi==\nexport MODE=production\n\n  ## Endpoint: https://test.example.cloud\nURL=https://www.example.com/path\n# OLD_KEY=https://old.example.com\r\nLAST=1";
 
@@ -87,7 +87,7 @@ fn a_slice_is_cut_at_the_edges_and_still_covers_its_range() {
 
 #[test]
 fn an_oversized_text_is_left_plain_instead_of_costing_time() {
-  let text = "KEY=value\n".repeat(vekro_index::highlight::MAX_BYTES / 10 + 10);
+  let text = "KEY=value\n".repeat(ws_index::highlight::MAX_BYTES / 10 + 10);
   let highlights = Highlights::compute(Language::Dotenv, &text);
   assert_eq!(highlights.runs().len(), 1);
   assert_eq!(highlights.runs()[0], (0..text.len(), None));

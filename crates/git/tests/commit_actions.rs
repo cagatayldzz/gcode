@@ -13,7 +13,7 @@ fn git(dir: &Path, arguments: &[&str]) -> String {
 }
 
 fn repository(name: &str) -> PathBuf {
-  let dir = std::env::temp_dir().join(format!("vekro-actions-{name}-{}", std::process::id()));
+  let dir = std::env::temp_dir().join(format!("ws-actions-{name}-{}", std::process::id()));
   let _ = fs::remove_dir_all(&dir);
   fs::create_dir_all(&dir).unwrap();
   git(&dir, &["init", "--initial-branch=main"]);
@@ -38,7 +38,7 @@ fn reverting_a_commit_adds_a_commit_that_undoes_it() {
   let dir = repository("revert");
   let added = commit_file(&dir, "b.txt", "b", "add b");
 
-  let short = vekro_git::revert_commit(&dir, &added).unwrap();
+  let short = ws_git::revert_commit(&dir, &added).unwrap();
 
   assert!(!dir.join("b.txt").exists());
   assert_eq!(git(&dir, &["log", "-1", "--format=%s"]), "Revert \"add b\"");
@@ -52,12 +52,12 @@ fn a_conflicting_revert_changes_nothing() {
   let first = commit_file(&dir, "a.txt", "one\nTWO\nthree\n", "edit two");
   commit_file(&dir, "a.txt", "one\nOTHER\nthree\n", "edit two again");
 
-  let error = vekro_git::revert_commit(&dir, &first).unwrap_err();
+  let error = ws_git::revert_commit(&dir, &first).unwrap_err();
 
   assert!(error.contains("conflicts in a.txt"), "{error}");
   assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "one\nOTHER\nthree\n");
-  assert!(!vekro_git::summary(&dir).unwrap().merging);
-  assert!(vekro_git::summary(&dir).unwrap().changes.is_empty());
+  assert!(!ws_git::summary(&dir).unwrap().merging);
+  assert!(ws_git::summary(&dir).unwrap().changes.is_empty());
   fs::remove_dir_all(dir).unwrap();
 }
 
@@ -67,7 +67,7 @@ fn reverting_with_uncommitted_changes_is_refused() {
   let added = commit_file(&dir, "b.txt", "b", "add b");
   fs::write(dir.join("a.txt"), "dirty").unwrap();
 
-  assert!(vekro_git::revert_commit(&dir, &added).unwrap_err().contains("before reverting"));
+  assert!(ws_git::revert_commit(&dir, &added).unwrap_err().contains("before reverting"));
   fs::remove_dir_all(dir).unwrap();
 }
 
@@ -78,9 +78,9 @@ fn a_commit_is_cherry_picked_onto_another_branch() {
   git(&dir, &["checkout", "main"]);
   let picked = commit_file(&dir, "feature.txt", "feature", "add feature");
 
-  vekro_git::cherry_pick(&dir, &picked, "release").unwrap();
+  ws_git::cherry_pick(&dir, &picked, "release").unwrap();
 
-  assert_eq!(vekro_git::summary(&dir).unwrap().branch, "release");
+  assert_eq!(ws_git::summary(&dir).unwrap().branch, "release");
   assert!(dir.join("feature.txt").exists());
   assert_eq!(git(&dir, &["log", "-1", "--format=%s"]), "add feature");
   fs::remove_dir_all(dir).unwrap();
@@ -94,12 +94,12 @@ fn a_conflicting_cherry_pick_returns_to_the_branch_it_started_on() {
   git(&dir, &["checkout", "main"]);
   let picked = commit_file(&dir, "a.txt", "one\nMAIN\nthree\n", "main edit");
 
-  let error = vekro_git::cherry_pick(&dir, &picked, "release").unwrap_err();
+  let error = ws_git::cherry_pick(&dir, &picked, "release").unwrap_err();
 
   assert!(error.contains("conflicts in a.txt"), "{error}");
-  assert_eq!(vekro_git::summary(&dir).unwrap().branch, "main");
+  assert_eq!(ws_git::summary(&dir).unwrap().branch, "main");
   assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "one\nMAIN\nthree\n");
-  assert!(vekro_git::summary(&dir).unwrap().changes.is_empty());
+  assert!(ws_git::summary(&dir).unwrap().changes.is_empty());
   fs::remove_dir_all(dir).unwrap();
 }
 
@@ -109,12 +109,12 @@ fn a_branch_is_created_at_an_older_commit() {
   let first = git(&dir, &["rev-parse", "HEAD"]);
   commit_file(&dir, "later.txt", "later", "later work");
 
-  vekro_git::branch_from_commit(&dir, &first, "hotfix").unwrap();
+  ws_git::branch_from_commit(&dir, &first, "hotfix").unwrap();
 
-  assert_eq!(vekro_git::summary(&dir).unwrap().branch, "hotfix");
+  assert_eq!(ws_git::summary(&dir).unwrap().branch, "hotfix");
   assert!(!dir.join("later.txt").exists());
-  assert!(vekro_git::branch_from_commit(&dir, &first, "hotfix").unwrap_err().contains("already exists"));
-  assert!(vekro_git::branch_from_commit(&dir, &first, "bad name").is_err());
+  assert!(ws_git::branch_from_commit(&dir, &first, "hotfix").unwrap_err().contains("already exists"));
+  assert!(ws_git::branch_from_commit(&dir, &first, "bad name").is_err());
   fs::remove_dir_all(dir).unwrap();
 }
 
@@ -124,12 +124,12 @@ fn amending_adds_files_and_replaces_the_message() {
   commit_file(&dir, "b.txt", "b", "add b");
   fs::write(dir.join("c.txt"), "c").unwrap();
 
-  vekro_git::amend_commit(&dir, &[PathBuf::from("c.txt")], "add b and c", "More detail.").unwrap();
+  ws_git::amend_commit(&dir, &[PathBuf::from("c.txt")], "add b and c", "More detail.").unwrap();
 
   assert_eq!(git(&dir, &["rev-list", "--count", "HEAD"]), "2", "no extra commit");
   assert_eq!(git(&dir, &["log", "-1", "--format=%s"]), "add b and c");
   assert_eq!(git(&dir, &["show", "--name-only", "--format=", "HEAD"]).lines().count(), 2);
-  assert!(vekro_git::summary(&dir).unwrap().changes.is_empty());
+  assert!(ws_git::summary(&dir).unwrap().changes.is_empty());
   fs::remove_dir_all(dir).unwrap();
 }
 
@@ -138,7 +138,7 @@ fn amending_only_the_message_keeps_the_files() {
   let dir = repository("amend-message");
   commit_file(&dir, "b.txt", "b", "typo mesage");
 
-  vekro_git::amend_commit(&dir, &[], "fixed message", "").unwrap();
+  ws_git::amend_commit(&dir, &[], "fixed message", "").unwrap();
 
   assert_eq!(git(&dir, &["log", "-1", "--format=%s"]), "fixed message");
   assert!(dir.join("b.txt").exists());
@@ -154,7 +154,7 @@ fn a_pushed_commit_cannot_be_amended() {
   git(&dir, &["remote", "add", "origin", origin.to_str().unwrap()]);
   git(&dir, &["push", "-u", "origin", "main"]);
 
-  let error = vekro_git::amend_commit(&dir, &[], "rewrite", "").unwrap_err();
+  let error = ws_git::amend_commit(&dir, &[], "rewrite", "").unwrap_err();
 
   assert!(error.contains("already on the remote"), "{error}");
   fs::remove_dir_all(dir).unwrap();
@@ -166,17 +166,17 @@ fn ignore_rules_are_appended_once_to_the_gitignore() {
   let dir = repository("ignore");
   fs::write(dir.join(".gitignore"), "target").unwrap();
 
-  vekro_git::add_to_gitignore(&dir, &["/secret.txt".into(), "*.log".into(), "target".into(), "*.log".into()]).unwrap();
+  ws_git::add_to_gitignore(&dir, &["/secret.txt".into(), "*.log".into(), "target".into(), "*.log".into()]).unwrap();
 
   assert_eq!(fs::read_to_string(dir.join(".gitignore")).unwrap(), "target\n/secret.txt\n*.log\n");
   fs::write(dir.join("secret.txt"), "x").unwrap();
   fs::write(dir.join("debug.log"), "x").unwrap();
-  assert!(vekro_git::summary(&dir)
+  assert!(ws_git::summary(&dir)
     .unwrap()
     .changes
     .iter()
     .all(|change| change.path != Path::new("secret.txt") && change.path != Path::new("debug.log")));
-  assert!(vekro_git::add_to_gitignore(&dir, &["two\nlines".into()]).is_err());
+  assert!(ws_git::add_to_gitignore(&dir, &["two\nlines".into()]).is_err());
   fs::remove_dir_all(dir).unwrap();
 }
 
@@ -190,6 +190,6 @@ fn recent_authors_lists_other_people_once_and_leaves_out_the_committer() {
   git(&dir, &["add", "."]);
   git(&dir, &["commit", "-m", "by ada again", "--author=Ada <ADA@example.com>"]);
 
-  assert_eq!(vekro_git::recent_authors(&dir, 100, 10), vec![("Ada".to_string(), "ADA@example.com".to_string())]);
+  assert_eq!(ws_git::recent_authors(&dir, 100, 10), vec![("Ada".to_string(), "ADA@example.com".to_string())]);
   fs::remove_dir_all(dir).unwrap();
 }

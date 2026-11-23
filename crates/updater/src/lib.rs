@@ -1,4 +1,4 @@
-//! Vekro's self-update: finds the latest GitHub release, downloads and verifies it (SHA-256, code signature, Gatekeeper,
+//! The app's self-update: finds the latest GitHub release, downloads and verifies it (SHA-256, code signature, Gatekeeper,
 //! matching developer team), then swaps the running `.app` bundle and relaunches it. Never depends on the interface.
 
 mod install;

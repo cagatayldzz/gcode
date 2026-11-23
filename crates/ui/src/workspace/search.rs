@@ -89,7 +89,7 @@ impl Workspace {
       return;
     };
     let options = self.search_options.clone();
-    let index_dir = vekro_storage::index_dir();
+    let index_dir = ws_storage::index_dir();
     let cancelled = Arc::new(AtomicBool::new(false));
     self.search_cancellation = Some(SearchCancellation(cancelled.clone()));
     self.search_task = Some(cx.spawn_in(window, async move |this, cx| {
@@ -138,7 +138,7 @@ impl Workspace {
     let options = self.search_options.clone();
     let replacement = self.search_replace.read(cx).value().to_string();
     let preserve_case = self.search_preserve_case;
-    let index_dir = vekro_storage::index_dir();
+    let index_dir = ws_storage::index_dir();
     let epoch = self.search_epoch;
     let work = cx.background_executor().spawn({
       let root = root.clone();

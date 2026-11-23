@@ -5,8 +5,8 @@ use crate::profiles::{other_open_profiles, profile_list, show_profile, update_pr
 use crate::settings::release_settings;
 use crate::SwitchProfile;
 use gpui_kit::component::avatar::Avatar;
-use vekro_hosting::Accounts;
-use vekro_storage::delete_profile_files;
+use ws_hosting::Accounts;
+use ws_storage::delete_profile_files;
 
 /// The avatar of the profile in the activity bar: between the Kit's small (24 px) and medium (48 px, wider than the button). It is the
 /// small avatar stretched to this size: a custom `Size` makes the Kit put the letter in a box half that size, off the center.
@@ -92,7 +92,7 @@ impl Workspace {
       if this.profile.id == id {
         let name = name.trim();
         this.profile.name = name.to_string();
-        window.set_window_title(&format!("Vekro — {name}"));
+        window.set_window_title(&format!("{} — {name}", ws_product::NAME));
       }
       this.sync_menus(true, cx);
       cx.notify();

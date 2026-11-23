@@ -18,7 +18,7 @@ use gpui_kit::{
   },
   *,
 };
-use vekro_opencommit::{config_path, Config, Provider, DEFAULT_INSTRUCTIONS, DEFAULT_MAX_INPUT_TOKENS, LANGUAGES, MODELS, TOKEN_LIMITS};
+use ws_opencommit::{config_path, Config, Provider, DEFAULT_INSTRUCTIONS, DEFAULT_MAX_INPUT_TOKENS, LANGUAGES, MODELS, TOKEN_LIMITS};
 
 /// The tallest the form gets before it scrolls, so the buttons stay in view.
 const BODY_MAX_HEIGHT: Pixels = px(520.);

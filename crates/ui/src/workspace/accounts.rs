@@ -4,9 +4,9 @@ use super::*;
 
 impl Workspace {
   /// The page of the open project's repository on the service that hosts it, and the service's name.
-  pub(super) fn web_repository(&self, cx: &App) -> Option<vekro_hosting::WebRepository> {
+  pub(super) fn web_repository(&self, cx: &App) -> Option<ws_hosting::WebRepository> {
     let url = self.git.as_ref()?.sync.as_ref()?.url.clone();
-    vekro_hosting::web_repository(&url, &self.settings.read(cx).accounts.items)
+    ws_hosting::web_repository(&url, &self.settings.read(cx).accounts.items)
   }
 
   /// Puts the service of the open project's remote in the Repository menu ("View on GitHub"). Menus belong to the application,
@@ -52,7 +52,7 @@ impl Workspace {
         IssueKind::PullRequests => ("Opening a pull request", account.provider.pull_request_permission().to_string()),
         IssueKind::Push => ("Pushing or pulling", account.provider.push_permission().to_string()),
         IssueKind::Workflows => {
-          ("Pushing commits that change .github/workflows", format!("{} (a classic token, the `workflow` scope)", vekro_git::WORKFLOWS_REFUSED))
+          ("Pushing commits that change .github/workflows", format!("{} (a classic token, the `workflow` scope)", ws_git::WORKFLOWS_REFUSED))
         }
       };
       account.issue = Some(format!("{action} was refused with this token. It needs {permission}."));
@@ -76,7 +76,7 @@ impl Workspace {
     });
   }
 
-  /// Asks the service what the account's token may do (see `vekro_hosting::verify_permissions`; nothing is changed) in the open
+  /// Asks the service what the account's token may do (see `ws_hosting::verify_permissions`; nothing is changed) in the open
   /// project's repository if the account serves it, else in the account's first repository. A fixed account loses its warning.
   pub(super) fn recheck_account(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
     let Some(account) = self.settings.read(cx).accounts.items.iter().find(|account| account.key() == key).cloned() else { return };
@@ -87,7 +87,7 @@ impl Workspace {
       model.rechecking.push(key.clone());
       cx.notify();
     });
-    let remote = self.projects.active.as_ref().and_then(|root| vekro_git::remote_url(root));
+    let remote = self.projects.active.as_ref().and_then(|root| ws_git::remote_url(root));
     let keychain = self.settings.read(cx).accounts.keychain();
     let work = cx.background_executor().spawn({
       let account = account.clone();
@@ -101,14 +101,14 @@ impl Workspace {
           Some(found) => found,
           None => {
             let first =
-              vekro_hosting::repositories(&connection)?.into_iter().next().ok_or("This account has no repository to check the permissions in.")?;
+              ws_hosting::repositories(&connection)?.into_iter().next().ok_or("This account has no repository to check the permissions in.")?;
             let repository = RepoRef::for_account(&account, &first.clone_url).ok_or("Could not tell which repository that is.")?;
             (repository, first.clone_url)
           }
         };
-        let report = vekro_hosting::verify_permissions(&connection, &repository, &url);
+        let report = ws_hosting::verify_permissions(&connection, &repository, &url);
         let confirmed = report.push.is_some() || report.pull_requests.is_some();
-        let problems = if confirmed { report.missing(account.provider) } else { vekro_hosting::check_access(&connection).warnings(account.provider) };
+        let problems = if confirmed { report.missing(account.provider) } else { ws_hosting::check_access(&connection).warnings(account.provider) };
         Ok::<_, String>((problems, confirmed, repository.full_name()))
       }
     });

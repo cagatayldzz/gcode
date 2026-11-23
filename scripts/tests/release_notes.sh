@@ -12,16 +12,16 @@ assert_eq "Chores" "$(note_section 'refactor: split')" "other section"
 
 sha_a="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 sha_b="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-notes="$(printf '%s\tfeat: add tabs\n%s\tchore: tidy\n' "$sha_a" "$sha_b" | render_notes owner/vekro v0.2.0 v0.1.0)"
+notes="$(printf '%s\tfeat: add tabs\n%s\tchore: tidy\n' "$sha_a" "$sha_b" | render_notes owner/project v0.2.0 v0.1.0)"
 
 assert_contains "## New Features" "$notes" "feature heading"
-assert_contains "- feat: add tabs ([aaaaaaa](https://github.com/owner/vekro/commit/$sha_a))" "$notes" "commit link"
+assert_contains "- feat: add tabs ([aaaaaaa](https://github.com/owner/project/commit/$sha_a))" "$notes" "commit link"
 assert_contains "## Chores" "$notes" "chores heading"
-assert_contains "[Full Changelog: v0.1.0...v0.2.0](https://github.com/owner/vekro/compare/v0.1.0...v0.2.0)" "$notes" "compare link"
+assert_contains "[Full Changelog: v0.1.0...v0.2.0](https://github.com/owner/project/compare/v0.1.0...v0.2.0)" "$notes" "compare link"
 [[ "$notes" != *"## Bug Fixes"* ]] || { echo "FAIL: empty sections are omitted" >&2; failures=$((failures + 1)); }
 
-first="$(printf '%s\tfeat: first\n' "$sha_a" | render_notes owner/vekro v0.1.0 '')"
-assert_contains "[Full Changelog](https://github.com/owner/vekro/commits/v0.1.0)" "$first" "first release changelog"
-assert_fails "no commits means no release" bash -c 'source scripts/release.sh; printf "" | render_notes owner/vekro v0.1.0 ""'
+first="$(printf '%s\tfeat: first\n' "$sha_a" | render_notes owner/project v0.1.0 '')"
+assert_contains "[Full Changelog](https://github.com/owner/project/commits/v0.1.0)" "$first" "first release changelog"
+assert_fails "no commits means no release" bash -c 'source scripts/release.sh; printf "" | render_notes owner/project v0.1.0 ""'
 
 finish

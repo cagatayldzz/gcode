@@ -17,7 +17,7 @@ use gpui_kit::{
   *,
 };
 use std::path::{Path, PathBuf};
-use vekro_storage::{Category, Project};
+use ws_storage::{Category, Project};
 
 /// A project row being dragged in the list.
 #[derive(Clone)]
@@ -50,7 +50,7 @@ impl ProjectManager {
     &self,
     id: impl Into<ElementId>,
     icon: &'static str,
-    tooltip: &'static str,
+    tooltip: impl Into<SharedString>,
     cx: &mut Context<Self>,
     act: impl Fn(&mut Workspace, &mut Window, &mut Context<Workspace>) + 'static,
   ) -> Button {
@@ -218,9 +218,13 @@ impl ProjectManager {
       .child(self.action(format!("project-down-{key}"), "icons/chevron-down.svg", "Move down", cx, move |workspace, _, cx| {
         workspace.move_project_by(&down, 1, cx)
       }))
-      .child(self.action(format!("project-remove-{key}"), "icons/trash.svg", "Remove from Vekro", cx, move |workspace, window, cx| {
-        workspace.confirm_remove_project(remove.clone(), window, cx)
-      }))
+      .child(self.action(
+        format!("project-remove-{key}"),
+        "icons/trash.svg",
+        format!("Remove from {}", ws_product::NAME),
+        cx,
+        move |workspace, window, cx| workspace.confirm_remove_project(remove.clone(), window, cx),
+      ))
   }
 }
 

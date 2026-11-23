@@ -31,16 +31,16 @@ Details: [Commit messages](../architecture/commit-messages.md).
 
 ## Updates
 
-When a newer release is published on GitHub, Vekro tells you **once** with a notification.
+When a newer release is published on GitHub, gcode tells you **once** with a notification.
 
 | Control | Does |
 | --- | --- |
 | **Check for updates** | Looks again. |
 | **Download & Install** | Downloads the new version and verifies it: checksum, code signature, macOS Gatekeeper, the same developer as the installed app. |
-| **Restart to Update** | Swaps the app in and reopens Vekro. If the swap fails, the old version is restored. |
+| **Restart to Update** | Swaps the app in and reopens gcode. If the swap fails, the old version is restored. |
 | **Check for updates on launch** | Off disables the check at startup. |
 
-Vekro only asks GitHub for the latest release and sends nothing about you. Updates work in release builds that run from `Vekro.app`,
+gcode only asks GitHub for the latest release and sends nothing about you. Updates work in release builds that run from `gcode.app`,
 not in development builds, and only on Apple Silicon.
 
 ## Menu bar
@@ -49,7 +49,7 @@ Only what is needed:
 
 | Menu | Items |
 | --- | --- |
-| **Vekro** | Settings…, Check for Updates…, Quit Vekro |
+| **gcode** | Settings…, Check for Updates…, Quit gcode |
 | **File** | Add Project…, Go to File…, Save, Close Tab |
 | **View** | Command Palette…, Toggle Terminal, Toggle AI Agents, New Codex Session, New Claude Session |
 | **Repository** | **View on GitHub / GitLab / Azure DevOps** (the host's name for any other; disabled while the project has no remote) |
@@ -57,5 +57,5 @@ Only what is needed:
 
 ## Where things are stored
 
-`~/Library/Application Support/Vekro` — override with the `VEKRO_DATA_DIR` environment variable. The files and when they are written are
+`~/Library/Application Support/gcode` — override with the `GCODE_DATA_DIR` environment variable. The files and when they are written are
 listed in [Persistence](../architecture/persistence.md).

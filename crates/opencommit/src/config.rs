@@ -83,9 +83,17 @@ impl Default for Config {
   }
 }
 
-/// `~/.opencommit`, or the file `VEKRO_OPENCOMMIT_CONFIG` names (for a scratch run that must not touch the real one).
+/// The key that holds the provider in the config file (the OpenCommit command ignores it).
+const PROVIDER_KEY: &str = "APP_COMMIT_PROVIDER";
+
+/// The provider key as the product's previous name wrote it.
+fn legacy_provider_key() -> String {
+  format!("{}_COMMIT_PROVIDER", ws_product::LEGACY_NAME.to_uppercase())
+}
+
+/// `~/.opencommit`, or the file `<prefix>_OPENCOMMIT_CONFIG` names (for a scratch run that must not touch the real one).
 pub fn config_path() -> PathBuf {
-  if let Some(path) = std::env::var_os("VEKRO_OPENCOMMIT_CONFIG") {
+  if let Some(path) = ws_product::env_var("OPENCOMMIT_CONFIG") {
     return PathBuf::from(path);
   }
   std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".opencommit")
@@ -126,12 +134,16 @@ impl Config {
   pub fn load(path: &Path) -> Self {
     let mut config = Self::default();
     let Ok(text) = fs::read_to_string(path) else { return config };
+    let (mut saw_provider, mut legacy_provider) = (false, None);
     for (key, value) in entries(&text) {
       let empty = matches!(value, "" | "undefined" | "null");
       match key {
-        "VEKRO_COMMIT_PROVIDER" => {
+        PROVIDER_KEY => {
+          saw_provider = true;
           config.provider = if value == "apple-intelligence" { Provider::AppleIntelligence } else { Provider::default() };
         }
+        // The key the product wrote under its previous name counts until the current one is saved.
+        key if key == legacy_provider_key() => legacy_provider = Some(value == "apple-intelligence"),
         "OCO_API_KEY" => config.api_key = if empty { String::new() } else { value.into() },
         "OCO_API_URL" => config.api_url = if empty { String::new() } else { value.into() },
         "OCO_MODEL" if !empty => config.model = value.into(),
@@ -146,13 +158,16 @@ impl Config {
         _ => {}
       }
     }
+    if let (false, Some(apple)) = (saw_provider, legacy_provider) {
+      config.provider = if apple { Provider::AppleIntelligence } else { Provider::default() };
+    }
     config
   }
 
   fn values(&self) -> Vec<(&'static str, String)> {
     vec![
       (
-        "VEKRO_COMMIT_PROVIDER",
+        PROVIDER_KEY,
         match self.provider {
           Provider::OpenAiCompatible => String::new(),
           Provider::AppleIntelligence => "apple-intelligence".into(),
@@ -197,7 +212,7 @@ impl Config {
         lines.push(format!("{name}={value}"));
       }
     }
-    let temporary = path.with_extension("vekro-tmp");
+    let temporary = path.with_extension("tmp");
     fs::write(&temporary, lines.join("\n") + "\n")?;
     #[cfg(unix)]
     {

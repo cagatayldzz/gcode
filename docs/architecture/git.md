@@ -1,6 +1,6 @@
 # Git
 
-`vekro-git` is the one crate that knows how to talk to a repository. It never depends on the interface, creates its test repositories in
+`ws-git` is the one crate that knows how to talk to a repository. It never depends on the interface, creates its test repositories in
 temporary directories, and exposes plain functions that return `Result<_, String>` — the string is a sentence meant for the user.
 
 ## Two engines, one rule
@@ -81,7 +81,7 @@ let args = if rebase_configured { ["pull"] } else { ["pull", "--no-rebase", "--n
 ```
 
 If the command fails and the repository is in the `Merge` state, the error says there are conflicts and the merge stays in progress for the
-resolver. (git prints `CONFLICT` on stdout, which Vekro does not read; the repository state is the reliable signal.)
+resolver. (git prints `CONFLICT` on stdout, which gcode does not read; the repository state is the reliable signal.)
 
 ### Switching branches
 
@@ -89,12 +89,12 @@ resolver. (git prints `CONFLICT` on stdout, which Vekro does not read; the repos
  switch_branch(name)            safe checkout; a remote-only name first gets a tracking branch
  switch_branch_with(name, Leave | Bring)
     no changes?          → switch_branch
-    stash_changes(current)           "!!Vekro<current>"  (untracked included)
+    stash_changes(current)           "!!app-stash<current>"  (untracked included)
     switch_branch(name)  fails?      → restore_stash(current); return the error
     Bring: restore_stash(current)    fails? → "…stay stashed on <current>: <why>"
 ```
 
-A stash entry is named `!!Vekro<branch>`; a newer stash for the same branch replaces the older one **only after the new one exists**, so a
+A stash entry is named `!!app-stash<branch>`; a newer stash for the same branch replaces the older one **only after the new one exists**, so a
 failure never loses work. User-made stashes are never touched.
 
 ### Revert and cherry-pick

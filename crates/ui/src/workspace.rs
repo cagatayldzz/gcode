@@ -64,10 +64,10 @@ use std::{
   },
   time::{Duration, Instant},
 };
-use vekro_git::{BranchChoices, BranchRef, CommitInfo, Comparison, Summary};
-use vekro_hosting::{Connection, PullRequest, RepoRef, TokenStore as _};
-use vekro_opencommit::DEFAULT_INSTRUCTIONS;
-use vekro_storage::{Category, Profile, Project, ProjectList, WindowMode, WindowPlacement};
+use ws_git::{BranchChoices, BranchRef, CommitInfo, Comparison, Summary};
+use ws_hosting::{Connection, PullRequest, RepoRef, TokenStore as _};
+use ws_opencommit::DEFAULT_INSTRUCTIONS;
+use ws_storage::{Category, Profile, Project, ProjectList, WindowMode, WindowPlacement};
 
 mod accounts;
 mod branches;
@@ -397,7 +397,7 @@ pub struct Workspace {
   remote_runs: usize,
   /// The branch menu is open, with the local branches it lists and the field that filters them.
   branch_menu_open: bool,
-  branches: Vec<vekro_git::BranchEntry>,
+  branches: Vec<ws_git::BranchEntry>,
   branch_filter: Entity<InputState>,
   /// Narrows the list of changed files by name.
   changes_filter: Entity<InputState>,
@@ -434,7 +434,7 @@ impl Workspace {
   pub fn new(profile: Profile, window: &mut Window, cx: &mut Context<Self>) -> Self {
     // The first window of a profile loads its settings; later windows of it share them.
     let settings = settings_for(&profile, cx);
-    window.set_window_title(&format!("Vekro — {}", profile.name));
+    window.set_window_title(&format!("{} — {}", ws_product::NAME, profile.name));
     {
       let preferences = &settings.read(cx).preferences;
       apply_theme(preferences.theme, preferences.code_font_size, window, cx);

@@ -82,7 +82,7 @@ impl Connection {
   }
 
   fn headers(&self) -> Vec<(&'static str, String)> {
-    let mut headers = vec![("User-Agent", "Vekro".to_string()), ("Accept", "application/json".to_string())];
+    let mut headers = vec![("User-Agent", ws_product::NAME.to_string()), ("Accept", "application/json".to_string())];
     match self.account.provider {
       Provider::GitHub => {
         headers.push(("Authorization", format!("Bearer {}", self.token)));
@@ -106,6 +106,20 @@ impl Connection {
     let sent = match (method, body) {
       ("POST", Some(body)) => {
         let mut request = agent.post(url);
+        for (name, value) in self.headers() {
+          request = request.header(name, value);
+        }
+        request.send_json(&body)
+      }
+      ("PATCH", Some(body)) => {
+        let mut request = agent.patch(url);
+        for (name, value) in self.headers() {
+          request = request.header(name, value);
+        }
+        request.send_json(&body)
+      }
+      ("PUT", Some(body)) => {
+        let mut request = agent.put(url);
         for (name, value) in self.headers() {
           request = request.header(name, value);
         }
@@ -138,7 +152,10 @@ impl Connection {
       .unwrap_or_default();
     let hint = self.account.provider.permission_hint();
     Err(match status {
-      401 | 203 => format!("{service} rejected the token. Check that it is correct, has not expired and has the permissions Vekro needs ({hint})."),
+      401 | 203 => format!(
+        "{service} rejected the token. Check that it is correct, has not expired and has the permissions {} needs ({hint}).",
+        ws_product::NAME
+      ),
       403 => format!("{service} refused the request: the token lacks a permission. It needs {hint}. {detail}").trim().to_string(),
       404 => format!("{service} could not find it. Check the address, the organization and the token's access. {detail}").trim().to_string(),
       422 => format!("{service} did not accept it: {detail}").trim().to_string(),
@@ -151,7 +168,7 @@ impl Connection {
   }
 }
 
-/// What a token is allowed to do, as far as the service lets Vekro find out without changing anything. `None` is unknown.
+/// What a token is allowed to do, as far as the service lets the app find out without changing anything. `None` is unknown.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TokenAccess {
   /// List repositories, clone and fetch.
@@ -186,8 +203,9 @@ impl TokenAccess {
     let confirmed = self.read == Some(false) || self.write == Some(false) || self.pull_requests == Some(false);
     (!confirmed && (self.write.is_none() || self.pull_requests.is_none())).then(|| {
       format!(
-        "{} does not tell Vekro which permissions the token has, so pushing and pull requests were not checked. If one is refused later, the token needs {}.",
+        "{} does not tell {} which permissions the token has, so pushing and pull requests were not checked. If one is refused later, the token needs {}.",
         provider.label(),
+        ws_product::NAME,
         provider.permission_hint()
       )
     })
@@ -431,6 +449,31 @@ pub fn create_pull_request(connection: &Connection, repository: &RepoRef, new: &
   Ok(parse_request(provider, &item, repository, &base))
 }
 
+/// Renames a repository on its service and returns the name it has there afterwards: a service may adjust the name (GitHub turns
+/// spaces into hyphens). The token needs the permission to administer the repository.
+pub fn rename_repository(connection: &Connection, repository: &RepoRef, new_name: &str) -> Result<String, String> {
+  let new_name = new_name.trim();
+  if new_name.is_empty() || new_name.contains(['/', '\\']) {
+    return Err("Enter a repository name without slashes.".into());
+  }
+  let api = connection.api();
+  let (url, body, key) = match connection.account.provider {
+    Provider::GitHub => (format!("{api}/repos/{}/{}", repository.namespace, repository.name), json!({ "name": new_name }), "name"),
+    Provider::GitLab => (
+      format!("{api}/projects/{}", encode(&repository.full_name())),
+      // A GitLab project has a display name and a path, which is what the address uses.
+      json!({ "name": new_name, "path": new_name.split_whitespace().collect::<Vec<_>>().join("-") }),
+      "path",
+    ),
+    Provider::AzureDevOps => {
+      (format!("{}?api-version={AZURE_VERSION}", azure_repository_path(&api, repository)), json!({ "name": new_name }), "name")
+    }
+  };
+  let method = if connection.account.provider == Provider::GitLab { "PUT" } else { "PATCH" };
+  let answer = connection.request(method, &url, Some(body))?;
+  Ok(answer[key].as_str().filter(|name| !name.is_empty()).unwrap_or(new_name).to_string())
+}
+
 /// The branch pull requests go into by default.
 pub fn default_branch(connection: &Connection, repository: &RepoRef) -> Result<String, String> {
   let api = connection.api();
@@ -509,7 +552,7 @@ pub fn verify_permissions(connection: &Connection, repository: &RepoRef, clone_u
   let (username, password) = connection.git_login();
   let basic = format!("Basic {}", base64(format!("{username}:{password}").as_bytes()));
   let advertisement = format!("{}/info/refs?service=git-receive-pack", clone_url.trim_end_matches('/'));
-  let push = match connection.status_of("GET", &advertisement, None, vec![("User-Agent", "Vekro".into()), ("Authorization", basic)]) {
+  let push = match connection.status_of("GET", &advertisement, None, vec![("User-Agent", ws_product::NAME.into()), ("Authorization", basic)]) {
     Some(200) => Some(true),
     Some(401 | 403 | 404) => Some(false),
     _ => None,

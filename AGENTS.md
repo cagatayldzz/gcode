@@ -8,14 +8,16 @@ English for all project-owned identifiers, comments, UI text, logs, tests, docs 
 
 # Layout
 
-Workspace: `apps/*` (executables), `crates/*` (libraries). Dependencies: `apps/vekro` → `app` → `ui` → `terminal`, `git`, `storage`, `index`. Keep `apps/vekro` a thin entry point; put application logic in `crates/*`. `terminal`, `git`, `storage` and `index` never depend on the interface. No `unsafe` (`unsafe_code = "deny"`). Update `docs/architecture/` when architecture changes (crate boundaries, window layout, files in the data directory).
+The product's name is written in `product.toml` only; code, scripts and workflows read it from there (`ws-product` in Rust, `scripts/product.sh` in shell). Never write the product name in code, identifiers, file names or tests: crates and types are named without it.
+
+Workspace: `apps/*` (executables), `crates/*` (libraries). Dependencies: `apps/desktop` → `app` → `ui` → `terminal`, `git`, `storage`, `index`. Keep `apps/desktop` a thin entry point; put application logic in `crates/*`. `terminal`, `git`, `storage` and `index` never depend on the interface. No `unsafe` (`unsafe_code = "deny"`). Update `docs/architecture/` when architecture changes (crate boundaries, window layout, files in the data directory).
 
 # Interface
 
 Use GPUI Kit (`gpui-kit`) and its default icons. Reference: <https://gpui-kit.com/llms-full.txt> ("Coding Guides"); read the relevant part before interface work. It wins over this file for GPUI Kit usage. Prefer the Kit's components, in particular `Dock`, `Editor`, `Diff`, `Empty`, `StatusBar` and `ScrollableElement`, over hand-built ones.
 
 - Kit components over hand-built elements; one shared component per repeated pattern.
-- Size tokens (`text_sm`, `rounded_md`, `size_5`, `gap_2`, `small()`), not inline `px(...)`. Pixels only for terminal geometry, window size/placement, platform boundaries, and named constants (`FONT_SIZE`, `LEFT_DOCK_WIDTH`) for pixel-only component APIs. The Kit sizes icons and dock parts in `rem`, so never change the theme's `font_size`; set the text size of Vekro's own content with `FONT_SIZE` instead.
+- Size tokens (`text_sm`, `rounded_md`, `size_5`, `gap_2`, `small()`), not inline `px(...)`. Pixels only for terminal geometry, window size/placement, platform boundaries, and named constants (`FONT_SIZE`, `LEFT_DOCK_WIDTH`) for pixel-only component APIs. The Kit sizes icons and dock parts in `rem`, so never change the theme's `font_size`; set the text size of the app's own content with `FONT_SIZE` instead.
 - Colors from `cx.theme()` or the palette in `theme.rs` (`colors(cx)`), not raw `rgb`/`hsla` (the terminal palette and `theme.rs` excepted).
 - Stable ids from identity (paths, panel ids), never list indexes.
 - Keep tasks and subscriptions on their owner; do not detach recurring ones. Retained UI text is `SharedString`. Never store `&mut Window`/`App`/`Context`; store handles.
@@ -23,7 +25,7 @@ Use GPUI Kit (`gpui-kit`) and its default icons. Reference: <https://gpui-kit.co
 - One command = one `Action` shared by buttons, menus and keys. Bind keys in `crates/app`.
 - Show actionable failures in the UI (a notification), not only logs.
 - Speed is a feature: opening a file, switching projects and typing must feel instant. Measure before optimizing (time the step, then the frames after it), never block the interface thread on slow work, and keep dependencies optimized in the dev profile.
-- Default to headless verification. Run focused Cargo checks and tests for the affected packages, then `bun run check`. Only build an app bundle, launch Vekro, or inspect its UI when the user explicitly requests it. Report visual verification only when performed.
+- Default to headless verification. Run focused Cargo checks and tests for the affected packages, then `bun run check`. Only build an app bundle, launch the app, or inspect its UI when the user explicitly requests it. Report visual verification only when performed.
 
 # Git
 
@@ -31,7 +33,7 @@ Use GPUI Kit (`gpui-kit`) and its default icons. Reference: <https://gpui-kit.co
 
 # Privacy
 
-Do not commit screenshots or logs that show the user's name, machine name, home path or terminal history. Use a scratch `VEKRO_DATA_DIR` for any run you intend to show.
+Do not commit screenshots or logs that show the user's name, machine name, home path or terminal history. Use a scratch data directory (the `<prefix>_DATA_DIR` variable, prefix in `product.toml`) for any run you intend to show.
 
 # Tests
 

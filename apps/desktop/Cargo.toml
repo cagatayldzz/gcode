@@ -1,19 +1,19 @@
 [package]
-name = "vekro"
+name = "ws-desktop"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
-description = "Vekro: editor, terminal and Git in one window"
-default-run = "Vekro"
+description = "The desktop executable: editor, terminal and Git in one window"
+default-run = "ws-desktop"
 
 [lints]
 workspace = true
 
 [dependencies]
-vekro-app.workspace = true
+ws-app.workspace = true
 
 [[bin]]
-name = "Vekro"
+name = "ws-desktop"
 path = "src/main.rs"

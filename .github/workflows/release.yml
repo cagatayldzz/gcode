@@ -38,9 +38,9 @@ jobs:
         with:
           shared-key: core
       - name: Lint core packages
-        run: cargo clippy --locked -p vekro-terminal -p vekro-git -p vekro-storage -p vekro-opencommit -p vekro-hosting -p vekro-version -p vekro-updater -p vekro-index --all-targets -- -D warnings
+        run: cargo clippy --locked -p ws-terminal -p ws-git -p ws-storage -p ws-opencommit -p ws-hosting -p ws-version -p ws-updater -p ws-index --all-targets -- -D warnings
       - name: Test core packages
-        run: cargo test --locked -p vekro-terminal -p vekro-git -p vekro-storage -p vekro-opencommit -p vekro-hosting -p vekro-version -p vekro-updater -p vekro-index
+        run: cargo test --locked -p ws-terminal -p ws-git -p ws-storage -p ws-opencommit -p ws-hosting -p ws-version -p ws-updater -p ws-index
 
   prepare:
     name: 2 · Prepare version
@@ -79,7 +79,7 @@ jobs:
             Cargo.toml
             Cargo.lock
             package.json
-            apps/vekro/macos/Info.plist
+            apps/desktop/macos/Info.plist
             dist/RELEASE_NOTES.md
 
   macos_arm64:
@@ -147,7 +147,7 @@ jobs:
           name: verified-release
           if-no-files-found: error
           path: |
-            dist/Vekro-*.zip
+            dist/*-macos-arm64.zip
             dist/SHA256SUMS.txt
             dist/RELEASE_NOTES.md
 
@@ -173,7 +173,11 @@ jobs:
         run: |
           cd dist
           sha256sum --check SHA256SUMS.txt
-          gh release create "$RELEASE_TAG" Vekro-*.zip SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA" --title "Vekro ${RELEASE_TAG#v}" \
+          # The product's name is the start of the archive's name: <name>-<tag>-macos-arm64.zip.
+          archive="$(ls ./*-macos-arm64.zip | head -n 1)"
+          product="${archive#./}"
+          product="${product%%-"$RELEASE_TAG"-*}"
+          gh release create "$RELEASE_TAG" ./*-macos-arm64.zip SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA" --title "$product ${RELEASE_TAG#v}" \
             --notes-file RELEASE_NOTES.md --draft
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

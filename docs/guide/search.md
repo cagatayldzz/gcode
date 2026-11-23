@@ -22,7 +22,7 @@ Type a few letters of a file name or path and press Enter to open it.
 
 ## Command palette — `⇧⌘P`
 
-A searchable list of everything Vekro can do. It has two groups:
+A searchable list of everything gcode can do. It has two groups:
 
 - **Commands** — the actions of the menus, each with its shortcut read from the live keymap.
 - **Projects** — choose one to switch to it.

@@ -1,7 +1,7 @@
-//! The AI agents Vekro opens in their own view, and how a project's agent sessions are arranged: tabs, one session each.
+//! The AI agents the app opens in their own view, and how a project's agent sessions are arranged: tabs, one session each.
 //! Pure data, so that the rules (which tab opens next, which one takes a closed tab's place) can be tested without a window.
 
-/// A command-line agent that Vekro can start.
+/// A command-line agent that the app can start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AgentKind {
   Codex,

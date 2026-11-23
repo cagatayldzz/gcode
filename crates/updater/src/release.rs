@@ -1,5 +1,5 @@
 use crate::{process, UpdateError};
-use vekro_version::is_newer;
+use ws_version::is_newer;
 
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const CHECKSUMS_NAME: &str = "SHA256SUMS.txt";
@@ -63,10 +63,10 @@ pub fn repository_slug() -> Option<&'static str> {
 }
 
 /// The newest published release when it is newer than `current`; `None` when
-/// Vekro is up to date or no release exists yet.
+/// The app is up to date or no release exists yet.
 pub fn check(current: &str) -> Result<Option<Release>, UpdateError> {
   if !cfg!(target_arch = "aarch64") {
-    return Err(UpdateError::new("Vekro releases are published for Apple Silicon Macs only."));
+    return Err(UpdateError::new(format!("{} releases are published for Apple Silicon Macs only.", ws_product::NAME)));
   }
   let slug = repository_slug().ok_or_else(|| UpdateError::new("The release repository is not configured."))?;
   let (status, body) = process::get(&format!("https://api.github.com/repos/{slug}/releases/latest"))?;
@@ -88,7 +88,7 @@ pub fn parse_release(json: &str, slug: &str) -> Result<Release, UpdateError> {
   let value: serde_json::Value = serde_json::from_str(json).map_err(|_| UpdateError::new("Could not read the release information."))?;
   let tag = value["tag_name"].as_str().ok_or_else(invalid)?;
   let version = tag.strip_prefix('v').filter(|v| is_plain_version(v)).ok_or_else(invalid)?;
-  let archive_name = format!("Vekro-{tag}-macos-arm64.zip");
+  let archive_name = format!("{}-{tag}-macos-arm64.zip", ws_product::NAME);
   let prefix = format!("https://github.com/{slug}/releases/download/{tag}/");
   let asset = |name: &str| -> Result<String, UpdateError> {
     let url =

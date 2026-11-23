@@ -105,7 +105,7 @@ impl Provider {
 pub struct TokenGuide {
   /// Where in the service's settings tokens are created.
   pub place: &'static str,
-  /// `(permission, what Vekro uses it for)`, named as the service names them.
+  /// `(permission, what the app uses it for)`, named as the service names them.
   pub permissions: &'static [(&'static str, &'static str)],
   pub note: &'static str,
 }
@@ -143,7 +143,7 @@ impl Account {
     }
   }
 
-  /// The page of the service where this account's tokens are listed and edited, to open in a browser. (GitHub does not tell Vekro
+  /// The page of the service where this account's tokens are listed and edited, to open in a browser. (GitHub does not tell the app
   /// which token is in use, so it is the list, not one token.)
   pub fn tokens_url(&self) -> String {
     let base = self.base_url();
@@ -175,7 +175,7 @@ pub trait TokenStore: Send + Sync {
   fn delete(&self, key: &str);
 }
 
-/// The macOS Keychain, through the `security` program (generic passwords of the service "Vekro").
+/// The macOS Keychain, through the `security` program (generic passwords of the product's service name).
 ///
 /// The password reaches `security -i` through its standard input, so it is never in a command line that other processes
 /// of the user could read, and it is never written to a file or a log.
@@ -186,7 +186,10 @@ pub struct KeychainStore {
   namespace: Option<String>,
 }
 
-const SERVICE: &str = "Vekro";
+const SERVICE: &str = ws_product::NAME;
+
+/// The service name entries had under the product's previous name; they move to [`SERVICE`] the first time they are read.
+const LEGACY_SERVICE: &str = ws_product::LEGACY_NAME;
 
 /// One argument of a `security -i` command line: in double quotes, with the quotes and backslashes escaped.
 fn quote(value: &str) -> String {
@@ -207,11 +210,29 @@ impl KeychainStore {
   }
 }
 
+/// The password of a generic Keychain item, if there is one.
+fn find_password(service: &str, account: &str) -> Option<String> {
+  let output = Command::new("security").args(["find-generic-password", "-s", service, "-a", account, "-w"]).stderr(Stdio::null()).output().ok()?;
+  output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim_end_matches('\n').to_string()).filter(|token| !token.is_empty())
+}
+
+fn delete_password(service: &str, account: &str) {
+  let _ =
+    Command::new("security").args(["delete-generic-password", "-s", service, "-a", account]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+}
+
 impl TokenStore for KeychainStore {
   fn get(&self, key: &str) -> Option<String> {
-    let key = &self.entry(key);
-    let output = Command::new("security").args(["find-generic-password", "-s", SERVICE, "-a", key, "-w"]).stderr(Stdio::null()).output().ok()?;
-    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim_end_matches('\n').to_string()).filter(|token| !token.is_empty())
+    let entry = self.entry(key);
+    if let Some(token) = find_password(SERVICE, &entry) {
+      return Some(token);
+    }
+    // A token saved under the previous service name moves to the current one, so nobody has to connect an account again.
+    let token = find_password(LEGACY_SERVICE, &entry)?;
+    if self.set(key, &token).is_ok() {
+      delete_password(LEGACY_SERVICE, &entry);
+    }
+    Some(token)
   }
 
   fn set(&self, key: &str, token: &str) -> Result<(), String> {
@@ -238,8 +259,9 @@ impl TokenStore for KeychainStore {
   }
 
   fn delete(&self, key: &str) {
-    let key = &self.entry(key);
-    let _ = Command::new("security").args(["delete-generic-password", "-s", SERVICE, "-a", key]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    let entry = self.entry(key);
+    delete_password(SERVICE, &entry);
+    delete_password(LEGACY_SERVICE, &entry);
   }
 }
 
@@ -283,7 +305,7 @@ impl Connection {
   pub fn git_login(&self) -> (String, String) {
     let username = match self.account.provider {
       Provider::GitLab => "oauth2".to_string(),
-      _ if self.account.username.is_empty() => "vekro".to_string(),
+      _ if self.account.username.is_empty() => ws_product::slug(),
       _ => self.account.username.clone(),
     };
     (username, self.token.clone())
@@ -311,7 +333,7 @@ impl Accounts {
 
   /// Reads the list of the profile with this Keychain namespace.
   pub fn load_in(path: &Path, namespace: Option<String>) -> Self {
-    let Some(Value::Object(root)) = vekro_storage::read_json(path) else {
+    let Some(Value::Object(root)) = ws_storage::read_json(path) else {
       return Self { items: Vec::new(), namespace };
     };
     let items = root
@@ -343,7 +365,7 @@ impl Accounts {
         "issue": account.issue,
       })).collect::<Vec<_>>(),
     });
-    vekro_storage::write_json(path, &value)
+    ws_storage::write_json(path, &value)
   }
 
   /// Adds an account, or replaces the one with the same key (a new token for the same account).

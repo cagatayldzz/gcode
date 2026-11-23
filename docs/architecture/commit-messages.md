@@ -7,11 +7,11 @@ The sparkle button beside the commit description writes a message from the diff 
    │ Workspace::generate_commit_message  (commit.rs)
    ▼
  background thread
-   ├─ vekro_git::diff_files(root, ticked_files)         build the diff
+   ├─ ws_git::diff_files(root, ticked_files)         build the diff
    ├─ diff ≤ token limit?  ── yes ─► one request
    │                       └─ no  ─► split per file  → summarize each → merge in a last request
    ▼
- vekro_opencommit::generate(&config, &instructions, &diff)  →  Message { summary, description }
+ ws_opencommit::generate(&config, &instructions, &diff)  →  Message { summary, description }
    ▼
  fills the Summary and Description fields (only if the project is still the same one)
 ```
@@ -28,9 +28,9 @@ The sparkle button beside the commit description writes a message from the diff 
 ## Configuration
 
 - Settings live in the user's **`~/.opencommit`**, shared with the `oco` command. Unknown lines are kept and the file is mode `0600`. The
-  `VEKRO_OPENCOMMIT_CONFIG` variable names another file (for scratch runs).
+  `GCODE_OPENCOMMIT_CONFIG` variable names another file (for scratch runs).
 - The **commit instructions** are in `preferences.json` (`commit_instructions`: `None` is the built-in text, `Some("")` none at all).
-- Vekro's `VEKRO_COMMIT_PROVIDER` key selects the optional **Apple Intelligence** provider and leaves the `oco` provider settings available to the CLI.
+- gcode's `APP_COMMIT_PROVIDER` key selects the optional **Apple Intelligence** provider and leaves the `oco` provider settings available to the CLI.
 - **Push after commit**: the commit button runs `git push` right after committing.
 
 ## Apple Intelligence
