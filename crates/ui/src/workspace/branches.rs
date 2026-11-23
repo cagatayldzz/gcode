@@ -78,11 +78,13 @@ impl Workspace {
     cx.spawn_in(window, async move |this, cx| {
       let (result, stashed) = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
-        this.refresh_project();
+        let here = this.settle_job(&root, cx);
         match result {
           Ok(()) => {
-            window.push_notification(Notification::info(format!("Switched to {name}.")), cx);
-            if stashed {
+            let message = this.say_where(&root, format!("Switched to {name}."));
+            window.push_notification(Notification::info(message), cx);
+            // The question acts on the open project's stash: it is asked only while the open project is the one that switched.
+            if stashed && here {
               this.ask_stashed_changes(name, window, cx);
             }
           }
@@ -138,10 +140,11 @@ impl Workspace {
     cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
-        this.refresh_project();
+        this.settle_job(&root, cx);
         match result {
           Ok(()) => {
-            window.push_notification(Notification::info(if restore { "Stashed changes restored." } else { "Stashed changes discarded." }), cx)
+            let message = if restore { "Stashed changes restored." } else { "Stashed changes discarded." };
+            window.push_notification(Notification::info(this.say_where(&root, message.to_string())), cx)
           }
           Err(message) => window.push_notification(Notification::error(message), cx),
         }
@@ -247,9 +250,9 @@ impl Workspace {
     cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
-        this.refresh_project();
+        this.settle_job(&root, cx);
         match result {
-          Ok(()) => window.push_notification(Notification::info(format!("Deleted {name}.")), cx),
+          Ok(()) => window.push_notification(Notification::info(this.say_where(&root, format!("Deleted {name}."))), cx),
           Err(message) => window.push_notification(Notification::error(message), cx),
         }
         cx.notify();
@@ -299,15 +302,20 @@ impl Workspace {
   ) {
     let Some(root) = self.projects.active.clone() else { return };
     let done = done.to_string();
-    let work = cx.background_executor().spawn(async move { action(&root, &id) });
+    let work = cx.background_executor().spawn({
+      let root = root.clone();
+      async move { action(&root, &id) }
+    });
     cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
-        this.refresh_project();
+        let here = this.settle_job(&root, cx);
         match result {
           Ok(short) => {
-            this.load_history(cx);
-            window.push_notification(Notification::info(format!("{done} {short}.")), cx);
+            if here {
+              this.load_history(cx);
+            }
+            window.push_notification(Notification::info(this.say_where(&root, format!("{done} {short}."))), cx);
           }
           Err(message) => window.push_notification(Notification::error(message), cx),
         }
@@ -365,13 +373,11 @@ impl Workspace {
         this.committing = false;
         match result {
           Ok(id) => {
-            this.commit_summary.update(cx, |input, cx| input.set_value("", window, cx));
-            this.commit_description.update(cx, |input, cx| input.set_value("", window, cx));
-            this.excluded.clear();
-            this.selected_change = None;
-            this.refresh_project();
-            this.load_history(cx);
-            window.push_notification(Notification::info(format!("Amended the last commit: {id}.")), cx);
+            this.clear_commit_draft(&root, window, cx);
+            if this.settle_job(&root, cx) {
+              this.load_history(cx);
+            }
+            window.push_notification(Notification::info(this.say_where(&root, format!("Amended the last commit: {id}."))), cx);
           }
           Err(message) => window.push_notification(Notification::error(message), cx),
         }

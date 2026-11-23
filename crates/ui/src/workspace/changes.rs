@@ -187,20 +187,19 @@ impl Workspace {
         this.committing = false;
         match result {
           Ok((id, pushed)) => {
-            this.commit_summary.update(cx, |input, cx| input.set_value("", window, cx));
-            this.commit_description.update(cx, |input, cx| input.set_value("", window, cx));
-            this.excluded.clear();
             // The diff of a file that was just committed has nothing left to show.
-            if let Some(open) = this.selected_change.clone().filter(|open| files.contains(open)) {
+            if let Some(open) =
+              this.selected_change.clone().filter(|open| files.contains(open) && job_scope::lands_here(this.projects.active.as_deref(), &root))
+            {
               if let Some(path) = ws_git::workdir_file(&root, &open) {
                 this.editor_panel.update(cx, |editor, cx| editor.forget(&path, cx));
               }
-              this.selected_change = None;
             }
-            this.refresh_project();
+            this.clear_commit_draft(&root, window, cx);
+            this.settle_job(&root, cx);
             match pushed {
-              None => window.push_notification(Notification::info(format!("Committed {id}.")), cx),
-              Some(Ok(_)) => window.push_notification(Notification::info(format!("Committed {id} and pushed.")), cx),
+              None => window.push_notification(Notification::info(this.say_where(&root, format!("Committed {id}."))), cx),
+              Some(Ok(_)) => window.push_notification(Notification::info(this.say_where(&root, format!("Committed {id} and pushed."))), cx),
               Some(Err(message)) => {
                 if let Some(kind) = refusal_kind(&message) {
                   this.flag_account_issue(&remote_url, kind, cx);

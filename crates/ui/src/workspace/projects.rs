@@ -486,6 +486,17 @@ impl Workspace {
         selected_change: self.selected_change.take(),
       };
       self.views.insert(root.clone(), view);
+      // What the tab of the project being left shows comes from here on from what is remembered, which can be ten seconds old: remember
+      // what the window knows now, so a push that just ended is not shown as waiting.
+      let status = self.git.as_ref().map(|git| {
+        let (changed, push) = git.status();
+        ProjectStatus { changed, push }
+      });
+      job_scope::remember_status(&mut self.project_status, root, status);
+      // The commit message typed for it stays with it.
+      let draft =
+        Draft { summary: self.commit_summary.read(cx).value().to_string(), description: self.commit_description.read(cx).value().to_string() };
+      self.drafts.put_away(root, draft);
     }
     self.close_project_search(cx);
     change(&mut self.projects);
@@ -510,6 +521,9 @@ impl Workspace {
     self.expanded = view.expanded;
     self.selected_entry = view.selected_entry;
     self.selected_change = view.selected_change;
+    let draft = after.as_ref().map(|root| self.drafts.take(root)).unwrap_or_default();
+    self.commit_summary.update(cx, |input, cx| input.set_value(draft.summary, window, cx));
+    self.commit_description.update(cx, |input, cx| input.set_value(draft.description, window, cx));
     if let (Some(root), Some(file)) = (after.clone(), self.selected_change.clone()) {
       self.change_view.update(cx, |view, cx| view.show(root, file, cx));
     }

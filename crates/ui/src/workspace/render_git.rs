@@ -227,7 +227,7 @@ impl Workspace {
           let fill = if let Some(work) = self.remote_work_here() {
             Some(fill.w(relative(work.shown())).into_any_element())
           } else {
-            self.remote_finish.clone().filter(|(_, _, root)| self.projects.active.as_deref() == Some(root.as_path())).map(|(from, run, _)| {
+            self.remote_finish.clone().filter(|(_, _, root)| job_scope::shown_in(root, self.projects.active.as_deref())).map(|(from, run, _)| {
               fill
                 .with_animation(("remote-finish", run), Animation::new(REMOTE_FINISH), move |fill, delta| {
                   fill.w(relative(from + (1. - from) * delta))

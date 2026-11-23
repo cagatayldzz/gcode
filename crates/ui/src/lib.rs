@@ -16,6 +16,7 @@ mod diff_view;
 mod editor;
 mod explorer;
 mod find_bar;
+mod job_scope;
 mod labels;
 mod line_comments;
 mod mention_picker;

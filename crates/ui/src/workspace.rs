@@ -1,3 +1,4 @@
+use crate::job_scope::{self, Draft, Drafts};
 use crate::line_comments::CommentMode;
 use crate::{
   agents::{AgentKind, AgentTabs},
@@ -312,6 +313,8 @@ pub struct Workspace {
   selected_change: Option<PathBuf>,
   /// The activity and file selections of the projects that are not open.
   views: HashMap<PathBuf, ProjectView>,
+  /// The commit messages typed in the projects that are not open.
+  drafts: Drafts,
   /// The view the sidebar shows.
   sidebar_tab: SidebarTab,
   /// The file in the Explorer the pointer is on.
@@ -487,6 +490,7 @@ impl Workspace {
       hovered_file: None,
       hovered_folder: None,
       views: HashMap::new(),
+      drafts: Drafts::default(),
       focus_handle: cx.focus_handle(),
       _setup_subscription: None,
       _dialog_subscription: None,

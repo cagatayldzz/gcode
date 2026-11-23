@@ -31,7 +31,11 @@ Choose a project from the **project menu** at the left of the title bar, or clic
 ```
 
 Everything in the window belongs to the open project: the Git summary, the folder tree (with the folders you had opened and the
-file you had selected), the file in the editor and the terminals. A dev server running in project A is still running when you come back to it.
+file you had selected), the file in the editor, the commit message you were typing and the terminals. A dev server running in project A is still running when you come back to it.
+
+A push, pull, commit or branch change that is still running when you switch finishes in the project it started in: its result is
+shown in that project's tab (the ↑ mark goes away when the push ends), and its notification names the project, for example
+*Pushed origin (gcode).* Its progress shows only while that project is open.
 
 If a project's folder disappears (deleted in Finder, by a command, by another app), gCode removes it from the list on its own, at the
 next start, when the window comes to the front, and every few seconds, and tells you which one it removed. A folder that cannot be
@@ -46,7 +50,8 @@ Beside each project in the menu, two marks can appear:
 | ↑ arrow | Commits are waiting to be pushed: the branch is ahead of its remote, or was never published while the repository has a remote. |
 | ● blue dot | Files have uncommitted changes. |
 
-They are read when the menu opens and kept up to date while it is open.
+They are read when the menu opens and kept up to date while it is open. A project's tab is updated the moment you leave it and when its own
+push, pull or commit ends.
 
 ## Favorites and categories
 

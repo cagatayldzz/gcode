@@ -93,23 +93,12 @@ impl Workspace {
           })
           .detach();
         }
-        // The window may show another project by now: refresh the one the work was for, and say which it was.
-        let elsewhere = this.projects.active.as_deref() != Some(root.as_path());
-        if elsewhere {
-          this.refresh_status_of(root.clone(), cx);
-        } else {
-          this.refresh_project();
-        }
+        // The window may show another project by now: settle the one the work was for, and say which it was.
+        this.settle_job(&root, cx);
         match result {
           Ok(_) => {
-            let place = this
-              .projects
-              .projects
-              .iter()
-              .find(|project| project.path == root)
-              .filter(|_| elsewhere)
-              .map(|project| format!(" ({})", project.name()));
-            window.push_notification(Notification::info(format!("{done} {remote}{}.", place.unwrap_or_default())), cx)
+            let message = this.say_where(&root, format!("{done} {remote}."));
+            window.push_notification(Notification::info(message), cx)
           }
           Err(message) => {
             if let Some(kind) = refusal_kind(&message) {
@@ -182,19 +171,26 @@ impl Workspace {
   /// Takes the last commit back, keeping its changes: they return to the Changes view with the commit's message in the commit box.
   pub(super) fn undo_commit(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
-    let work = cx.background_executor().spawn(async move { ws_git::undo_commit(&root, &id) });
+    let work = cx.background_executor().spawn({
+      let root = root.clone();
+      async move { ws_git::undo_commit(&root, &id) }
+    });
     cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
         match result {
           Ok((summary, description)) => {
-            this.commit_summary.update(cx, |input, cx| input.set_value(summary, window, cx));
-            this.commit_description.update(cx, |input, cx| input.set_value(description, window, cx));
-            this.refresh_project();
-            this.selected_commit = None;
-            this.git_view = GitView::Changes;
-            window
-              .push_notification(Notification::info("Undid the commit: its changes are back in Changes, with its message in the commit box."), cx);
+            if this.settle_job(&root, cx) {
+              this.commit_summary.update(cx, |input, cx| input.set_value(summary, window, cx));
+              this.commit_description.update(cx, |input, cx| input.set_value(description, window, cx));
+              this.selected_commit = None;
+              this.git_view = GitView::Changes;
+            } else {
+              // The message waits in that project's box until it is opened again.
+              this.drafts.set(&root, Draft { summary, description });
+            }
+            let message = this.say_where(&root, "Undid the commit: its changes are back in Changes, with its message in the commit box.".to_string());
+            window.push_notification(Notification::info(message), cx);
           }
           Err(message) => window.push_notification(Notification::error(message), cx),
         }
@@ -390,11 +386,10 @@ impl Workspace {
       let result = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
         this.merge_task = None;
-        if this.projects.active.as_ref() != Some(&root) {
+        if !this.settle_job(&root, cx) {
           cx.notify();
           return;
         }
-        this.refresh_project();
         match result {
           Ok(ws_git::MergeOutcome::Finished) => this.merge_completed(branch.as_deref(), window, cx),
           Ok(ws_git::MergeOutcome::Conflicted(state)) => {
@@ -587,11 +582,9 @@ impl Workspace {
       async move { ws_git::quick_status(&root) }
     });
     cx.spawn(async move |this, cx| {
-      let Some((changed, push)) = work.await else { return };
-      let status = ProjectStatus { changed, push };
+      let found = work.await.map(|(changed, push)| ProjectStatus { changed, push });
       let _ = this.update(cx, |this, cx| {
-        if this.project_status.get(&root) != Some(&status) {
-          this.project_status.insert(root, status);
+        if job_scope::remember_status(&mut this.project_status, &root, found) {
           cx.notify();
         }
       });
@@ -599,9 +592,45 @@ impl Workspace {
     .detach();
   }
 
+  /// Settles what a background job for `root` changed, once it ended: the open project is read again; when the user moved on to
+  /// another one, only what the tab of `root` shows is. Returns whether `root` is still the open project, the only case in which the
+  /// job may change anything else the window shows.
+  pub(super) fn settle_job(&mut self, root: &Path, cx: &mut Context<Self>) -> bool {
+    let here = job_scope::lands_here(self.projects.active.as_deref(), root);
+    if here {
+      self.refresh_project();
+    } else {
+      self.refresh_status_of(root.to_path_buf(), cx);
+    }
+    here
+  }
+
+  /// `message`, naming the project when the job that made it ended in another project than the open one.
+  pub(super) fn say_where(&self, root: &Path, message: String) -> String {
+    let place = (!job_scope::lands_here(self.projects.active.as_deref(), root))
+      .then(|| self.projects.projects.iter().find(|project| project.path == root).map(|project| project.name()))
+      .flatten();
+    job_scope::name_the_place(&message, place.as_deref())
+  }
+
+  /// Empties the commit box of `root` after a commit was made there: the open project's boxes, or the draft put away for another one.
+  pub(super) fn clear_commit_draft(&mut self, root: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    if job_scope::lands_here(self.projects.active.as_deref(), root) {
+      self.commit_summary.update(cx, |input, cx| input.set_value("", window, cx));
+      self.commit_description.update(cx, |input, cx| input.set_value("", window, cx));
+      self.excluded.clear();
+      self.selected_change = None;
+    } else {
+      self.drafts.clear(root);
+      if let Some(view) = self.views.get_mut(root) {
+        view.selected_change = None;
+      }
+    }
+  }
+
   /// The push, pull or fetch that is running for the open project, not for another one.
   pub(super) fn remote_work_here(&self) -> Option<&RemoteWork> {
-    self.remote_work.as_ref().filter(|work| self.projects.active.as_deref() == Some(work.root.as_path()))
+    self.remote_work.as_ref().filter(|work| job_scope::shown_in(&work.root, self.projects.active.as_deref()))
   }
 
   /// What a project holds: for the open project what the window already read, for the others what the last background read found.
