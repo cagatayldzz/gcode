@@ -25,6 +25,7 @@ impl Workspace {
     let fetching_after_push = Arc::new(AtomicBool::new(false));
     let fraction = Arc::new(AtomicU32::new(0));
     self.remote_work = Some(RemoteWork {
+      root: root.clone(),
       title: title.into(),
       progress: progress.clone(),
       fraction: fraction.clone(),
@@ -80,11 +81,11 @@ impl Workspace {
           // The fill runs on to the right edge and goes away.
           this.remote_runs += 1;
           let run = this.remote_runs;
-          this.remote_finish = Some((work.shown(), run));
+          this.remote_finish = Some((work.shown(), run, work.root.clone()));
           cx.spawn(async move |this, cx| {
             cx.background_executor().timer(REMOTE_FINISH * 3 / 2).await;
             let _ = this.update(cx, |this, cx| {
-              if this.remote_finish.is_some_and(|(_, current)| current == run) {
+              if this.remote_finish.as_ref().is_some_and(|(_, current, _)| *current == run) {
                 this.remote_finish = None;
                 cx.notify();
               }
@@ -92,9 +93,24 @@ impl Workspace {
           })
           .detach();
         }
-        this.refresh_project();
+        // The window may show another project by now: refresh the one the work was for, and say which it was.
+        let elsewhere = this.projects.active.as_deref() != Some(root.as_path());
+        if elsewhere {
+          this.refresh_status_of(root.clone(), cx);
+        } else {
+          this.refresh_project();
+        }
         match result {
-          Ok(_) => window.push_notification(Notification::info(format!("{done} {remote}.")), cx),
+          Ok(_) => {
+            let place = this
+              .projects
+              .projects
+              .iter()
+              .find(|project| project.path == root)
+              .filter(|_| elsewhere)
+              .map(|project| format!(" ({})", project.name()));
+            window.push_notification(Notification::info(format!("{done} {remote}{}.", place.unwrap_or_default())), cx)
+          }
           Err(message) => {
             if let Some(kind) = refusal_kind(&message) {
               this.flag_account_issue(&remote_url, kind, cx);
@@ -561,6 +577,31 @@ impl Workspace {
       window.defer(cx, move |window, cx| focus.focus(window, cx));
     }
     cx.notify();
+  }
+
+  /// Reads what one project holds off the interface thread, so its tab stops showing what it held before a push, pull or fetch ended
+  /// while another project was open.
+  pub(super) fn refresh_status_of(&mut self, root: PathBuf, cx: &mut Context<Self>) {
+    let work = cx.background_executor().spawn({
+      let root = root.clone();
+      async move { ws_git::quick_status(&root) }
+    });
+    cx.spawn(async move |this, cx| {
+      let Some((changed, push)) = work.await else { return };
+      let status = ProjectStatus { changed, push };
+      let _ = this.update(cx, |this, cx| {
+        if this.project_status.get(&root) != Some(&status) {
+          this.project_status.insert(root, status);
+          cx.notify();
+        }
+      });
+    })
+    .detach();
+  }
+
+  /// The push, pull or fetch that is running for the open project, not for another one.
+  pub(super) fn remote_work_here(&self) -> Option<&RemoteWork> {
+    self.remote_work.as_ref().filter(|work| self.projects.active.as_deref() == Some(work.root.as_path()))
   }
 
   /// What a project holds: for the open project what the window already read, for the others what the last background read found.

@@ -217,6 +217,8 @@ struct ProjectView {
 
 /// A push, pull or fetch that is running: what the toolbar button says, and the last progress line git reported.
 struct RemoteWork {
+  /// The project the work belongs to: the window may show another one by the time it ends.
+  root: PathBuf,
   title: SharedString,
   progress: Arc<Mutex<String>>,
   /// How far the work is, in thousandths, from the percentages git reports; it never goes back.
@@ -409,7 +411,7 @@ pub struct Workspace {
   /// The push, pull or fetch that is running.
   remote_work: Option<RemoteWork>,
   /// A finished push, pull or fetch whose fill is still running out to the right: where it stood, and which run it was.
-  remote_finish: Option<(f32, usize)>,
+  remote_finish: Option<(f32, usize, PathBuf)>,
   remote_runs: usize,
   /// The branch menu is open, with the local branches it lists and the field that filters them.
   branch_menu_open: bool,

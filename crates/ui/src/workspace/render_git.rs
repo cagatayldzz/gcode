@@ -132,7 +132,7 @@ impl Workspace {
       } else {
         ("icons/refresh-cw.svg", format!("Fetch {}", sync.remote), 0)
       };
-      let detail = if let Some(work) = &self.remote_work {
+      let detail = if let Some(work) = self.remote_work_here() {
         work.progress.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
       } else if !sync.upstream {
         format!("Send it to {}", sync.remote)
@@ -157,7 +157,7 @@ impl Workspace {
             .w_full()
             .gap_2()
             .items_center()
-            .child(match &self.remote_work {
+            .child(match self.remote_work_here() {
               Some(_) => Spinner::new().small().into_any_element(),
               None => Icon::empty().path(icon).size_5().text_color(theme.muted_foreground).into_any_element(),
             })
@@ -167,7 +167,7 @@ impl Workspace {
                 .min_w_0()
                 .items_start()
                 .child(
-                  Label::new(self.remote_work.as_ref().map_or(title.into(), |work| {
+                  Label::new(self.remote_work_here().map_or(title.into(), |work| {
                     if work.fetching_after_push.load(Ordering::Relaxed) {
                       format!("Fetching {}", sync.remote).into()
                     } else {
@@ -224,10 +224,10 @@ impl Workspace {
           // While a push, pull or fetch runs, a soft fill of the accent color grows across the button from left to right as
           // far as git has got.
           let fill = div().absolute().top_0().bottom_0().left_0().bg(accent.opacity(0.15));
-          let fill = if let Some(work) = &self.remote_work {
+          let fill = if let Some(work) = self.remote_work_here() {
             Some(fill.w(relative(work.shown())).into_any_element())
           } else {
-            self.remote_finish.map(|(from, run)| {
+            self.remote_finish.clone().filter(|(_, _, root)| self.projects.active.as_deref() == Some(root.as_path())).map(|(from, run, _)| {
               fill
                 .with_animation(("remote-finish", run), Animation::new(REMOTE_FINISH), move |fill, delta| {
                   fill.w(relative(from + (1. - from) * delta))
