@@ -11,7 +11,7 @@ The terminal info bar and the command palette read the live keymap, so what they
 | `⇧⌘P` | Command palette |
 | `⇧⌘F` | Search in project |
 | `⌘S` | Save the open file |
-| `⌘W` | Close the open editor tab; pressed again, the remaining tabs from the last to the first (never the window). In a terminal it closes the pane |
+| `⌘W` | Close the open editor tab; pressed again, the remaining tabs from the last to the first (never the window). In a terminal it does nothing, so a running terminal is never closed by accident |
 | `⌘J` | Show or hide the terminals |
 | `⇧⌘A` | Show or hide the AI agents |
 | `⇧⌘M` | Mention projects (in the AI view and terminals) |

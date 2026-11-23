@@ -61,12 +61,15 @@ pub(crate) fn run_with_timeout(program: &Path, args: &[&str], timeout: Duration)
   }
 }
 
-/// Stops the daemon's processes and removes the control socket they left behind, so the next start is clean.
+/// Stops the daemon's processes and removes the control socket they left behind, so the next start is clean. A stuck daemon ignores SIGTERM,
+/// so the processes are killed outright.
 fn clear_stuck_daemon(home: Option<&Path>) {
-  let _ = Command::new("pkill").args(["-f", DAEMON_PROCESS_PATTERN]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+  let _ = Command::new("pkill").args(["-KILL", "-f", DAEMON_PROCESS_PATTERN]).stdout(Stdio::null()).stderr(Stdio::null()).status();
   if let Some(home) = home {
     let _ = std::fs::remove_file(home.join(".codex/app-server-control/app-server-control.sock"));
   }
+  // Give the system a moment to reap the killed processes before the next start.
+  std::thread::sleep(Duration::from_millis(500));
 }
 
 fn restart_once(program: &Path) -> std::io::Result<Outcome> {

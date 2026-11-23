@@ -74,6 +74,8 @@ actions!(
     FindInFile,
     ReplaceInFile,
     CloseTab,
+    // In a terminal: close the pane that has the keyboard. Only from menus: ⌘W never closes a terminal.
+    ClosePane,
     MentionProjects,
     ToggleTerminal,
     ToggleAgents,

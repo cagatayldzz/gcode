@@ -3,7 +3,7 @@
 use crate::{
   selection::{extend_selection, move_endpoint, word_range},
   theme::colors,
-  ClearBuffer, CloseTab, CopySelection, NewTerminal, PasteClipboard, SplitDown, SplitRight,
+  ClearBuffer, ClosePane, CopySelection, NewTerminal, PasteClipboard, SplitDown, SplitRight,
 };
 use futures::StreamExt as _;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -666,7 +666,7 @@ impl Render for Terminal {
           .item(PopupMenuItem::new("Paste").action(Box::new(PasteClipboard)))
           .item(PopupMenuItem::new("Clear Buffer").action(Box::new(ClearBuffer)))
           .separator()
-          .item(PopupMenuItem::new("Close").action(Box::new(CloseTab)))
+          .item(PopupMenuItem::new("Close").action(Box::new(ClosePane)))
       })
   }
 }

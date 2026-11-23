@@ -28,9 +28,9 @@ use crate::{
   terminal_layout::{Arrangement, Direction, Node},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
-  AddLineComment, AddProfile, AddProject, CheckForUpdates, ClearBuffer, CloseTab, EditProfiles, FindInFile, MentionProjects, NewClaude, NewCodex,
-  NewTerminal, OpenSettings, RemoveLineComment, ReplaceInFile, SaveFile, SearchProject, SelectNextOccurrence, SplitDown, SplitRight, ToggleAgents,
-  ToggleAllChanges, ToggleLineComment, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
+  AddLineComment, AddProfile, AddProject, CheckForUpdates, ClearBuffer, ClosePane, CloseTab, EditProfiles, FindInFile, MentionProjects, NewClaude,
+  NewCodex, NewTerminal, OpenSettings, RemoveLineComment, ReplaceInFile, SaveFile, SearchProject, SelectNextOccurrence, SplitDown, SplitRight,
+  ToggleAgents, ToggleAllChanges, ToggleLineComment, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{base::Selectable as _, prelude::FluentBuilder as _};
 use gpui_kit::{
@@ -742,14 +742,18 @@ impl Workspace {
       .unwrap_or_default()
   }
 
+  /// Close Pane (menus only): closes the terminal pane that has the keyboard.
+  pub fn close_focused_pane(&mut self, _: &ClosePane, window: &mut Window, cx: &mut Context<Self>) {
+    if let Some(terminal) = self.focused_terminal(window, cx) {
+      self.close_pane(terminal, window, cx);
+    }
+  }
+
   /// ⌘W: closes the open tab of the editor, then the others from the last to the first, and keeps the focus in the window so
-  /// the shortcut keeps working. It never closes the window, and does nothing while a terminal has the keyboard.
+  /// the shortcut keeps working. It never closes the window, and does nothing while a terminal has the keyboard: a running
+  /// terminal is only closed on purpose, from its menu or its close button.
   pub fn close_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
-    // In a terminal, ⌘W closes the pane that has the keyboard.
     if self.terminal_focused(window, cx) {
-      if let Some(terminal) = self.focused_terminal(window, cx) {
-        self.close_pane(terminal, window, cx);
-      }
       return;
     }
     if let Some(side) = self.file_actions.focused_side(window, cx) {
@@ -904,6 +908,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::remove_line_comment))
       .on_action(cx.listener(Self::toggle_line_comment))
       .on_action(cx.listener(Self::close_tab))
+      .on_action(cx.listener(Self::close_focused_pane))
       .on_action(cx.listener(Self::mention_projects))
       .size_full()
       .bg(theme.background)

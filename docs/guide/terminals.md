@@ -23,17 +23,17 @@ Each project starts with one `zsh` (your login shell) in the project folder and 
 | New tab | `⌘T` | Shows the terminals if they were hidden. |
 | Split side by side | `⌘D` | The shell with the keyboard is split; the new one gets the keyboard. |
 | Split one above the other | `⇧⌘D` | |
-| Close pane | `⌘W` | The sibling takes the whole place; a tab left without panes goes; when the last goes the editor returns. |
+| Close pane | the pane's ✕ or its menu (`⌘W` does nothing in a terminal) | The sibling takes the whole place; a tab left without panes goes; when the last goes the editor returns. |
 | Resize | drag the divider | |
 
 A tab with several panes gives each a small header with **×**, the shell's title, and **⋯** (New Tab, Split Pane Vertically,
 Split Pane Horizontally, Restart Session, Restart Codex Daemon, Close).
 
 - **Restart Session** replaces a hung shell with a new one in the same place and folder.
-- **Restart Codex Daemon** runs `codex app-server daemon restart`, for when Codex keeps showing "Reconnecting to server…" or sits at "Waiting for startup". If the restart does not finish within 20 seconds, the daemon's processes are stopped and the restart is tried once more. Codex sessions running in terminals are not touched. Start Codex again afterwards.
+- **Restart Codex Daemon** runs `codex app-server daemon restart`, for when Codex keeps showing "Reconnecting to server…" or sits at "Waiting for startup". If the restart does not finish within 20 seconds, the daemon's processes are killed (a stuck daemon ignores a normal stop) and the restart is tried once more. Codex sessions running in terminals are not touched. Start Codex again afterwards.
 - A shell that exits (`exit`, `⌃D`) closes its pane the same way as ×.
 
-Right-click in a terminal for New Tab, Split Pane Vertically/Horizontally, Copy, Paste, Clear Buffer and Close; each shows its shortcut.
+Right-click in a terminal for New Tab, Split Pane Vertically/Horizontally, Copy, Paste, Clear Buffer and Close; each shows its shortcut, if it has one.
 
 ## Keyboard
 

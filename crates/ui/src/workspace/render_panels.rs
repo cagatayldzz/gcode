@@ -413,7 +413,6 @@ impl Workspace {
           shortcut_hint("Split down", &SplitDown, window),
           shortcut_hint("Clear", &ClearBuffer, window),
           shortcut_hint("Mention projects", &MentionProjects, window),
-          shortcut_hint("Close", &CloseTab, window),
           shortcut_hint("Hide", &ToggleTerminal, window),
         ],
         cx,
@@ -472,14 +471,7 @@ impl Workspace {
       .size_full()
       .child(header)
       .child(div().flex_1().min_h_0().bg(palette.background).children(shown))
-      .child(shortcut_bar(
-        vec![
-          shortcut_hint("Mention projects", &MentionProjects, window),
-          shortcut_hint("Close session", &CloseTab, window),
-          shortcut_hint("Hide", &ToggleAgents, window),
-        ],
-        cx,
-      ))
+      .child(shortcut_bar(vec![shortcut_hint("Mention projects", &MentionProjects, window), shortcut_hint("Hide", &ToggleAgents, window)], cx))
       .into_any_element()
   }
 
