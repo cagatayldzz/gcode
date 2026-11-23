@@ -2,7 +2,10 @@
 //! The palettes use semantic colors from GitHub Primer (https://github.com/primer/primitives).
 
 use gpui_kit::{
-  component::{highlighter::ThemeStyle, ActiveTheme as _, Theme, ThemeMode},
+  component::{
+    highlighter::{SyntaxColors, ThemeStyle},
+    ActiveTheme as _, Theme, ThemeMode,
+  },
   *,
 };
 use ws_storage::ThemeChoice;
@@ -187,6 +190,40 @@ fn syntax_color(color: Hsla) -> Option<ThemeStyle> {
   serde_json::from_value(serde_json::json!({ "color": color })).ok()
 }
 
+/// The dark theme's code colors as GitHub draws them: properties, attributes, constants and operators blue; identifiers, types and
+/// punctuation in the text color; class names that are built orange; JSON and YAML keys green (the `label` role).
+fn github_dark(syntax: &mut SyntaxColors, c: &Colors) {
+  let text = syntax_color(c.text);
+  let blue = syntax_color(hex(0x79c0ff));
+  let string = syntax_color(hex(0xa5d6ff));
+  syntax.property = blue;
+  syntax.attribute = blue;
+  syntax.operator = blue;
+  syntax.title = blue;
+  syntax.text_literal = blue;
+  syntax.text_code_span = blue;
+  syntax.link_uri = blue;
+  syntax.string_escape = string;
+  syntax.string_regex = string;
+  syntax.string_special = string;
+  syntax.string_special_symbol = string;
+  syntax.preproc = syntax.keyword;
+  for role in [
+    &mut syntax.type_,
+    &mut syntax.variable,
+    &mut syntax.variable_special,
+    &mut syntax.embedded,
+    &mut syntax.enum_,
+    &mut syntax.variant,
+    &mut syntax.primary,
+    &mut syntax.punctuation,
+    &mut syntax.punctuation_bracket,
+    &mut syntax.punctuation_delimiter,
+  ] {
+    *role = text;
+  }
+}
+
 /// Applies the chosen appearance (the system's, unless the user picked one) with the app's colors and fonts.
 pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut Window, cx: &mut App) {
   match choice {
@@ -220,6 +257,10 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     let syntax = &mut style.syntax;
     syntax.property = syntax_color(property);
     syntax.attribute = syntax.property;
+    // The names of a data file (JSON and YAML keys) keep the color the properties had.
+    syntax.label = syntax_color(property);
+    // The name of a class that is built or listed, and the names of the line-based files (see `minimap::outline`).
+    syntax.constructor = syntax_color(type_name);
     syntax.comment = syntax_color(c.text_secondary);
     syntax.comment_doc = syntax.comment;
     syntax.string = syntax_color(string);
@@ -236,6 +277,9 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     syntax.punctuation = literal;
     syntax.punctuation_bracket = literal;
     syntax.punctuation_delimiter = syntax_color(c.text_secondary);
+    if dark {
+      github_dark(syntax, &c);
+    }
 
     let colors = &mut theme.colors;
     colors.background = c.background;

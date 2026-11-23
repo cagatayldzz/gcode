@@ -72,3 +72,37 @@ fn tsx_colors_jsx_tags_attributes_and_typescript() {
     }
   }
 }
+
+fn color_of(source: &str, language: &str, token: &str) -> Option<gpui_kit::Hsla> {
+  syntax::register_highlights();
+  let mut highlighter = SyntaxHighlighter::new(language);
+  assert!(highlighter.update(None, &Rope::from(source), None));
+  let theme = HighlightTheme::default_dark();
+  let styles = highlighter.styles(&(0..source.len()), &*theme);
+  let offset = source.find(token).unwrap();
+  styles.iter().find(|(range, _)| range.contains(&offset)).and_then(|(_, style)| style.color)
+}
+
+fn role_color(role: &str) -> Option<gpui_kit::Hsla> {
+  HighlightTheme::default_dark().style(role).and_then(|style| style.color)
+}
+
+#[test]
+fn toml_tables_are_names() {
+  let source = "[package]\nname = \"x\"\n";
+  assert_eq!(color_of(source, "toml", "package"), role_color("function"));
+  assert_eq!(color_of(source, "toml", "\"x\""), role_color("string"));
+}
+
+#[test]
+fn yaml_and_json_keys_use_the_label_role() {
+  assert_eq!(color_of("name: sample\n", "yaml", "name"), role_color("label"));
+  assert_eq!(color_of("{\"name\": 1}", "json", "\"name\""), role_color("label"));
+}
+
+#[test]
+fn shell_commands_are_constants_and_operators_keywords() {
+  let source = "ls -la | cat\necho hi\n";
+  assert_eq!(color_of(source, "bash", "echo"), role_color("constant"));
+  assert_eq!(color_of(source, "bash", "|"), role_color("keyword"));
+}

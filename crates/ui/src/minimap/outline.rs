@@ -67,6 +67,8 @@ pub(crate) fn line_styles(
   let underline = Some(UnderlineStyle { thickness: px(1.), color: None, wavy: false });
   let name = orange_style(resolver);
   let keyword = resolver.style("keyword").unwrap_or_default();
+  let string = resolver.style("string").unwrap_or_default();
+  let entity = resolver.style("function").unwrap_or_default();
   let variable = resolver.style("variable").or_else(|| resolver.style("property")).unwrap_or_default();
   highlights
     .slice(range)
@@ -75,10 +77,12 @@ pub(crate) fn line_styles(
       let style = match role {
         None => HighlightStyle::default(),
         Some(Role::Comment) => comment,
-        Some(Role::Name | Role::Instruction) => name,
-        Some(Role::Keyword) => keyword,
+        Some(Role::Name) => name,
+        Some(Role::Keyword | Role::Instruction) => keyword,
+        Some(Role::Value) => string,
+        Some(Role::Entity) => entity,
         Some(Role::Variable) => variable,
-        Some(Role::Link) => HighlightStyle { underline, ..HighlightStyle::default() },
+        Some(Role::Link) => HighlightStyle { underline, ..string },
         Some(Role::CommentLink) => HighlightStyle { underline, ..comment },
       };
       (run, style)
@@ -90,7 +94,7 @@ pub(crate) fn line_styles(
 /// in the light one).
 fn orange_style(resolver: &dyn HighlightStyleResolver) -> HighlightStyle {
   const ORANGE: f32 = 38.;
-  ["constant", "attribute", "number", "type", "string"]
+  ["constructor", "constant", "attribute", "number", "type", "string"]
     .into_iter()
     .filter_map(|role| resolver.style(role))
     .filter_map(|style| style.color.map(|color| (style, (color.h * 360. - ORANGE).abs())))

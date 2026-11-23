@@ -67,6 +67,10 @@ pub enum Role {
   Instruction,
   /// `$NAME` or `${NAME}`.
   Variable,
+  /// The value of a setting and a quoted string of a Dockerfile: drawn as a string.
+  Value,
+  /// A file or folder name of a `.gitignore` pattern.
+  Entity,
 }
 
 /// A stretch of the text and what it is; `None` is plain text.
@@ -174,7 +178,21 @@ fn gitignore_line(line: &str, offset: usize, builder: &mut Builder) {
   // Git treats a hash as a comment only at the very start of a line.
   if line.starts_with('#') {
     builder.push(offset..offset + line.len(), Role::Comment);
+    return;
   }
+  // The wildcards and a leading `!` are keywords; the names between them and the slashes are entities.
+  let mut start = 0;
+  for (at, character) in line.char_indices() {
+    let wildcard = matches!(character, '*' | '?') || (character == '!' && at == 0);
+    if wildcard || matches!(character, '/' | '[' | ']' | '\\') || character.is_whitespace() {
+      builder.push(offset + start..offset + at, Role::Entity);
+      if wildcard {
+        builder.push(offset + at..offset + at + 1, Role::Keyword);
+      }
+      start = at + character.len_utf8();
+    }
+  }
+  builder.push(offset + start..offset + line.len(), Role::Entity);
 }
 
 /// The instructions a Dockerfile line can start with.
@@ -240,12 +258,36 @@ fn dockerfile_line(line: &str, offset: usize, continued: bool, builder: &mut Bui
       }
     }
   }
+  spans.extend(quoted(line).into_iter().map(|span| (span, Role::Value)));
   spans.extend(variables(line).into_iter().map(|span| (span, Role::Variable)));
   spans.sort_by_key(|(span, _)| span.start);
   for (span, role) in spans {
     builder.push(offset + span.start..offset + span.end, role);
   }
   line.trim_end().ends_with('\\')
+}
+
+/// The quoted strings of a line, quotes included. A quote with no partner on the line starts no string.
+fn quoted(line: &str) -> Vec<Range<usize>> {
+  let mut found = Vec::new();
+  let mut open: Option<(usize, char)> = None;
+  let mut escaped = false;
+  for (at, character) in line.char_indices() {
+    if escaped {
+      escaped = false;
+      continue;
+    }
+    match (open, character) {
+      (_, '\\') => escaped = true,
+      (None, '"' | '\'') => open = Some((at, character)),
+      (Some((start, quote)), _) if character == quote => {
+        found.push(start..at + 1);
+        open = None;
+      }
+      _ => {}
+    }
+  }
+  found
 }
 
 /// `$NAME` and `${NAME...}` in a line.
@@ -305,14 +347,28 @@ fn dotenv_line(line: &str, offset: usize, builder: &mut Builder) {
   if export > 0 {
     builder.push(offset + indent..offset + indent + export, Role::Keyword);
   }
+  let mut value_from = None;
   if let Some(equals) = rest.find('=') {
     let name = &rest[..equals];
     if !name.is_empty() && name.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '.' | '-')) {
       builder.push(offset + name_start..offset + name_start + equals, Role::Name);
+      builder.push(offset + name_start + equals..offset + name_start + equals + 1, Role::Keyword);
+      value_from = Some(name_start + equals + 1);
     }
   }
+  // The value is a string, and the web addresses in it stay underlined. A line that is no setting only has its addresses marked.
+  let mut cursor = value_from.unwrap_or(0);
   for address in addresses {
-    builder.push(offset + address.start..offset + address.end, Role::Link);
+    if address.start >= cursor {
+      if value_from.is_some() {
+        builder.push(offset + cursor..offset + address.start, Role::Value);
+      }
+      builder.push(offset + address.start..offset + address.end, Role::Link);
+      cursor = address.end;
+    }
+  }
+  if value_from.is_some() {
+    builder.push(offset + cursor..offset + line.len(), Role::Value);
   }
 }
 

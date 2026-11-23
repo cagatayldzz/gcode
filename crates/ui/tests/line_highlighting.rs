@@ -38,7 +38,7 @@ fn roles_become_the_themes_colors_and_underlines() {
     let name = style_at(&styles, "TOKEN").color;
     assert!(name.is_some() && name != comment, "a name has a color of its own");
     assert_eq!(style_at(&styles, "# a comment").color, comment);
-    assert_eq!(style_at(&styles, "abc/def").color, None, "a value keeps the text color");
+    assert_eq!(style_at(&styles, "abc/def").color, theme.style("string").and_then(|style| style.color), "a value is a string");
     assert_eq!(style_at(&styles, "export").color, theme.style("keyword").and_then(|style| style.color));
     assert!(style_at(&styles, "https://www.example.com").underline.is_some());
     let in_comment = style_at(&styles, "https://old.example.com");
@@ -47,13 +47,15 @@ fn roles_become_the_themes_colors_and_underlines() {
 }
 
 #[test]
-fn a_gitignore_comment_takes_the_comment_color_and_a_pattern_stays_plain() {
+fn a_gitignore_comment_takes_the_comment_color_and_a_name_the_function_color() {
   let text = "# build output\n/build\n";
   let highlights = Highlights::compute(Language::Gitignore, text);
   let theme = HighlightTheme::default_dark();
   let styles = outline::line_styles(&highlights, &(0..text.len()), &*theme);
   assert_eq!(styles[0].1.color, theme.style("comment").and_then(|style| style.color));
-  assert_eq!(styles.last().unwrap().1, HighlightStyle::default());
+  let name = text.find("/build").unwrap() + 1;
+  let style = styles.iter().find(|(range, _)| range.contains(&name)).map(|(_, style)| *style).unwrap();
+  assert_eq!(style.color, theme.style("function").and_then(|style| style.color), "a name is drawn like a function");
 }
 
 #[test]
@@ -70,6 +72,7 @@ fn dockerfile_instructions_use_the_name_color_and_variables_their_own() {
     assert!(instruction.is_some(), "an instruction has a color");
     assert_eq!(at("AS base").color, instruction, "AS is drawn like the instructions");
     assert_eq!(at("RUN").color, instruction);
+    assert_eq!(instruction, theme.style("keyword").and_then(|style| style.color), "an instruction is a keyword");
     assert_eq!(at("echo hi").color, None, "arguments keep the text color");
     assert_ne!(at("${IMAGE}"), at("echo hi"), "a variable is not plain text");
   }

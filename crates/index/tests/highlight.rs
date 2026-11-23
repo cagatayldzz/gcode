@@ -42,7 +42,7 @@ fn dotenv_names_comments_keywords_and_addresses_have_their_roles() {
   assert_eq!(role_at(&runs, ENV, "# OLD_KEY"), Some(Role::Comment), "a setting in a comment is a comment");
   assert_eq!(text_of(&runs, ENV, "NEXT_PUBLIC_TOKEN"), "NEXT_PUBLIC_TOKEN");
   assert_eq!(role_at(&runs, ENV, "NEXT_PUBLIC_TOKEN"), Some(Role::Name));
-  assert_eq!(role_at(&runs, ENV, "abc/def+ghi=="), None, "a value is plain text");
+  assert_eq!(role_at(&runs, ENV, "abc/def+ghi=="), Some(Role::Value), "a value is a string");
   assert_eq!(role_at(&runs, ENV, "export"), Some(Role::Keyword));
   assert_eq!(role_at(&runs, ENV, "MODE"), Some(Role::Name));
   assert_eq!(role_at(&runs, ENV, "LAST"), Some(Role::Name), "the last line needs no newline");
@@ -65,9 +65,10 @@ fn gitignore_marks_only_a_hash_at_the_start_of_a_line() {
   let text = "# header\n/build\nfile#not-a-comment\n  # indented is a pattern\n";
   let runs = Highlights::compute(Language::Gitignore, text).runs().to_vec();
   assert_eq!(role_at(&runs, text, "# header"), Some(Role::Comment));
-  assert_eq!(role_at(&runs, text, "/build"), None);
-  assert_eq!(role_at(&runs, text, "#not-a-comment"), None);
-  assert_eq!(role_at(&runs, text, "# indented"), None);
+  assert_eq!(role_at(&runs, text, "/build"), None, "a slash is plain text");
+  assert_eq!(role_at(&runs, text, "build"), Some(Role::Entity));
+  assert_eq!(role_at(&runs, text, "#not-a-comment"), Some(Role::Entity));
+  assert_eq!(role_at(&runs, text, "# indented"), Some(Role::Entity), "an indented hash is a pattern");
 }
 
 #[test]
@@ -131,7 +132,7 @@ fn dockerfile_instructions_stages_and_variables_have_their_roles() {
   assert_eq!(text_of(&runs, DOCKERFILE, "${BUN_IMAGE}"), "${BUN_IMAGE}");
   assert_eq!(role_at(&runs, DOCKERFILE, "${BUN_IMAGE}"), Some(Role::Variable));
   assert_eq!(text_of(&runs, DOCKERFILE, "$HOME_DIR"), "$HOME_DIR");
-  assert_eq!(text_of(&runs, DOCKERFILE, "$USER"), "$USER");
+  assert_eq!(role_at(&runs, DOCKERFILE, "$USER"), Some(Role::Value), "a variable inside quotes is part of the string");
   assert_eq!(role_at(&runs, DOCKERFILE, "$ESCAPED"), None, "an escaped dollar sign is plain text");
   assert_eq!(role_at(&runs, DOCKERFILE, "--from=builder"), None, "flags and values are plain text");
   assert_eq!(role_at(&runs, DOCKERFILE, "oven/bun"), None);
@@ -172,4 +173,34 @@ fn dockerfile_runs_cover_any_text_even_without_a_final_newline_or_with_carriage_
   for text in ["", "FROM x", "FROM x\r\nRUN y \\\r\n  z\r\n", "\\", "$", "${", "${A", "$$A", "FROM \\\n"] {
     covers(Highlights::compute(Language::Dockerfile, text).runs(), &(0..text.len()));
   }
+}
+
+#[test]
+fn a_gitignore_pattern_marks_wildcards_and_negation_as_keywords_and_names_as_entities() {
+  let text = "!keep.log\n*.log\nnode_modules/\n";
+  let runs = Highlights::compute(Language::Gitignore, text).runs().to_vec();
+  assert_eq!(role_at(&runs, text, "!keep"), Some(Role::Keyword));
+  assert_eq!(role_at(&runs, text, "keep.log"), Some(Role::Entity));
+  assert_eq!(role_at(&runs, text, "*.log"), Some(Role::Keyword));
+  assert_eq!(role_at(&runs, text, ".log\nnode"), Some(Role::Entity));
+  assert_eq!(role_at(&runs, text, "node_modules"), Some(Role::Entity));
+}
+
+#[test]
+fn a_dotenv_equals_sign_is_a_keyword_and_a_quoted_value_is_one_string() {
+  let text = "DATABASE_URL=\"postgres://user:pass@localhost:5432/db\"\n";
+  let runs = Highlights::compute(Language::Dotenv, text).runs().to_vec();
+  assert_eq!(role_at(&runs, text, "=\""), Some(Role::Keyword));
+  assert_eq!(role_at(&runs, text, "\"postgres"), Some(Role::Value));
+  assert_eq!(role_at(&runs, text, "5432"), Some(Role::Value));
+}
+
+#[test]
+fn a_dockerfile_quoted_string_is_a_value() {
+  let text = "CMD [\"node\", 'dist/index.js']\nRUN echo \"unclosed\n";
+  let runs = Highlights::compute(Language::Dockerfile, text).runs().to_vec();
+  assert_eq!(text_of(&runs, text, "\"node\""), "\"node\"");
+  assert_eq!(role_at(&runs, text, "\"node\""), Some(Role::Value));
+  assert_eq!(role_at(&runs, text, "'dist"), Some(Role::Value));
+  assert_eq!(role_at(&runs, text, "\"unclosed"), None);
 }

@@ -920,18 +920,25 @@ pub(crate) fn language_for(path: &Path) -> &'static str {
   if let Some(language) = path.file_name().and_then(|name| name.to_str()).and_then(Language::for_file_name) {
     return language.name();
   }
+  // Files known by their whole name, with no extension that tells the language.
+  match path.file_name().and_then(|name| name.to_str()).unwrap_or_default() {
+    "Cargo.lock" => return "toml",
+    "bun.lock" | ".babelrc" | ".eslintrc" | ".prettierrc" | ".swcrc" | ".stylelintrc" => return "json",
+    ".zshrc" | ".zshenv" | ".zprofile" | ".bashrc" | ".bash_profile" | ".bash_aliases" | ".profile" => return "bash",
+    _ => {}
+  }
   match path.extension().and_then(|extension| extension.to_str()).unwrap_or_default().to_ascii_lowercase().as_str() {
     "rs" => "rust",
     "toml" => "toml",
-    "json" | "jsonc" => "json",
-    "md" | "markdown" => "markdown",
-    "ts" => "typescript",
+    "json" | "jsonc" | "json5" | "webmanifest" | "code-workspace" => "json",
+    "md" | "markdown" | "mdx" => "markdown",
+    "ts" | "mts" | "cts" => "typescript",
     "tsx" => "tsx",
     "js" | "jsx" | "mjs" | "cjs" => "javascript",
-    "html" | "htm" => "html",
-    "css" => "css",
-    "py" => "python",
-    "sh" | "zsh" | "bash" => "bash",
+    "html" | "htm" | "xhtml" | "xml" | "svg" | "plist" => "html",
+    "css" | "scss" => "css",
+    "py" | "pyi" => "python",
+    "sh" | "zsh" | "bash" | "ksh" => "bash",
     "yml" | "yaml" => "yaml",
     "swift" => "swift",
     "kt" | "kts" => "kotlin",

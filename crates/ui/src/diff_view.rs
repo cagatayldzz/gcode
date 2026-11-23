@@ -23,7 +23,7 @@ fn with_editor_language(file: DiffFile) -> DiffFile {
     return file;
   }
   let path = Path::new(file.path().as_ref());
-  let language = if path.file_name().is_some_and(|name| name == "Cargo.lock") { "toml" } else { language_for(path) };
+  let language = language_for(path);
   if language != "text" && LanguageRegistry::singleton().language(language).is_some() {
     file.with_language(language)
   } else {

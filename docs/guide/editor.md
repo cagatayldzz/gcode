@@ -36,11 +36,11 @@ Click a file to open it in a tab. The tabs sit in a row on top, and the shown on
 
 ### Syntax highlighting
 
-Highlighting comes from tree-sitter grammars through GPUI Kit, plus a few line-based languages gCode colors itself.
+Highlighting comes from tree-sitter grammars through GPUI Kit, plus a few line-based languages gCode colors itself. The dark theme uses GitHub's colors.
 
 | Source | Languages |
 | --- | --- |
-| Grammars | Rust, TOML, JSON / JSONC, Markdown, TypeScript, TSX, JavaScript, HTML, CSS, Python, Bash / zsh, YAML, Swift, Go, **Kotlin** |
+| Grammars | Rust, TOML, JSON / JSONC, Markdown, TypeScript, TSX, JavaScript, HTML, CSS, Python, Bash / zsh, YAML, Swift, Go, **Kotlin**. Also by extension: `.mts` / `.cts`, `.scss`, `.mdx`, `.xml` / `.svg` / `.plist`, `.pyi`, `.json5`; and by name: `Cargo.lock`, `bun.lock`, `.zshrc`, `.bashrc`, `.babelrc` |
 | Line-based | `.env`, `.gitignore`, Dockerfile |
 | Anything else | Plain text |
 

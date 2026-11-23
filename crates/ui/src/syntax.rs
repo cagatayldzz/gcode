@@ -5,7 +5,7 @@ pub(crate) fn register_highlights() {
   if let Some(mut json) = registry.language("json") {
     json.highlights = r#"
       (comment) @comment
-      (pair key: (string) @property)
+      (pair key: (string) @label)
       (pair value: (string) @string)
       (array (string) @string)
       (document (string) @string)
@@ -19,6 +19,24 @@ pub(crate) fn register_highlights() {
     .into();
     registry.register("json", &json);
   }
+  // The data and shell grammars, drawn as GitHub does: keys use the `label` role (green in the dark theme), a TOML table is a
+  // function-like name, a shell command is a constant, and the shell's operators and flags are keywords.
+  rewrite(registry, "yaml", |query| query.replace("@property", "@label"));
+  rewrite(registry, "toml", |query| {
+    format!(
+      "{}\n(table (bare_key) @function)\n(table (dotted_key (bare_key) @function))\n(table_array_element (bare_key) @function)",
+      query.replace("@property", "@variable").replace("\"=\" @operator", "\"=\" @punctuation.delimiter")
+    )
+  });
+  rewrite(registry, "bash", |query| {
+    // The last pattern colors every argument that starts with a dash, but the highlighter does not run its `#match?` test, so it
+    // would color every word of a command. It goes.
+    let query = query.rfind("(\n  (command").map_or(query, |at| &query[..at]);
+    query
+      .replace("(command_name) @function", "(command_name) @constant")
+      .replace("(variable_name) @property", "(variable_name) @variable")
+      .replace("] @operator", "] @keyword")
+  });
   // GPUI Kit registers the Swift grammar with an empty highlight query.
   if let Some(mut swift) = registry.language("swift") {
     swift.highlights = tree_sitter_swift::HIGHLIGHTS_QUERY.into();
@@ -37,5 +55,13 @@ pub(crate) fn register_highlights() {
   if let Some(mut javascript) = registry.language("javascript") {
     javascript.highlights = format!("{}\n{}", javascript.highlights, include_str!("syntax/jsx.scm")).into();
     registry.register("javascript", &javascript);
+  }
+}
+
+/// Replaces the highlight query of a registered language with the result of `change`.
+fn rewrite(registry: &LanguageRegistry, name: &str, change: impl FnOnce(&str) -> String) {
+  if let Some(mut language) = registry.language(name) {
+    language.highlights = change(&language.highlights).into();
+    registry.register(name, &language);
   }
 }
