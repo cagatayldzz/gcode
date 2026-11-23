@@ -1,0 +1,14 @@
+# Syntax sample: YAML.
+name: sample
+on:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "hello"
+        env:
+          DEBUG: true
+          COUNT: 3

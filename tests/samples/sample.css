@@ -1,0 +1,14 @@
+/* Syntax sample: CSS. */
+:root {
+  --accent: #3b82f6;
+}
+
+.button:hover > span {
+  color: var(--accent);
+  margin: 0 auto;
+  transition: color 0.2s ease-in-out;
+}
+
+@media (max-width: 600px) {
+  #main .button { display: none !important; }
+}

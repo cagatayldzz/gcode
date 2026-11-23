@@ -1,0 +1,5 @@
+# Syntax sample: gitignore (file: gitignore/.gitignore).
+node_modules/
+*.log
+!keep.log
+/dist

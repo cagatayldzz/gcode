@@ -1,0 +1,6 @@
+{
+  // Syntax sample: JSON with comments.
+  "name": "sample",
+  "enabled": true,
+  "list": [1, 2, 3],
+}

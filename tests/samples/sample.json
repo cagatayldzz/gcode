@@ -1,0 +1,7 @@
+{
+  "name": "sample",
+  "version": "1.0.0",
+  "private": true,
+  "tags": ["a", "b"],
+  "nested": { "count": 42, "ratio": 0.5, "none": null }
+}

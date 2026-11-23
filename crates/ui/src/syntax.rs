@@ -29,4 +29,13 @@ pub(crate) fn register_highlights() {
     "kotlin",
     &LanguageConfig::new("kotlin", tree_sitter_kotlin_ng::LANGUAGE.into(), Vec::new(), include_str!("syntax/kotlin.scm"), "", ""),
   );
+  // GPUI Kit gives TSX the bare grammar query and JavaScript no JSX rules, so no JSX tag is colored. Add them.
+  if let (Some(mut tsx), Some(typescript)) = (registry.language("tsx"), registry.language("typescript")) {
+    tsx.highlights = format!("{}\n{}", typescript.highlights, include_str!("syntax/jsx.scm")).into();
+    registry.register("tsx", &tsx);
+  }
+  if let Some(mut javascript) = registry.language("javascript") {
+    javascript.highlights = format!("{}\n{}", javascript.highlights, include_str!("syntax/jsx.scm")).into();
+    registry.register("javascript", &javascript);
+  }
 }

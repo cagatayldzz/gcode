@@ -1,0 +1,12 @@
+# Syntax sample: TOML.
+[package]
+name = "sample"
+version = "0.1.0"
+authors = ["Ada <ada@example.com>"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = 3
+lto = true
