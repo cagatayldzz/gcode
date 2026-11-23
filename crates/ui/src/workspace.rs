@@ -112,6 +112,9 @@ const PROJECT_MENU_WIDTH: Pixels = px(380.);
 /// How tall the lists of the project menu get before they scroll, and the least the branch menu's lists are.
 const MENU_LIST_MAX_HEIGHT: Pixels = px(320.);
 
+/// The line under the Git bar: the branch menu starts below it, so that it does not cover it.
+const BAR_BORDER: Pixels = px(1.);
+
 /// How many of the most recently changed branches the branch menu lists as recent.
 const RECENT_BRANCHES: usize = 5;
 
@@ -869,6 +872,7 @@ impl Render for Workspace {
       .bg(theme.background)
       .text_color(theme.foreground)
       .text_size(FONT_SIZE)
+      .children(self.render_branch_menu(window, cx))
       .child(
         TitleBar::new().h(TOOLBAR_HEIGHT).pl(px(96.)).bg(palette.rail).border_b_1().border_color(palette.border).child(
           h_flex()

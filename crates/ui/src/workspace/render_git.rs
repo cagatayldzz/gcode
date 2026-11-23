@@ -2,6 +2,7 @@
 
 use super::*;
 use gpui_kit::component::avatar::Avatar;
+use gpui_kit::component::ElementExt as _;
 
 /// The fixed height of a line in the Changes list: the virtualized list needs every row's height before it draws.
 const CHANGE_ROW_HEIGHT: Pixels = px(32.);
@@ -214,7 +215,11 @@ impl Workspace {
         .bg(palette.rail)
         .border_b_1()
         .border_color(palette.border)
-        .child(div().h_12().border_r_1().border_color(palette.border).child(picker))
+        .child({
+          // The slot is measured: the branch menu opens at its bottom left corner.
+          let slot = self.branch_trigger_bounds.clone();
+          div().h_12().border_r_1().border_color(palette.border).child(picker).on_prepaint(move |bounds, _, _| slot.set(bounds))
+        })
         .children(sync.map(|button| {
           // While a push, pull or fetch runs, a soft fill of the accent color grows across the button from left to right as
           // far as git has got.
