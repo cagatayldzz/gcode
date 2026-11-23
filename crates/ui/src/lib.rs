@@ -15,6 +15,7 @@ mod daemon;
 mod diff_view;
 mod editor;
 mod explorer;
+mod find_bar;
 mod labels;
 mod line_comments;
 mod mention_picker;
@@ -68,6 +69,9 @@ actions!(
     ToggleLineComment,
     // In the editor: select the next place the selected text (or the word at the cursor) occurs, keeping the selections so far.
     SelectNextOccurrence,
+    // In the editor: the find widget, and the same with the replace row open.
+    FindInFile,
+    ReplaceInFile,
     CloseTab,
     MentionProjects,
     ToggleTerminal,

@@ -25,6 +25,9 @@ The terminal info bar and the command palette read the live keymap, so what they
 
 | Shortcut | Action |
 | --- | --- |
+| `⌘F` | Find in the file: a widget at the top right of the editor with the selected text as the query, **Aa** (match case), the match count (`3 of 8`), previous / next (`⇧↵` / `↵`) and close (`Esc`). The matches are highlighted in the text |
+| `⌥⌘F` | Find and replace: the same widget with the replace row open (`↵` replaces one, **All** replaces every match). The arrow at its left opens or closes the row |
+| `⇧⌘F` | Search in project, also while the editor has the focus |
 | `⌘K` `⌘C` | Add line comment to the selected lines |
 | `⌘K` `⌘U` | Remove line comment |
 | `⌘D` | Add the next occurrence: selects the word at the cursor, then each press adds the next place the selected text occurs (wraps around the file). In a terminal, `⌘D` still splits the pane |

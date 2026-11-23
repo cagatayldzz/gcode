@@ -3,9 +3,9 @@
 //! A command is an `Action`, the same one a button, a menu item or a key runs, so the palette adds no command of its own.
 
 use crate::{
-  components::display_path, theme::FONT_SIZE_SM, AddLineComment, AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, GoToFile,
-  NewClaude, NewCodex, NewTerminal, OpenSettings, RemoveLineComment, SaveFile, SearchProject, SelectNextOccurrence, SplitDown, SplitRight,
-  ToggleAgents, ToggleAllChanges, ToggleLineComment, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
+  components::display_path, theme::FONT_SIZE_SM, AddLineComment, AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, FindInFile,
+  GoToFile, NewClaude, NewCodex, NewTerminal, OpenSettings, RemoveLineComment, ReplaceInFile, SaveFile, SearchProject, SelectNextOccurrence,
+  SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleLineComment, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{
   component::{
@@ -70,6 +70,8 @@ fn commands() -> Vec<Entry> {
     entry("Add Line Comment", &["comment out", "#", "//"], AddLineComment),
     entry("Remove Line Comment", &["uncomment", "comment in"], RemoveLineComment),
     entry("Toggle Line Comment", &["comment", "uncomment"], ToggleLineComment),
+    entry("Find in File", &["search", "replace"], FindInFile),
+    entry("Replace in File", &["find", "substitute"], ReplaceInFile),
     entry("Add Next Occurrence", &["select", "multi cursor", "same word"], SelectNextOccurrence),
     entry("Close Tab", &["close file"], CloseTab),
     entry("New Terminal", &["shell", "console"], NewTerminal),

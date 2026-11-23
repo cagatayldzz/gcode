@@ -2,6 +2,7 @@
 
 use crate::close_order::CloseOrder;
 use crate::components::{strip, strip_tab};
+use crate::find_bar::{FindBar, FindClosed};
 use crate::line_comments::{self, CommentMode};
 use crate::minimap::{line_styles, Minimap};
 use crate::occurrences::{next_occurrence, word_at};
@@ -85,6 +86,8 @@ struct ReadyFile {
   _changes: Subscription,
   /// Repaints the status bar when the cursor moves.
   _cursor: Subscription,
+  /// The find and replace widget, made the first time ⌘F is pressed in this file.
+  find: Option<(Entity<FindBar>, Subscription)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -686,6 +689,7 @@ impl EditorPanel {
         overwrite_armed: false,
         _changes: changes,
         _cursor: cursor,
+        find: None,
       },
     );
     self.touch(path);
@@ -814,6 +818,32 @@ impl EditorPanel {
     let Some(found) = next_occurrence(&text, &text[origin.clone()], from) else { return true };
     state.update(cx, |state, cx| state.add_selection(found.clone(), cx));
     self.occurrences = Some((path, origin, found.end));
+    true
+  }
+
+  /// Find (⌘F) and Replace (⌥⌘F): shows the find widget of the open file, with the selected text as the query. Does nothing unless
+  /// the file's editor (or its widget) has the focus.
+  pub fn open_find(&mut self, replace: bool, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    let Some(path) = self.tabs.current().filter(|_| !self.report_active).cloned() else { return false };
+    let Some(file) = self.files.get_mut(&path) else { return false };
+    let state = file.state.clone();
+    if !state.read(cx).focus_handle(cx).contains_focused(window, cx) && !file.find.as_ref().is_some_and(|(bar, _)| bar.read(cx).is_visible()) {
+      return false;
+    }
+    let bar = match &file.find {
+      Some((bar, _)) => bar.clone(),
+      None => {
+        let bar = cx.new(|cx| FindBar::new(state.clone(), window, cx));
+        let editor = state.clone();
+        let closed = cx.subscribe_in(&bar, window, move |_, _, _: &FindClosed, window, cx| {
+          window.focus(&editor.read(cx).focus_handle(cx), cx);
+        });
+        file.find = Some((bar.clone(), closed));
+        bar
+      }
+    };
+    bar.update(cx, |bar, cx| bar.open(replace, window, cx));
+    cx.notify();
     true
   }
 
@@ -1116,13 +1146,20 @@ impl Render for EditorPanel {
                   .flex()
                   .size_full()
                   .child(
-                    div().flex_1().min_w_0().h_full().cursor_text().child(
-                      Editor::new(&file.state)
-                        .readonly(self.read_only || self.replacement_files.contains(path))
-                        .appearance(false)
-                        .bordered(false)
-                        .size_full(),
-                    ),
+                    div()
+                      .flex_1()
+                      .min_w_0()
+                      .h_full()
+                      .relative()
+                      .cursor_text()
+                      .child(
+                        Editor::new(&file.state)
+                          .readonly(self.read_only || self.replacement_files.contains(path))
+                          .appearance(false)
+                          .bordered(false)
+                          .size_full(),
+                      )
+                      .children(file.find.as_ref().map(|(bar, _)| bar.clone())),
                   )
                   .child(file.minimap.clone())
                   .into_any_element()
