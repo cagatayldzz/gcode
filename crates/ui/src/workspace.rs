@@ -103,14 +103,17 @@ const BADGE_OVERHANG: Pixels = px(4.);
 /// The width of the bar at the far left that chooses the view of the sidebar.
 const ACTIVITY_BAR_WIDTH: Pixels = px(56.);
 
-/// The width of the branch menu and of a category's project list.
-const MENU_WIDTH: Pixels = px(280.);
+/// The width of the branch menu.
+const MENU_WIDTH: Pixels = px(380.);
 
 /// The width of the project menu: wider, as each project also shows what is waiting in it.
 const PROJECT_MENU_WIDTH: Pixels = px(380.);
 
-/// How tall the branch list and a category's project list get before they scroll.
+/// How tall the lists of the project menu get before they scroll, and the least the branch menu's lists are.
 const MENU_LIST_MAX_HEIGHT: Pixels = px(320.);
+
+/// How many of the most recently changed branches the branch menu lists as recent.
+const RECENT_BRANCHES: usize = 5;
 
 /// How often the toolbar redraws while git reports its progress.
 /// How long the fill of a finished push, pull or fetch takes to reach the right edge.
@@ -402,6 +405,8 @@ pub struct Workspace {
   remote_runs: usize,
   /// The branch menu is open, with the local branches it lists and the field that filters them.
   branch_menu_open: bool,
+  /// Where the branch button is in the window, so that its menu can reach from the button's bottom to the window's.
+  branch_trigger_bounds: Rc<Cell<Bounds<Pixels>>>,
   branches: Vec<ws_git::BranchEntry>,
   branch_filter: Entity<InputState>,
   /// Narrows the list of changed files by name.
@@ -547,6 +552,7 @@ impl Workspace {
       remote_finish: None,
       remote_runs: 0,
       branch_menu_open: false,
+      branch_trigger_bounds: Rc::default(),
       branches: Vec::new(),
       branch_filter: branch_filter.clone(),
       changes_filter: changes_filter.clone(),

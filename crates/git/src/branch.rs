@@ -22,6 +22,10 @@ pub struct BranchEntry {
   pub name: String,
   /// The remote that has this branch when there is no local branch of the name yet; switching creates the local one.
   pub remote: Option<String>,
+  /// When the branch's latest commit was made, in seconds since the epoch: the last time work landed on it.
+  pub time: Option<i64>,
+  /// The repository's default branch: the one the remote's `HEAD` points at (else `main`, `master` or `develop`, whichever exists).
+  pub default: bool,
 }
 
 /// What to do with uncommitted changes when switching to another branch.
@@ -62,26 +66,44 @@ fn checked(output: Output) -> Result<String, String> {
 /// The local branches, and the branches only a remote has, sorted by name. A remote branch a local one stands for is not listed twice.
 pub fn branch_entries(path: &Path) -> Result<Vec<BranchEntry>, String> {
   let repository = Repository::discover(path).map_err(message)?;
-  let mut locals = HashSet::new();
-  let mut remotes: Vec<(String, String)> = Vec::new();
+  let mut locals: Vec<(String, Option<i64>)> = Vec::new();
+  let mut remotes: Vec<(String, String, Option<i64>)> = Vec::new();
   for (branch, kind) in repository.branches(None).map_err(message)?.filter_map(Result::ok) {
     let Some(name) = branch.name().ok().flatten().map(str::to_string) else { continue };
+    let time = branch.get().peel_to_commit().ok().map(|commit| commit.time().seconds());
     if kind == BranchType::Local {
-      locals.insert(name);
+      locals.push((name, time));
     } else if let Some((remote, short)) = name.split_once('/').filter(|(_, short)| *short != "HEAD") {
-      remotes.push((remote.to_string(), short.to_string()));
+      remotes.push((remote.to_string(), short.to_string(), time));
     }
   }
-  let mut entries: Vec<BranchEntry> = locals.iter().map(|name| BranchEntry { name: name.clone(), remote: None }).collect();
-  let mut seen = locals;
-  remotes.sort_by_key(|(remote, _)| (remote != "origin", remote.clone()));
-  for (remote, short) in remotes {
+  let mut seen: HashSet<String> = locals.iter().map(|(name, _)| name.clone()).collect();
+  let mut entries: Vec<BranchEntry> = locals.into_iter().map(|(name, time)| BranchEntry { name, remote: None, time, default: false }).collect();
+  remotes.sort_by_key(|(remote, _, _)| (remote != "origin", remote.clone()));
+  for (remote, short, time) in remotes {
     if seen.insert(short.clone()) {
-      entries.push(BranchEntry { name: short, remote: Some(remote) });
+      entries.push(BranchEntry { name: short, remote: Some(remote), time, default: false });
     }
   }
   entries.sort_by_key(|entry| entry.name.to_lowercase());
+  if let Some(name) = default_branch_name(&repository, &entries) {
+    if let Some(entry) = entries.iter_mut().find(|entry| entry.name == name) {
+      entry.default = true;
+    }
+  }
   Ok(entries)
+}
+
+/// The name of the default branch: where `origin/HEAD` points, else the first of `main`, `master`, `develop` the list has.
+fn default_branch_name(repository: &Repository, entries: &[BranchEntry]) -> Option<String> {
+  let pointed = repository.remotes().ok()?.iter().flatten().flatten().find_map(|remote| {
+    let reference = repository.find_reference(&format!("refs/remotes/{remote}/HEAD")).ok()?;
+    let target = reference.symbolic_target().ok()??;
+    target.strip_prefix(&format!("refs/remotes/{remote}/")).map(str::to_string)
+  });
+  pointed
+    .filter(|name| entries.iter().any(|entry| &entry.name == name))
+    .or_else(|| ["main", "master", "develop"].into_iter().find(|name| entries.iter().any(|entry| entry.name == *name)).map(str::to_string))
 }
 
 /// Makes a local branch that follows a remote one and switches to it, like `git switch <name>` does when only a remote has it.

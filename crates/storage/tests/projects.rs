@@ -227,6 +227,33 @@ fn favorites_are_starred_listed_in_order_and_survive_a_save() {
 }
 
 #[test]
+fn starred_branches_belong_to_their_project_and_survive_a_save() {
+  let mut list = ProjectList::default();
+  list.add(PathBuf::from("/work/a"));
+  list.add(PathBuf::from("/work/b"));
+  let (a, b) = (PathBuf::from("/work/a"), PathBuf::from("/work/b"));
+  list.set_favorite_branch(&a, "develop", true);
+  list.set_favorite_branch(&a, "develop", true);
+  list.set_favorite_branch(&a, "feature/x", true);
+  list.set_favorite_branch(&b, "main", true);
+  list.set_favorite_branch(&PathBuf::from("/work/missing"), "main", true);
+  assert_eq!(list.favorite_branches(&a), ["develop", "feature/x"], "a branch is starred once");
+  assert_eq!(list.favorite_branches(&b), ["main"]);
+
+  let dir = std::env::temp_dir().join(format!("ws-projects-branches-{}", std::process::id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  let file = dir.join("projects.json");
+  list.save(&file).unwrap();
+  let mut loaded = ProjectList::load(&file);
+  assert_eq!(loaded.favorite_branches(&a), ["develop", "feature/x"]);
+  loaded.set_favorite_branch(&a, "develop", false);
+  assert_eq!(loaded.favorite_branches(&a), ["feature/x"]);
+  std::fs::write(&file, r#"{"projects": ["/work/a", {"path": "/work/b"}]}"#).unwrap();
+  assert!(ProjectList::load(&file).favorite_branches(&a).is_empty(), "files from before starred branches have none");
+  std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn relocating_a_project_keeps_its_look_and_place() {
   let mut list = ProjectList::default();
   list.add(PathBuf::from("/work/a"));

@@ -2,6 +2,7 @@
 
 use super::*;
 use gpui_kit::component::text::TextView;
+use gpui_kit::component::ElementExt as _;
 
 impl Workspace {
   /// Shows repository status, the selectable project path, and the open file status.
@@ -39,6 +40,7 @@ impl Workspace {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     let current = SharedString::from(current.to_string());
+    let trigger_bounds = self.branch_trigger_bounds.clone();
     let trigger = Button::new("branch-trigger")
       .custom(
         ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.rail_item_hover).active(palette.rail_item_hover),
@@ -66,8 +68,22 @@ impl Workspace {
           )
           .child(Icon::new(IconName::ChevronDown).size_4().text_color(theme.muted_foreground)),
       )
-      .tooltip("Switch branch");
+      .tooltip("Switch branch")
+      .on_prepaint({
+        let trigger_bounds = trigger_bounds.clone();
+        move |bounds, _, _| trigger_bounds.set(bounds)
+      });
+    // The popover has no padding of its own: the lists' scrollbars then run along the menu's right edge, and the padding sits
+    // inside the header and inside the lists, so a scrollbar never covers a row.
     Popover::new("branch-menu")
+      .p_0()
+      .rounded_none()
+      .shadow_none()
+      .border_1()
+      .border_t_0()
+      .border_color(theme.border)
+      // The menu touches its button: the kit leaves a gap of a quarter of a rem by default.
+      .offset(Pixels::ZERO)
       .anchor(Anchor::TopLeft)
       .open(self.branch_menu_open)
       .on_open_change({
@@ -75,11 +91,12 @@ impl Workspace {
         move |open, window, cx| workspace.update(cx, |this, cx| this.set_branch_menu(*open, window, cx))
       })
       .trigger(trigger)
-      .content(move |_, _, cx| {
+      .content(move |_, window, cx| {
         let theme = cx.theme().clone();
         let palette = colors(cx);
-        let (filter, query, branches, tab, hosted, state) = {
+        let (filter, query, branches, tab, hosted, state, starred) = {
           let this = workspace.read(cx);
+          let starred: Vec<String> = this.projects.active.as_ref().map(|path| this.projects.favorite_branches(path).to_vec()).unwrap_or_default();
           (
             this.branch_filter.clone(),
             this.branch_filter.read(cx).value().to_string(),
@@ -87,8 +104,12 @@ impl Workspace {
             this.branch_tab,
             this.hosted_remote(cx).map(|(_, repository)| repository.full_name()),
             this.pull_requests.clone(),
+            starred,
           )
         };
+        // The menu always reaches the bottom of the window, whatever it holds: from the bottom of its button to the window's edge,
+        // less its own two border lines. Its list takes what the header leaves, and scrolls when it holds more.
+        let menu_height = (window.viewport_size().height - trigger_bounds.get().bottom() - px(2.)).max(MENU_LIST_MAX_HEIGHT);
         let lowered = query.trim().to_lowercase();
         let tab = if hosted.is_some() { tab } else { BranchTab::Branches };
 
@@ -111,48 +132,101 @@ impl Workspace {
 
         let body = match tab {
           BranchTab::Branches => {
-            let rows: Vec<AnyElement> = branches
-              .into_iter()
-              .filter(|entry| lowered.is_empty() || entry.name.to_lowercase().contains(&lowered))
-              .map(|entry| {
-                let ws_git::BranchEntry { name, remote } = entry;
-                let selected = name == current.as_ref() && remote.is_none();
-                let workspace = workspace.clone();
-                let menu_workspace = workspace.clone();
-                let (menu_name, menu_remote) = (name.clone(), remote.clone());
-                h_flex()
-                  .id(SharedString::from(format!("branch-{name}")))
-                  .gap_2()
+            // Sections, as in GitHub Desktop: the starred branches, the default one, the five most recently changed, then the rest.
+            let visible: Vec<ws_git::BranchEntry> =
+              branches.into_iter().filter(|entry| lowered.is_empty() || entry.name.to_lowercase().contains(&lowered)).collect();
+            let (favorites, rest): (Vec<_>, Vec<_>) = visible.into_iter().partition(|entry| starred.contains(&entry.name));
+            let (defaults, rest): (Vec<_>, Vec<_>) = rest.into_iter().partition(|entry| entry.default);
+            let mut newest: Vec<&ws_git::BranchEntry> = rest.iter().collect();
+            newest.sort_by_key(|entry| std::cmp::Reverse(entry.time));
+            let recent_names: Vec<String> = newest.into_iter().take(RECENT_BRANCHES).map(|entry| entry.name.clone()).collect();
+            let (recent, others): (Vec<_>, Vec<_>) = rest.into_iter().partition(|entry| recent_names.contains(&entry.name));
+            let make_row = |entry: &ws_git::BranchEntry| -> AnyElement {
+              let ws_git::BranchEntry { name, remote, time, .. } = entry.clone();
+              let favorite = starred.contains(&name);
+              let (star_workspace, star_name) = (workspace.clone(), name.clone());
+              let selected = name == current.as_ref() && remote.is_none();
+              let workspace = workspace.clone();
+              let menu_workspace = workspace.clone();
+              let (menu_name, menu_remote) = (name.clone(), remote.clone());
+              h_flex()
+                .id(SharedString::from(format!("branch-{name}")))
+                .gap_2()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .items_center()
+                .cursor_pointer()
+                .hover(|row| row.bg(palette.hover))
+                // The star, at the left: filled for a starred branch, an outline otherwise.
+                .child(
+                  div()
+                    .id(SharedString::from(format!("branch-star-{name}")))
+                    .size_6()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .hover(|star| star.bg(palette.hover))
+                    .when(!favorite, |star| star.opacity(0.5))
+                    .tooltip(move |window, cx| Tooltip::new(if favorite { "Remove from favorites" } else { "Add to favorites" }).build(window, cx))
+                    .child(Icon::empty().path(if favorite { "icons/star-fill.svg" } else { "icons/star.svg" }).size_4().text_color(if favorite {
+                      palette.modified
+                    } else {
+                      theme.muted_foreground
+                    }))
+                    .on_click(move |_, _, cx| {
+                      // The click must not also switch the branch.
+                      cx.stop_propagation();
+                      star_workspace.update(cx, |this, cx| this.toggle_favorite_branch(&star_name, cx));
+                    }),
+                )
+                .child(div().size_4().flex_none().when(selected, |mark| mark.child(Icon::new(IconName::Check).size_4())))
+                .child(Label::new(name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+                .when_some(remote.clone(), |row, remote| {
+                  row.child(Label::new(remote).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).flex_none())
+                })
+                // When work last landed on the branch: its latest commit.
+                .when_some(time, |row, time| {
+                  row.child(Label::new(ago_long(time)).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).flex_none())
+                })
+                .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.switch_branch(name.clone(), window, cx)))
+                .context_menu(move |menu, _, _| {
+                  let (rename_workspace, rename_name) = (menu_workspace.clone(), menu_name.clone());
+                  let (delete_workspace, delete_name, delete_remote) = (menu_workspace.clone(), menu_name.clone(), menu_remote.clone());
+                  menu
+                    .item(
+                      PopupMenuItem::new("Rename…")
+                        .icon(Icon::empty().path("icons/pencil.svg"))
+                        .disabled(menu_remote.is_some())
+                        .on_click(move |_, window, cx| rename_workspace.update(cx, |this, cx| this.rename_branch(rename_name.clone(), window, cx))),
+                    )
+                    .separator()
+                    .item(PopupMenuItem::new("Delete…").icon(Icon::empty().path("icons/trash.svg")).on_click(move |_, window, cx| {
+                      delete_workspace.update(cx, |this, cx| this.confirm_delete_branch(delete_name.clone(), delete_remote.clone(), window, cx))
+                    }))
+                })
+                .into_any_element()
+            };
+            let mut rows: Vec<AnyElement> = Vec::new();
+            let sections = [("Favorites", favorites), ("Default Branch", defaults), ("Recent Branches", recent), ("Other Branches", others)];
+            for (label, entries) in sections {
+              if entries.is_empty() {
+                continue;
+              }
+              rows.push(
+                Label::new(label)
                   .px_2()
-                  .py_1()
-                  .rounded_md()
-                  .items_center()
-                  .cursor_pointer()
-                  .hover(|row| row.bg(palette.hover))
-                  .child(div().size_4().flex_none().when(selected, |mark| mark.child(Icon::new(IconName::Check).size_4())))
-                  .child(Label::new(name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
-                  .when_some(remote.clone(), |row, remote| {
-                    row.child(Label::new(remote).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).flex_none())
-                  })
-                  .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.switch_branch(name.clone(), window, cx)))
-                  .context_menu(move |menu, _, _| {
-                    let (rename_workspace, rename_name) = (menu_workspace.clone(), menu_name.clone());
-                    let (delete_workspace, delete_name, delete_remote) = (menu_workspace.clone(), menu_name.clone(), menu_remote.clone());
-                    menu
-                      .item(
-                        PopupMenuItem::new("Rename…")
-                          .icon(Icon::empty().path("icons/pencil.svg"))
-                          .disabled(menu_remote.is_some())
-                          .on_click(move |_, window, cx| rename_workspace.update(cx, |this, cx| this.rename_branch(rename_name.clone(), window, cx))),
-                      )
-                      .separator()
-                      .item(PopupMenuItem::new("Delete…").icon(Icon::empty().path("icons/trash.svg")).on_click(move |_, window, cx| {
-                        delete_workspace.update(cx, |this, cx| this.confirm_delete_branch(delete_name.clone(), delete_remote.clone(), window, cx))
-                      }))
-                  })
-                  .into_any_element()
-              })
-              .collect();
+                  .pt_2()
+                  .text_size(FONT_SIZE_SM)
+                  .font_weight(FontWeight::SEMIBOLD)
+                  .text_color(theme.muted_foreground)
+                  .into_any_element(),
+              );
+              rows.extend(entries.iter().map(&make_row));
+            }
             let new_branch = {
               let (workspace, suggestion) = (workspace.clone(), query.trim().to_string());
               Button::new("branch-create")
@@ -162,15 +236,18 @@ impl Workspace {
             };
             v_flex()
               .gap_2()
-              .child(h_flex().gap_2().items_center().child(div().flex_1().child(crate::components::soft_input(&filter, cx))).child(new_branch))
+              .flex_1()
+              .min_h_0()
+              .child(h_flex().gap_2().items_center().px_3().child(div().flex_1().child(crate::components::soft_input(&filter, cx))).child(new_branch))
               .child(
-                v_flex()
-                  .id("branch-list")
-                  .max_h(MENU_LIST_MAX_HEIGHT)
-                  .overflow_y_scrollbar()
-                  .gap_0p5()
-                  .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground)))
-                  .children(rows),
+                div().id("branch-list").flex_1().min_h_0().overflow_y_scrollbar().child(
+                  v_flex()
+                    .gap_0p5()
+                    .px_3()
+                    .pb_3()
+                    .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground)))
+                    .children(rows),
+                ),
               )
               .into_any_element()
           }
@@ -232,12 +309,11 @@ impl Workspace {
                 } else if shown.is_empty() {
                   Label::new("No matching pull requests").px_2().py_1().text_color(theme.muted_foreground).into_any_element()
                 } else {
-                  v_flex()
+                  div()
                     .id("pull-request-list")
-                    .max_h(MENU_LIST_MAX_HEIGHT)
+                    .max_h(menu_height)
                     .overflow_y_scrollbar()
-                    .gap_0p5()
-                    .children(shown.into_iter().map(|request| {
+                    .child(v_flex().gap_0p5().px_3().children(shown.into_iter().map(|request| {
                       let url = request.url.clone();
                       v_flex()
                         .id(SharedString::from(format!("pull-request-{}", request.url)))
@@ -261,7 +337,7 @@ impl Workspace {
                             .text_ellipsis(),
                         )
                         .on_click(move |_, _, cx| cx.open_url(&url))
-                    }))
+                    })))
                     .into_any_element()
                 }
               }
@@ -277,14 +353,14 @@ impl Workspace {
             };
             v_flex()
               .gap_2()
-              .child(h_flex().gap_2().items_center().child(div().flex_1().child(crate::components::soft_input(&filter, cx))).child(refresh))
-              .child(list)
+              .child(h_flex().gap_2().items_center().px_3().child(div().flex_1().child(crate::components::soft_input(&filter, cx))).child(refresh))
+              .child(div().child(list))
               .child(div().h_px().bg(palette.border))
-              .child(create)
+              .child(div().px_3().pb_3().child(create))
               .into_any_element()
           }
         };
-        v_flex().w(MENU_WIDTH).gap_2().children(tabs).child(body)
+        v_flex().w(MENU_WIDTH).h(menu_height).pt_3().gap_2().children(tabs.map(|tabs| div().px_3().child(tabs))).child(body)
       })
   }
 

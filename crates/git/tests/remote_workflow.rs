@@ -158,6 +158,23 @@ fn remote_only_branches_are_listed_and_switching_creates_a_tracking_branch() {
 }
 
 #[test]
+fn branches_say_when_they_last_changed_and_which_one_is_the_default() {
+  let remote = Remote::new("branch-times");
+  git(&remote.other, &["checkout", "-b", "teammate-work"]);
+  commit_file(&remote.other, "t.txt", "t", "teammate branch");
+  git(&remote.other, &["push", "-u", "origin", "teammate-work"]);
+  ws_git::fetch(&remote.mine, None, |_| {}).unwrap();
+
+  let entries = ws_git::branch_entries(&remote.mine).unwrap();
+  let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+  assert!(
+    entries.iter().all(|entry| entry.time.is_some_and(|time| (now - time).abs() < 600)),
+    "the tip commit's time, for local and remote branches"
+  );
+  assert_eq!(entries.iter().filter(|entry| entry.default).map(|entry| entry.name.as_str()).collect::<Vec<_>>(), ["main"]);
+}
+
+#[test]
 fn a_branch_is_renamed_and_deleted_but_not_the_one_checked_out() {
   let remote = Remote::new("rename-delete");
   ws_git::create_branch(&remote.mine, "old-name").unwrap();

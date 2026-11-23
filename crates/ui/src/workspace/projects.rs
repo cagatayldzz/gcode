@@ -124,6 +124,15 @@ impl Workspace {
     cx.notify();
   }
 
+  /// Stars a branch of the open project, or takes its star away: starred branches are listed first in the branch menu.
+  pub(crate) fn toggle_favorite_branch(&mut self, branch: &str, cx: &mut Context<Self>) {
+    let Some(path) = self.projects.active.clone() else { return };
+    let favorite = self.projects.favorite_branches(&path).iter().any(|name| name == branch);
+    self.projects.set_favorite_branch(&path, branch, !favorite);
+    self.persist_projects();
+    cx.notify();
+  }
+
   /// Makes a category from a project, unnamed: the menu's way to start one without a second project.
   pub(crate) fn new_category(&mut self, project: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
     self.ask_name("New category", "Category name", "Press Enter to add the category.", "", window, cx, move |this, name, _, cx| {

@@ -49,7 +49,7 @@ file; `ProjectIndex::open` uses the saved one while nothing changed, else walks 
 
 | File | Type | Written |
 | --- | --- | --- |
-| `projects.json` | `ProjectList` (project paths with name, icon, color and category; the categories and whether each is folded; favorites; the active project) | when a project is added or selected, or a category changes |
+| `projects.json` | `ProjectList` (project paths with name, icon, color and category; the categories and whether each is folded; favorites and each project's starred branches; the active project) | when a project is added or selected, or a category changes |
 | `accounts.json` | `Accounts` (service, host, organization and user name; **never a token**) | when an account is connected or disconnected, or an issue is set or cleared |
 | `preferences.json` | `Preferences` | on each settings change |
 
@@ -73,7 +73,7 @@ file; `ProjectIndex::open` uses the saved one while nothing changed, else walks 
 ```json
 {
   "projects": [
-    { "path": "/path/to/a", "category": null, "color": "#8b7bff", "icon": "rocket", "favorite": true },
+    { "path": "/path/to/a", "category": null, "color": "#8b7bff", "icon": "rocket", "favorite": true, "favorite_branches": ["develop"] },
     { "path": "/path/to/b", "category": "category-1", "name": "Billing" }
   ],
   "categories": [{ "id": "category-1", "name": "", "collapsed": false }],

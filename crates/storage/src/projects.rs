@@ -18,11 +18,13 @@ pub struct Project {
   pub color: Option<String>,
   /// Starred by the user: listed first in the project menu.
   pub favorite: bool,
+  /// Branches the user starred in this project: listed first in the branch menu. Kept here, not in the repository.
+  pub favorite_branches: Vec<String>,
 }
 
 impl Project {
   pub fn new(path: PathBuf) -> Self {
-    Self { path, category: None, name: None, icon: None, color: None, favorite: false }
+    Self { path, category: None, name: None, icon: None, color: None, favorite: false, favorite_branches: Vec::new() }
   }
 
   /// The folder's name.
@@ -77,6 +79,11 @@ impl ProjectList {
               icon: text(object, "icon"),
               color: text(object, "color"),
               favorite: object.get("favorite").and_then(Value::as_bool).unwrap_or(false),
+              favorite_branches: object
+                .get("favorite_branches")
+                .and_then(Value::as_array)
+                .map(|names| names.iter().filter_map(|name| name.as_str().map(str::to_owned)).collect())
+                .unwrap_or_default(),
             }),
             _ => None,
           })
@@ -112,6 +119,7 @@ impl ProjectList {
           "icon": project.icon,
           "color": project.color,
           "favorite": project.favorite,
+          "favorite_branches": project.favorite_branches,
         })).collect::<Vec<_>>(),
       "categories": self.categories.iter().map(|category| json!({ "id": category.id, "name": category.name, "collapsed": category.collapsed })).collect::<Vec<_>>(),
       "active": self.active.as_ref().map(|path| path.to_string_lossy()),
@@ -180,6 +188,20 @@ impl ProjectList {
     if let Some(project) = self.projects.iter_mut().find(|project| project.path == path) {
       project.favorite = favorite;
     }
+  }
+
+  /// Stars or unstars a branch of a project.
+  pub fn set_favorite_branch(&mut self, path: &Path, branch: &str, favorite: bool) {
+    let Some(project) = self.projects.iter_mut().find(|project| project.path == path) else { return };
+    project.favorite_branches.retain(|name| name != branch);
+    if favorite {
+      project.favorite_branches.push(branch.to_string());
+    }
+  }
+
+  /// The starred branches of a project.
+  pub fn favorite_branches(&self, path: &Path) -> &[String] {
+    self.projects.iter().find(|project| project.path == path).map_or(&[], |project| project.favorite_branches.as_slice())
   }
 
   /// The starred projects, in list order.
