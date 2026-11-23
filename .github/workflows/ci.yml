@@ -44,7 +44,10 @@ jobs:
         with:
           shared-key: interface
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Check the interface crates
-        run: cargo check --locked -p ws-ui -p ws-app
+          # A failing test must not leave the next run with a cold cache (a cold run is about 13 minutes).
+          cache-on-failure: true
+      # One build profile for both steps: `cargo check` would compile every dependency a second time.
+      - name: Build the interface crates
+        run: cargo test --locked -p ws-ui -p ws-app --no-run
       - name: Open and draw the window headlessly
         run: cargo test --locked -p ws-ui --test window_render
