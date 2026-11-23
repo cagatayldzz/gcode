@@ -24,12 +24,21 @@
     <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
       <feGaussianBlur stdDeviation="14"/>
     </filter>
+    <clipPath id="upper"><polygon points="0,0 1004,0 0,1004"/></clipPath>
+    <clipPath id="lower"><polygon points="664,380 1500,380 1500,1500 0,1500 0,1044"/></clipPath>
+    <mask id="cut" maskUnits="userSpaceOnUse" x="200" y="200" width="624" height="624">
+      <rect x="200" y="200" width="624" height="624" fill="#fff"/>
+      <circle cx="512" cy="512" r="132" fill="#000"/>
+      <rect x="512" y="380" width="320" height="72" fill="#000"/>
+    </mask>
   </defs>
   <rect x="100" y="112" width="824" height="824" rx="185" fill="#020611" opacity="0.45" filter="url(#soft)"/>
   <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
   <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#glow)"/>
   <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="url(#rim)" stroke-width="4"/>
-  <!-- The two halves share one silhouette, with a clear seam at small sizes. -->
-  <path d="M273 276 H397 Q408 276 413 286 L502 460 V747 Q502 759 496 748 L263 292 Q255 276 273 276 Z" fill="url(#left)"/>
-  <path d="M522 460 L611 286 Q616 276 627 276 H751 Q769 276 761 292 L528 748 Q522 759 522 747 Z" fill="url(#right)"/>
+  <!-- A disc cut along a diagonal seam, white above and blue below, with an aperture that makes it a "G". -->
+  <g mask="url(#cut)">
+    <circle cx="512" cy="512" r="280" fill="url(#left)" clip-path="url(#upper)"/>
+    <circle cx="512" cy="512" r="280" fill="url(#right)" clip-path="url(#lower)"/>
+  </g>
 </svg>
