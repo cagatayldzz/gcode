@@ -402,6 +402,11 @@ impl Workspace {
             let source = if pending { "incoming changes".into() } else { branch.unwrap_or_default().into() };
             let dialog = cx.new(|_| MergeDialog::new(root.clone(), source, state));
             let subscription = cx.subscribe_in(&dialog, window, |this, dialog, event, window, cx| {
+              if let MergeEvent::OpenFile(path) = event {
+                window.close_dialog(cx);
+                this.open_changed_file(&OpenChangedFile(path.clone()), window, cx);
+                return;
+              }
               let source = dialog.read(cx).source().clone();
               window.close_dialog(cx);
               this.merge_dialog = None;
@@ -409,6 +414,7 @@ impl Workspace {
               match event {
                 MergeEvent::Completed => this.merge_completed(Some(source.as_str()), window, cx),
                 MergeEvent::Aborted => window.push_notification(Notification::info("Merge aborted."), cx),
+                MergeEvent::OpenFile(_) => {}
               }
               cx.notify();
             });

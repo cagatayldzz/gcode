@@ -412,7 +412,7 @@ impl Workspace {
       .border_t_1()
       .border_color(palette.border)
       .bg(palette.surface)
-      .child(Input::new(&self.commit_summary).small().bg(palette.background).border_color(palette.border))
+      .child(Input::new(&self.commit_summary).bg(palette.background).border_color(palette.border))
       .child(
         div()
           .relative()
@@ -506,7 +506,7 @@ impl Workspace {
       GitView::Changes => v_flex()
         .flex_1()
         .min_h_0()
-        .child(div().flex_none().px_3().py_2().child(crate::components::soft_input(&self.changes_filter, cx).small().bg(palette.background)))
+        .child(div().flex_none().px_3().py_2().child(crate::components::soft_input(&self.changes_filter, cx).bg(palette.background)))
         .child(
           h_flex()
             .id("changes-header")
@@ -772,7 +772,7 @@ impl Workspace {
       None => h_flex()
         .gap_1()
         .items_center()
-        .child(div().flex_1().child(crate::components::soft_input(&self.compare_filter, cx).small().prefix(branch_icon())))
+        .child(div().flex_1().child(crate::components::soft_input(&self.compare_filter, cx).prefix(branch_icon())))
         .when(self.compare_open, |row| {
           row.child(
             Button::new("compare-close")
