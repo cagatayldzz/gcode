@@ -3,6 +3,15 @@
 use git2::{build::CheckoutBuilder, DiffFormat, DiffOptions, Repository, Status, StatusOptions};
 use std::path::{Path, PathBuf};
 
+mod branch;
+pub use branch::{
+  branch_entries, delete_branch, delete_remote_branch, discard_stash, has_changes, has_stash, rename_branch, restore_stash, stash_changes,
+  switch_branch_with, upstream_remote, BranchEntry, Changes, SWITCH_OVERWRITE,
+};
+
+mod commit_actions;
+pub use commit_actions::{add_to_gitignore, branch_from_commit, cherry_pick, revert_commit};
+
 mod compare;
 
 mod merge;
@@ -346,11 +355,22 @@ pub fn discard_changes(path: &Path, file: &Path) -> Result<(), String> {
 /// The commit is built from the last commit plus the chosen files, so what was staged for other files is left out of it.
 /// Afterwards the index of the chosen files matches the commit, like after `git commit <files>`.
 pub fn commit(path: &Path, files: &[PathBuf], summary: &str, description: &str) -> Result<String, String> {
+  build_commit(path, files, summary, description, false)
+}
+
+/// Replaces the last commit with one that also has `files` (which may be none, to only change the message), like
+/// `git commit --amend`. A commit a remote branch already has cannot be amended: that would rewrite published history. Returns
+/// the short id of the new commit.
+pub fn amend_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str) -> Result<String, String> {
+  build_commit(path, files, summary, description, true)
+}
+
+fn build_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str, amend: bool) -> Result<String, String> {
   let summary = summary.trim();
   if summary.is_empty() {
     return Err("Write a summary for the commit.".into());
   }
-  if files.is_empty() {
+  if files.is_empty() && !amend {
     return Err("Choose at least one file to commit.".into());
   }
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
@@ -360,6 +380,15 @@ pub fn commit(path: &Path, files: &[PathBuf], summary: &str, description: &str) 
   let workdir = repository.workdir().ok_or("The repository has no working folder.")?.to_path_buf();
   let signature = repository.signature().map_err(|_| "Set user.name and user.email in your Git configuration first.".to_string())?;
   let parent = repository.head().ok().and_then(|head| head.peel_to_commit().ok());
+  if amend {
+    let last = parent.as_ref().ok_or("There is no commit to amend.")?;
+    if last.parent_count() > 1 {
+      return Err("A merge commit cannot be amended here.".into());
+    }
+    if on_remote(&repository, last.id()) {
+      return Err("This commit is already on the remote; amending it would rewrite published history.".into());
+    }
+  }
 
   // A copy of the last commit's tree in memory, with the chosen files applied.
   let mut tree_index = git2::Index::new().map_err(|error| error.message().to_string())?;
@@ -380,15 +409,28 @@ pub fn commit(path: &Path, files: &[PathBuf], summary: &str, description: &str) 
   }
   let tree_id = tree_index.write_tree_to(&repository).map_err(|error| error.message().to_string())?;
   let tree = repository.find_tree(tree_id).map_err(|error| error.message().to_string())?;
-  if parent.as_ref().is_some_and(|parent| parent.tree_id() == tree_id) {
+  if !amend && parent.as_ref().is_some_and(|parent| parent.tree_id() == tree_id) {
     return Err("The chosen files have no changes to commit.".into());
   }
   let message = match description.trim() {
     "" => summary.to_string(),
     description => format!("{summary}\n\n{description}"),
   };
-  let parents: Vec<&git2::Commit> = parent.iter().collect();
-  let id = repository.commit(Some("HEAD"), &signature, &signature, &message, &tree, &parents).map_err(|error| error.message().to_string())?;
+  let before_last: Option<git2::Commit> = if amend { parent.as_ref().and_then(|last| last.parent(0).ok()) } else { None };
+  let parents: Vec<&git2::Commit> = if amend { before_last.iter().collect() } else { parent.iter().collect() };
+  // An amended commit does not have the current tip as its parent, so the branch is moved to it afterwards.
+  let id = repository
+    .commit(if amend { None } else { Some("HEAD") }, &signature, &signature, &message, &tree, &parents)
+    .map_err(|error| error.message().to_string())?;
+  if amend {
+    let head = repository.head().map_err(|error| error.message().to_string())?;
+    if head.is_branch() {
+      let name = head.name().map_err(|error| error.message().to_string())?.to_string();
+      repository.reference(&name, id, true, "commit (amend)").map_err(|error| error.message().to_string())?;
+    } else {
+      repository.set_head_detached(id).map_err(|error| error.message().to_string())?;
+    }
+  }
   real_index.write().map_err(|error| error.message().to_string())?;
   Ok(id.to_string().chars().take(7).collect())
 }
@@ -439,13 +481,17 @@ pub fn switch_branch(path: &Path, name: &str) -> Result<(), String> {
   if repository.state() == git2::RepositoryState::Merge {
     return Err("Finish or abort the current merge first.".into());
   }
+  // A branch only a remote has gets a local branch that follows it, like `git switch` does.
+  if repository.find_branch(name, git2::BranchType::Local).is_err() {
+    branch::track_remote_branch(&repository, name)?;
+  }
   let branch = repository.find_branch(name, git2::BranchType::Local).map_err(|_| format!("There is no branch named {name}."))?;
   let commit = branch.get().peel_to_commit().map_err(|error| error.message().to_string())?;
   let mut checkout = CheckoutBuilder::new();
   checkout.safe();
   repository.checkout_tree(commit.as_object(), Some(&mut checkout)).map_err(|error| {
     if error.code() == git2::ErrorCode::Conflict {
-      format!("Your changes would be overwritten by switching to {name}. Commit or discard them first.")
+      format!("{SWITCH_OVERWRITE} {name}. Commit or discard them first.")
     } else {
       error.message().to_string()
     }
@@ -637,7 +683,7 @@ pub fn fetch(path: &Path, credentials: Option<&Credentials>, mut on_progress: im
   with_login(credentials, |credentials| finish(run_git(path, &["fetch"], credentials, &mut on_progress)?, "git fetch failed."))
 }
 
-/// Brings in the remote's new commits with `git pull`, like GitHub Desktop: a branch that only fell behind moves forward, and one
+/// Brings in the remote's new commits with `git pull`: a branch that only fell behind moves forward, and one
 /// that has commits of its own gets a merge commit. The user's `pull.rebase` setting is honored; without one the pull merges,
 /// instead of asking git to choose. A merge that conflicts stays in progress (see [`read_merge`]) for the conflict resolver, and
 /// the error says so.
@@ -750,6 +796,42 @@ pub fn head_summary(path: &Path) -> Option<String> {
   let repository = Repository::discover(path).ok()?;
   let commit = repository.head().ok()?.peel_to_commit().ok()?;
   commit.summary().ok().flatten().map(str::to_string)
+}
+
+/// People who made recent commits, as `(name, email)`, the person committing excluded: the suggestions for a co-author. Scans at
+/// most `scan` commits and returns at most `limit` people, most recent first.
+pub fn recent_authors(path: &Path, scan: usize, limit: usize) -> Vec<(String, String)> {
+  let Ok(repository) = Repository::discover(path) else { return Vec::new() };
+  let me = repository.signature().ok().and_then(|signature| signature.email().ok().map(str::to_lowercase));
+  let Ok(mut walk) = repository.revwalk() else { return Vec::new() };
+  if walk.push_head().is_err() {
+    return Vec::new();
+  }
+  let mut seen = std::collections::HashSet::new();
+  let mut found = Vec::new();
+  for id in walk.filter_map(Result::ok).take(scan) {
+    let Ok(commit) = repository.find_commit(id) else { continue };
+    let author = commit.author();
+    let (Ok(name), Ok(email)) = (author.name(), author.email()) else { continue };
+    let key = email.to_lowercase();
+    if name.is_empty() || email.is_empty() || Some(&key) == me.as_ref() || !seen.insert(key) {
+      continue;
+    }
+    found.push((name.to_string(), email.to_string()));
+    if found.len() >= limit {
+      break;
+    }
+  }
+  found
+}
+
+/// The summary and the description of the last commit, to fill the commit box when amending.
+pub fn head_message(path: &Path) -> Option<(String, String)> {
+  let repository = Repository::discover(path).ok()?;
+  let commit = repository.head().ok()?.peel_to_commit().ok()?;
+  let message = commit.message().ok()?;
+  let (summary, rest) = message.split_once('\n').unwrap_or((message, ""));
+  Some((summary.trim().to_string(), rest.trim().to_string()))
 }
 
 /// A commit in the history list.

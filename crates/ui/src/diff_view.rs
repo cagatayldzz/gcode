@@ -1,5 +1,5 @@
 //! A diff as the Changes and History views show it: the Kit `Diff` with whole-line red and green backgrounds from the
-//! theme's palette (`Colors::diff_added`, `Colors::diff_removed`), like GitHub Desktop, instead of a tint of the status colors.
+//! theme's palette (`Colors::diff_added`, `Colors::diff_removed`), instead of a tint of the status colors.
 
 use crate::{editor::language_for, theme::colors};
 use gpui_kit::{

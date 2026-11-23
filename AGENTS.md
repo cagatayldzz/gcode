@@ -8,7 +8,7 @@ English for all project-owned identifiers, comments, UI text, logs, tests, docs 
 
 # Layout
 
-Workspace: `apps/*` (executables), `crates/*` (libraries). Dependencies: `apps/vekro` → `app` → `ui` → `terminal`, `git`, `storage`, `index`. Keep `apps/vekro` a thin entry point; put application logic in `crates/*`. `terminal`, `git`, `storage` and `index` never depend on the interface. No `unsafe` (`unsafe_code = "deny"`). Update `docs/architecture.md` when architecture changes (crate boundaries, window layout, files in the data directory).
+Workspace: `apps/*` (executables), `crates/*` (libraries). Dependencies: `apps/vekro` → `app` → `ui` → `terminal`, `git`, `storage`, `index`. Keep `apps/vekro` a thin entry point; put application logic in `crates/*`. `terminal`, `git`, `storage` and `index` never depend on the interface. No `unsafe` (`unsafe_code = "deny"`). Update `docs/architecture/` when architecture changes (crate boundaries, window layout, files in the data directory).
 
 # Interface
 

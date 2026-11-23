@@ -129,3 +129,142 @@ fn a_new_branch_is_published_by_the_first_push() {
   assert_eq!((sync.ahead, sync.behind), (0, 0));
   assert!(git(&remote.root.join("origin.git"), &["branch", "--list", "feature"]).contains("feature"));
 }
+
+#[test]
+fn remote_only_branches_are_listed_and_switching_creates_a_tracking_branch() {
+  let remote = Remote::new("remote-branches");
+  git(&remote.other, &["checkout", "-b", "teammate-work"]);
+  commit_file(&remote.other, "t.txt", "t", "teammate branch");
+  git(&remote.other, &["push", "-u", "origin", "teammate-work"]);
+  vekro_git::fetch(&remote.mine, None, |_| {}).unwrap();
+
+  let entries = vekro_git::branch_entries(&remote.mine).unwrap();
+  let names: Vec<_> = entries.iter().map(|entry| (entry.name.as_str(), entry.remote.as_deref())).collect();
+  assert_eq!(names, [("main", None), ("teammate-work", Some("origin"))]);
+
+  vekro_git::switch_branch(&remote.mine, "teammate-work").unwrap();
+
+  assert_eq!(vekro_git::summary(&remote.mine).unwrap().branch, "teammate-work");
+  assert!(remote.mine.join("t.txt").exists());
+  let sync = vekro_git::summary(&remote.mine).unwrap().sync.unwrap();
+  assert!(sync.upstream);
+  assert_eq!((sync.ahead, sync.behind), (0, 0));
+  assert!(vekro_git::branch_entries(&remote.mine).unwrap().iter().all(|entry| entry.remote.is_none()));
+}
+
+#[test]
+fn a_branch_is_renamed_and_deleted_but_not_the_one_checked_out() {
+  let remote = Remote::new("rename-delete");
+  vekro_git::create_branch(&remote.mine, "old-name").unwrap();
+  vekro_git::switch_branch(&remote.mine, "main").unwrap();
+
+  vekro_git::rename_branch(&remote.mine, "old-name", "new-name").unwrap();
+  assert!(vekro_git::rename_branch(&remote.mine, "new-name", "main").unwrap_err().contains("already exists"));
+  assert!(vekro_git::rename_branch(&remote.mine, "new-name", "bad name").is_err());
+  let names: Vec<_> = vekro_git::branch_entries(&remote.mine).unwrap().into_iter().map(|entry| entry.name).collect();
+  assert_eq!(names, ["main", "new-name"]);
+
+  assert!(vekro_git::delete_branch(&remote.mine, "main").unwrap_err().contains("cannot be deleted"));
+  vekro_git::delete_branch(&remote.mine, "new-name").unwrap();
+  assert_eq!(vekro_git::branch_entries(&remote.mine).unwrap().len(), 1);
+}
+
+#[test]
+fn a_branch_is_deleted_on_the_remote_too() {
+  let remote = Remote::new("delete-remote");
+  vekro_git::create_branch(&remote.mine, "gone").unwrap();
+  commit_file(&remote.mine, "g.txt", "g", "work");
+  vekro_git::push(&remote.mine, None, |_| {}).unwrap();
+  vekro_git::switch_branch(&remote.mine, "main").unwrap();
+  vekro_git::delete_branch(&remote.mine, "gone").unwrap();
+
+  vekro_git::delete_remote_branch(&remote.mine, "origin", "gone", None, |_| {}).unwrap();
+
+  assert!(git(&remote.root.join("origin.git"), &["branch", "--list", "gone"]).is_empty());
+}
+
+#[test]
+fn leaving_changes_stashes_them_on_the_branch_and_they_can_be_restored() {
+  let remote = Remote::new("leave");
+  vekro_git::create_branch(&remote.mine, "feature").unwrap();
+  vekro_git::switch_branch(&remote.mine, "main").unwrap();
+  fs::write(remote.mine.join("a.txt"), "edited\n").unwrap();
+  fs::write(remote.mine.join("new.txt"), "untracked").unwrap();
+
+  vekro_git::switch_branch_with(&remote.mine, "feature", vekro_git::Changes::Leave).unwrap();
+
+  let summary = vekro_git::summary(&remote.mine).unwrap();
+  assert_eq!(summary.branch, "feature");
+  assert!(summary.changes.is_empty(), "the changes were set aside");
+  assert!(vekro_git::has_stash(&remote.mine, "main"));
+  assert!(!vekro_git::has_stash(&remote.mine, "feature"));
+
+  vekro_git::switch_branch_with(&remote.mine, "main", vekro_git::Changes::Leave).unwrap();
+  vekro_git::restore_stash(&remote.mine, "main").unwrap();
+  assert_eq!(fs::read_to_string(remote.mine.join("a.txt")).unwrap(), "edited\n");
+  assert!(remote.mine.join("new.txt").exists());
+  assert!(!vekro_git::has_stash(&remote.mine, "main"));
+}
+
+#[test]
+fn bringing_changes_applies_them_on_the_other_branch_even_when_they_would_collide() {
+  let remote = Remote::new("bring");
+  vekro_git::create_branch(&remote.mine, "feature").unwrap();
+  commit_file(&remote.mine, "a.txt", "one\ntwo\nthree\nfeature line\n", "feature edit");
+  vekro_git::switch_branch(&remote.mine, "main").unwrap();
+  fs::write(remote.mine.join("b.txt"), "carried").unwrap();
+  fs::write(remote.mine.join("a.txt"), "one\ntwo\nthree\nmain line\n").unwrap();
+  assert!(vekro_git::switch_branch(&remote.mine, "feature").unwrap_err().starts_with(vekro_git::SWITCH_OVERWRITE));
+
+  let error = vekro_git::switch_branch_with(&remote.mine, "feature", vekro_git::Changes::Bring).unwrap_err();
+
+  assert!(error.contains("stay stashed on main"), "{error}");
+  assert!(vekro_git::has_stash(&remote.mine, "main"), "nothing was lost");
+
+  vekro_git::discard_stash(&remote.mine, "main").unwrap();
+  assert!(!vekro_git::has_stash(&remote.mine, "main"));
+}
+
+#[test]
+fn bringing_changes_that_do_not_collide_carries_them_over() {
+  let remote = Remote::new("bring-clean");
+  vekro_git::create_branch(&remote.mine, "feature").unwrap();
+  vekro_git::switch_branch(&remote.mine, "main").unwrap();
+  fs::write(remote.mine.join("b.txt"), "carried").unwrap();
+
+  vekro_git::switch_branch_with(&remote.mine, "feature", vekro_git::Changes::Bring).unwrap();
+
+  assert_eq!(vekro_git::summary(&remote.mine).unwrap().branch, "feature");
+  assert_eq!(fs::read_to_string(remote.mine.join("b.txt")).unwrap(), "carried");
+  assert!(!vekro_git::has_stash(&remote.mine, "main"));
+}
+
+#[test]
+fn merging_with_uncommitted_changes_that_do_not_overlap_works() {
+  let remote = Remote::new("merge-dirty");
+  vekro_git::create_branch(&remote.mine, "feature").unwrap();
+  commit_file(&remote.mine, "f.txt", "f", "feature work");
+  vekro_git::switch_branch(&remote.mine, "main").unwrap();
+  fs::write(remote.mine.join("a.txt"), "one\ntwo\nthree\nlocal edit\n").unwrap();
+
+  let outcome = vekro_git::start_merge(&remote.mine, "feature", "main").unwrap();
+
+  assert!(matches!(outcome, vekro_git::MergeOutcome::Finished));
+  assert!(remote.mine.join("f.txt").exists());
+  assert_eq!(fs::read_to_string(remote.mine.join("a.txt")).unwrap(), "one\ntwo\nthree\nlocal edit\n");
+}
+
+#[test]
+fn merging_over_uncommitted_changes_to_the_same_file_is_refused_and_loses_nothing() {
+  let remote = Remote::new("merge-overlap");
+  vekro_git::create_branch(&remote.mine, "feature").unwrap();
+  commit_file(&remote.mine, "a.txt", "one\ntwo\nthree\nfeature\n", "feature edit");
+  vekro_git::switch_branch(&remote.mine, "main").unwrap();
+  fs::write(remote.mine.join("a.txt"), "one\ntwo\nthree\nmine\n").unwrap();
+
+  let error = vekro_git::start_merge(&remote.mine, "feature", "main").unwrap_err();
+
+  assert!(error.contains("overwritten"), "{error}");
+  assert_eq!(fs::read_to_string(remote.mine.join("a.txt")).unwrap(), "one\ntwo\nthree\nmine\n");
+  assert!(!vekro_git::summary(&remote.mine).unwrap().merging);
+}

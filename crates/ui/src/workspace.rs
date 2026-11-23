@@ -70,6 +70,7 @@ use vekro_opencommit::DEFAULT_INSTRUCTIONS;
 use vekro_storage::{Category, Profile, Project, ProjectList, WindowMode, WindowPlacement};
 
 mod accounts;
+mod branches;
 mod changes;
 mod command_palette;
 mod commit;
@@ -130,7 +131,7 @@ const SIDEBAR_WIDTH: Pixels = px(280.);
 const SIDEBAR_MIN_WIDTH: Pixels = px(200.);
 const SIDEBAR_MAX_WIDTH: Pixels = px(960.);
 
-/// Indentation of each tree level, as in VS Code: a child's arrow sits a little right of its parent's, not a full arrow's width.
+/// Indentation of each tree level: a child's arrow sits a little right of its parent's, not a full arrow's width.
 const INDENT: Rems = rems(0.75);
 
 /// The views of the sidebar, in activity-bar order.
@@ -396,8 +397,10 @@ pub struct Workspace {
   remote_runs: usize,
   /// The branch menu is open, with the local branches it lists and the field that filters them.
   branch_menu_open: bool,
-  branches: Vec<String>,
+  branches: Vec<vekro_git::BranchEntry>,
   branch_filter: Entity<InputState>,
+  /// Narrows the list of changed files by name.
+  changes_filter: Entity<InputState>,
   /// The repository menu of the title bar is open.
   projects_menu_open: bool,
   project_filter: Entity<InputState>,
@@ -445,6 +448,7 @@ impl Workspace {
     let commit_summary = cx.new(|cx| InputState::new(window, cx).placeholder("Summary (required)"));
     let commit_description = cx.new(|cx| TextareaState::new(window, cx).placeholder("Description"));
     let branch_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find or create a branch"));
+    let changes_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
     let project_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find a project"));
     let compare_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Select Branch to Compare…"));
     let mut this = Self {
@@ -539,6 +543,7 @@ impl Workspace {
       branch_menu_open: false,
       branches: Vec::new(),
       branch_filter: branch_filter.clone(),
+      changes_filter: changes_filter.clone(),
       projects_menu_open: false,
       project_filter: project_filter.clone(),
       window_save: Task::ready(()),
@@ -561,6 +566,7 @@ impl Workspace {
         cx.subscribe(&commit_summary, |_, _, _: &InputEvent, cx| cx.notify()),
         // The menus list what the filter field matches.
         cx.subscribe(&branch_filter, |_, _, _: &InputEvent, cx| cx.notify()),
+        cx.subscribe(&changes_filter, |_, _, _: &InputEvent, cx| cx.notify()),
         cx.subscribe(&project_filter, |_, _, _: &InputEvent, cx| cx.notify()),
         // Choosing the field lists the branches; typing narrows them; Enter takes the first one.
         cx.subscribe_in(&compare_filter, window, |this, _, event: &InputEvent, window, cx| match event {
@@ -617,7 +623,7 @@ impl Workspace {
         let preferences = &this.settings.read(cx).preferences;
         apply_theme(preferences.theme, preferences.code_font_size, window, cx)
       }),
-      // Changes made in another app (an editor, GitHub Desktop, a terminal) show up as soon as the window is back.
+      // Changes made in another app (an editor, another Git client, a terminal) show up as soon as the window is back.
       _editor: cx.observe(&editor_panel, |_, _, cx| cx.notify()),
       _active_tab: cx.subscribe_in(&editor_panel, window, |this, _, shown: &ActiveTab, window, cx| {
         match shown {

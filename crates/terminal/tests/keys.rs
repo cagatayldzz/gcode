@@ -71,7 +71,7 @@ fn arrows_follow_the_cursor_mode_and_modifiers() {
 }
 
 #[test]
-fn iterm_style_line_and_word_navigation() {
+fn option_and_command_arrows_move_by_word_and_line() {
   let alt = Modifiers { alt: true, ..plain() };
   let command = Modifiers { command: true, ..plain() };
   assert_eq!(encode_key("left", None, alt, false), Some(b"\x1bb".to_vec()));

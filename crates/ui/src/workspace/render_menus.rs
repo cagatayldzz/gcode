@@ -113,10 +113,13 @@ impl Workspace {
           BranchTab::Branches => {
             let rows: Vec<AnyElement> = branches
               .into_iter()
-              .filter(|name| lowered.is_empty() || name.to_lowercase().contains(&lowered))
-              .map(|name| {
-                let selected = name == current.as_ref();
+              .filter(|entry| lowered.is_empty() || entry.name.to_lowercase().contains(&lowered))
+              .map(|entry| {
+                let vekro_git::BranchEntry { name, remote } = entry;
+                let selected = name == current.as_ref() && remote.is_none();
                 let workspace = workspace.clone();
+                let menu_workspace = workspace.clone();
+                let (menu_name, menu_remote) = (name.clone(), remote.clone());
                 h_flex()
                   .id(SharedString::from(format!("branch-{name}")))
                   .gap_2()
@@ -128,7 +131,25 @@ impl Workspace {
                   .hover(|row| row.bg(palette.hover))
                   .child(div().size_4().flex_none().when(selected, |mark| mark.child(Icon::new(IconName::Check).size_4())))
                   .child(Label::new(name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+                  .when_some(remote.clone(), |row, remote| {
+                    row.child(Label::new(remote).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).flex_none())
+                  })
                   .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.switch_branch(name.clone(), window, cx)))
+                  .context_menu(move |menu, _, _| {
+                    let (rename_workspace, rename_name) = (menu_workspace.clone(), menu_name.clone());
+                    let (delete_workspace, delete_name, delete_remote) = (menu_workspace.clone(), menu_name.clone(), menu_remote.clone());
+                    menu
+                      .item(
+                        PopupMenuItem::new("Rename…")
+                          .icon(Icon::empty().path("icons/pencil.svg"))
+                          .disabled(menu_remote.is_some())
+                          .on_click(move |_, window, cx| rename_workspace.update(cx, |this, cx| this.rename_branch(rename_name.clone(), window, cx))),
+                      )
+                      .separator()
+                      .item(PopupMenuItem::new("Delete…").icon(Icon::empty().path("icons/trash.svg")).on_click(move |_, window, cx| {
+                        delete_workspace.update(cx, |this, cx| this.confirm_delete_branch(delete_name.clone(), delete_remote.clone(), window, cx))
+                      }))
+                  })
                   .into_any_element()
               })
               .collect();
@@ -184,7 +205,7 @@ impl Workspace {
                   .cloned()
                   .collect();
                 if found.is_empty() {
-                  // GitHub Desktop's empty state: nothing to do here, and a way to get going.
+                  // The empty state: nothing to do here, and a way to get going.
                   let workspace = workspace.clone();
                   v_flex()
                     .items_center()

@@ -522,41 +522,13 @@ impl Workspace {
     if open {
       self.branch_tab = BranchTab::Branches;
       if let Some(root) = &self.projects.active {
-        self.branches = vekro_git::branches(root).unwrap_or_default();
+        self.branches = vekro_git::branch_entries(root).unwrap_or_default();
       }
       self.branch_filter.update(cx, |input, cx| input.set_value("", window, cx));
       let focus = self.branch_filter.read(cx).focus_handle(cx);
       window.defer(cx, move |window, cx| focus.focus(window, cx));
     }
     cx.notify();
-  }
-
-  /// Switches the open project's repository to another local branch. Changes the switch would overwrite stop it.
-  pub(super) fn switch_branch(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
-    self.branch_menu_open = false;
-    cx.notify();
-    let Some(root) = self.projects.active.clone() else { return };
-    if self.git.as_ref().is_some_and(|git| git.branch == name) {
-      return;
-    }
-    let work = cx.background_executor().spawn({
-      let (root, name) = (root.clone(), name.clone());
-      async move { vekro_git::switch_branch(&root, &name) }
-    });
-    cx.spawn_in(window, async move |this, cx| {
-      let result = work.await;
-      let _ = this.update_in(cx, |this, window, cx| {
-        match result {
-          Ok(()) => {
-            this.refresh_project();
-            window.push_notification(Notification::info(format!("Switched to {name}.")), cx);
-          }
-          Err(message) => window.push_notification(Notification::error(message), cx),
-        }
-        cx.notify();
-      });
-    })
-    .detach();
   }
 
   /// Asks for a name, creates a branch at the current commit and switches to it. Uncommitted changes come along.

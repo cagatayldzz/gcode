@@ -21,7 +21,7 @@ impl Modifiers {
 /// `key` is the key name (`"a"`, `"enter"`, `"left"`, …) and `text` the text the
 /// key types, if any. Option (alt) with text sends the typed text, so characters
 /// such as `@` on non-US layouts still work; Option with the arrow and backspace
-/// keys moves by word, like iTerm2. Returns `None` for keys that send nothing.
+/// keys moves by word, as in most terminals. Returns `None` for keys that send nothing.
 pub fn encode_key(key: &str, text: Option<&str>, mods: Modifiers, app_cursor: bool) -> Option<Vec<u8>> {
   if mods.command {
     return match key {
@@ -66,7 +66,7 @@ pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
 }
 
 /// Formats dropped paths as shell arguments without executing them. Each path is followed by a
-/// space, as in Terminal and iTerm2, so a second drop does not run into the first path.
+/// space, as terminals do, so a second drop does not run into the first path.
 pub fn dropped_paths<'a>(paths: impl IntoIterator<Item = &'a std::path::Path>) -> String {
   paths
     .into_iter()

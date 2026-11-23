@@ -29,6 +29,7 @@ pub enum MergeSide {
   Incoming,
 }
 
+#[derive(Debug)]
 pub enum MergeOutcome {
   Finished,
   Conflicted(MergeState),
@@ -133,11 +134,7 @@ pub fn start_merge(path: &Path, branch: &str, current_branch: &str) -> Result<Me
   if repository.state() != RepositoryState::Clean || repository.head().map_err(error)?.shorthand().ok() != Some(current_branch) {
     return Err("The repository or current branch changed. Refresh before merging.".into());
   }
-  let mut options = git2::StatusOptions::new();
-  options.include_untracked(false).include_ignored(false);
-  if !repository.statuses(Some(&mut options)).map_err(error)?.is_empty() {
-    return Err("Commit or stash your tracked changes before merging.".into());
-  }
+  // Uncommitted changes are fine: git itself refuses, and changes nothing, when the merge would overwrite them.
   let output = git(path, &["merge", "--no-ff", "--no-edit", "--", branch])?;
   if output.status.success() {
     return Ok(MergeOutcome::Finished);

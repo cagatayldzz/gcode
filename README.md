@@ -16,7 +16,7 @@ window. Built with Rust and [GPUI Kit](https://gpui-kit.com).
 
 ## Get started
 
-Vekro supports macOS 15 or later on Apple Silicon. See [GitHub Releases](https://github.com/cagatayldzz/vekro/releases) for downloads, or follow the [development guide](docs/development.md) to run it from source.
+Vekro supports macOS 15 or later on Apple Silicon. See [GitHub Releases](https://github.com/cagatayldzz/vekro/releases) for downloads, or follow the [development guide](docs/development/index.md) to run it from source.
 
 ```sh
 bun install
@@ -25,7 +25,7 @@ bun run dev
 
 ## Documentation
 
-- [Usage](docs/usage.md) — projects, shortcuts, terminals, editor, Git, and settings
-- [Development](docs/development.md) — platform, commands, packages, and tests
-- [Architecture](docs/architecture.md) — code map, data flow, and persistence
+- [User guide](docs/guide/index.md) — projects, editor, search, terminals, AI agents, Git, accounts, settings and shortcuts
+- [Architecture](docs/architecture/index.md) — crate boundaries, the code map, window layout, data flow and persistence
+- [Development](docs/development/index.md) — setup, conventions, testing, performance and releases
 - [Project rules](AGENTS.md) — conventions for contributors and AI agents

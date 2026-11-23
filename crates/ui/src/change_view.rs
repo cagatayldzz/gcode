@@ -1,4 +1,4 @@
-//! The changes of one file of the Git tab, shown in the main area in place of the editor, like GitHub Desktop: the path on top,
+//! The changes of one file of the Git tab, shown in the main area in place of the editor: the path on top,
 //! the diff below. Choosing another file replaces it; no tab is added.
 
 use crate::{

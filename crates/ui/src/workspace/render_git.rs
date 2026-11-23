@@ -236,6 +236,12 @@ impl Workspace {
     )
   }
 
+  /// The changed files whose path contains the filter text (all of them without one).
+  fn visible_changes(&self, query: &str) -> Vec<&vekro_git::Change> {
+    let Some(git) = self.git.as_ref() else { return Vec::new() };
+    git.changes.iter().filter(|change| query.is_empty() || change.path.to_string_lossy().to_lowercase().contains(query)).collect()
+  }
+
   /// One line of the Changes list: a checkbox, the file name with its folder, and the kind of change. Its height is fixed
   /// ([`CHANGE_ROW_HEIGHT`]) because the list is virtualized, and its width is the list's own: a virtual list lays its rows out
   /// at their content width, so a percentage would leave short rows narrow and long ones unclipped.
@@ -309,7 +315,12 @@ impl Workspace {
         let (workspace, deleted) = (workspace.clone(), change.kind == vekro_git::ChangeKind::Deleted);
         let root = root.clone();
         let busy = self.committing || self.discarding;
+        let ignore_folder = file.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
+        let ignore_extension = file.extension().map(|extension| extension.to_string_lossy().into_owned());
         move |menu, _, _| {
+          let ignore_workspace = workspace.clone();
+          let ignore_file = file.clone();
+          let (ignore_folder, ignore_extension) = (ignore_folder.clone(), ignore_extension.clone());
           let (open_workspace, open_file) = (workspace.clone(), file.clone());
           let (discard_workspace, discard_file) = (workspace.clone(), file.clone());
           let (finder_root, finder_file) = (root.clone(), file.clone());
@@ -332,6 +343,27 @@ impl Workspace {
                 .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy_path.clone()))),
             )
             .separator()
+            .item(PopupMenuItem::new("Ignore File (Add to .gitignore)").icon(Icon::empty().path("icons/eye-off.svg")).on_click({
+              let (workspace, pattern) = (ignore_workspace.clone(), format!("/{}", ignore_file.display()));
+              move |_, window, cx| workspace.update(cx, |this, cx| this.ignore_patterns(vec![pattern.clone()], window, cx))
+            }))
+            .when_some(ignore_folder, |menu, folder| {
+              let workspace = ignore_workspace.clone();
+              menu.item(
+                PopupMenuItem::new("Ignore Folder (Add to .gitignore)")
+                  .icon(Icon::empty().path("icons/eye-off.svg"))
+                  .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.ignore_patterns(vec![format!("/{folder}/")], window, cx))),
+              )
+            })
+            .when_some(ignore_extension, |menu, extension| {
+              let workspace = ignore_workspace.clone();
+              menu.item(
+                PopupMenuItem::new(format!("Ignore All .{extension} Files (Add to .gitignore)"))
+                  .icon(Icon::empty().path("icons/eye-off.svg"))
+                  .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.ignore_patterns(vec![format!("*.{extension}")], window, cx))),
+              )
+            })
+            .separator()
             .item(PopupMenuItem::new("Discard Changes…").icon(Icon::empty().path("icons/trash.svg")).disabled(busy).on_click(move |_, window, cx| {
               discard_workspace.update(cx, |this, cx| this.confirm_discard_changes(vec![discard_file.clone()], window, cx))
             }))
@@ -351,11 +383,12 @@ impl Workspace {
     let chosen = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).count();
     let workspace = cx.entity();
     // Only the rows in view are built: a project can have thousands of changed files.
-    let changes_list = v_virtual_list(workspace.clone(), "git-changes", self.change_sizes(git.changes.len()), |this, range, _, cx| {
-      let Some(git) = this.git.as_ref() else {
-        return Vec::new();
-      };
-      let changes: Vec<vekro_git::Change> = git.changes.get(range).map(<[vekro_git::Change]>::to_vec).unwrap_or_default();
+    let query = self.changes_filter.read(cx).value().trim().to_lowercase();
+    let shown = self.visible_changes(&query).len();
+    let changes_list = v_virtual_list(workspace.clone(), "git-changes", self.change_sizes(shown), |this, range, _, cx| {
+      let query = this.changes_filter.read(cx).value().trim().to_lowercase();
+      let changes: Vec<vekro_git::Change> =
+        this.visible_changes(&query).get(range).map(|rows| rows.iter().map(|change| (*change).clone()).collect()).unwrap_or_default();
       let width = this.changes_scroll.bounds().size.width;
       changes.iter().map(|change| this.change_row(change, width, cx)).collect()
     })
@@ -409,13 +442,46 @@ impl Workspace {
           ),
       )
       .child(
-        Button::new("commit")
-          .primary()
-          .small()
+        div()
+          .id("commit-wrapper")
           .w_full()
-          .label(label)
-          .disabled(chosen == 0 || !summary_filled || self.committing || self.discarding || git.merging || self.merge_task.is_some())
-          .on_click(cx.listener(|this, _, window, cx| this.commit_changes(window, cx))),
+          .child(
+            Button::new("commit")
+              .primary()
+              .small()
+              .w_full()
+              .label(label)
+              .disabled(chosen == 0 || !summary_filled || self.committing || self.discarding || git.merging || self.merge_task.is_some())
+              .on_click(cx.listener(|this, _, window, cx| this.commit_changes(window, cx))),
+          )
+          .context_menu({
+            let workspace = workspace.clone();
+            let disabled = self.committing || self.discarding || git.merging || self.merge_task.is_some();
+            let root = self.projects.active.clone().unwrap_or_default();
+            move |menu, window, cx| {
+              let (amend_workspace, author_workspace, author_root) = (workspace.clone(), workspace.clone(), root.clone());
+              menu
+                .item(
+                  PopupMenuItem::new("Amend Last Commit")
+                    .icon(Icon::empty().path("icons/undo-2.svg"))
+                    .disabled(disabled)
+                    .on_click(move |_, window, cx| amend_workspace.update(cx, |this, cx| this.amend_commit(window, cx))),
+                )
+                .submenu("Add Co-author", window, cx, move |submenu, _, _| {
+                  let people = vekro_git::recent_authors(&author_root, 500, 12);
+                  if people.is_empty() {
+                    return submenu.item(PopupMenuItem::new("No other authors in this repository").disabled(true));
+                  }
+                  people.into_iter().fold(submenu, |submenu, (name, email)| {
+                    let (workspace, label) = (author_workspace.clone(), format!("{name} <{email}>"));
+                    submenu.item(
+                      PopupMenuItem::new(label)
+                        .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.add_co_author(&name, &email, window, cx))),
+                    )
+                  })
+                })
+            }
+          }),
       );
     let tabs = TabBar::new("git-view-tabs")
       .underline()
@@ -434,6 +500,7 @@ impl Workspace {
       GitView::Changes => v_flex()
         .flex_1()
         .min_h_0()
+        .child(div().flex_none().px_3().py_2().child(crate::components::soft_input(&self.changes_filter, cx).small().bg(palette.background)))
         .child(
           h_flex()
             .id("changes-header")
@@ -530,12 +597,14 @@ impl Workspace {
     }
     let workspace = cx.entity();
     let tip = self.history.first().map(|commit| commit.id.clone());
+    let git_branch = self.git.as_ref().map(|git| git.branch.clone()).unwrap_or_default();
     let rows = commits.iter().map(|commit| {
       let id = commit.id.clone();
       let selected = self.selected_commit.as_deref() == Some(commit.id.as_str());
       // Only the last commit, and only while the remote does not have it, can be undone.
       let undoable = tip.as_deref() == Some(commit.id.as_str()) && commit.unpushed;
       let (menu_workspace, menu_id) = (workspace.clone(), commit.id.clone());
+      let (menu_root, menu_current) = (self.projects.active.clone().unwrap_or_default(), git_branch.clone());
       // Only the first letter of the author: the avatar takes two letters from a name of several words.
       let initial: SharedString = commit.author.trim().chars().take(1).flat_map(char::to_uppercase).collect::<String>().into();
       h_flex()
@@ -589,11 +658,35 @@ impl Workspace {
           )
         })
         .on_click(cx.listener(move |this, _, _, cx| this.select_commit(id.clone(), cx)))
-        .context_menu(move |menu, _, _| {
+        .context_menu(move |menu, window, cx| {
           let (undo_workspace, undo_id) = (menu_workspace.clone(), menu_id.clone());
           let (tag_workspace, tag_id) = (menu_workspace.clone(), menu_id.clone());
           let copy_id = menu_id.clone();
+          let (revert_workspace, revert_id) = (menu_workspace.clone(), menu_id.clone());
+          let (branch_workspace, branch_id) = (menu_workspace.clone(), menu_id.clone());
+          let (pick_workspace, pick_id, pick_root, pick_current) = (menu_workspace.clone(), menu_id.clone(), menu_root.clone(), menu_current.clone());
           menu
+            .item(
+              PopupMenuItem::new("Revert Changes in Commit…")
+                .icon(Icon::empty().path("icons/undo-2.svg"))
+                .on_click(move |_, window, cx| revert_workspace.update(cx, |this, cx| this.confirm_revert_commit(revert_id.clone(), window, cx))),
+            )
+            .item(
+              PopupMenuItem::new("Create Branch from Commit…")
+                .icon(Icon::empty().path("icons/git-branch.svg"))
+                .on_click(move |_, window, cx| branch_workspace.update(cx, |this, cx| this.branch_from_commit(branch_id.clone(), window, cx))),
+            )
+            .submenu("Cherry-pick Commit to", window, cx, move |submenu, _, _| {
+              let branches = vekro_git::branch_entries(&pick_root).unwrap_or_default();
+              branches.into_iter().filter(|entry| entry.remote.is_none() && entry.name != pick_current).fold(submenu, |submenu, entry| {
+                let (workspace, id, branch) = (pick_workspace.clone(), pick_id.clone(), entry.name.clone());
+                submenu.item(
+                  PopupMenuItem::new(entry.name)
+                    .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.cherry_pick_commit(id.clone(), branch.clone(), window, cx))),
+                )
+              })
+            })
+            .separator()
             .item(
               PopupMenuItem::new("Undo Commit…")
                 .disabled(!undoable)
