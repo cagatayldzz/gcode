@@ -16,6 +16,7 @@ pub fn repositories(connection: &Connection) -> Result<Vec<Repository>, String>;
 pub fn pull_requests(connection: &Connection, repository: &RepoRef) -> Result<Vec<PullRequest>, String>;
 pub fn create_pull_request(connection: &Connection, repository: &RepoRef, new: &NewPullRequest) -> Result<PullRequest, String>;
 pub fn rename_repository(connection: &Connection, repository: &RepoRef, new_name: &str) -> Result<String, String>;  // the name it has afterwards
+pub fn current_name(connection: &Connection, repository: &RepoRef) -> Result<String, String>;                        // the name it has now (follows GitHub's redirect)
 pub fn renamed_url(url: &str, old: &str, new: &str) -> Option<String>;                                             // the same remote form, new name
 pub fn verify_permissions(connection: &Connection, repository: &RepoRef, clone_url: &str) -> PermissionReport;
 ```
@@ -77,6 +78,11 @@ organization. `Credentials` redacts the token from `Debug` output.
 (Azure DevOps), and returns the name the service ended up with. `renamed_url` then rewrites the project's remote address in whatever form it
 has (`https`, `ssh://`, `git@host:…`, with or without `.git`). The interface renames the repository **before** touching anything local, and asks
 first: see [Projects → Renaming the repository with the project](../guide/projects.md#renaming-the-repository-with-the-project).
+
+A repository renamed on the service itself (in the browser) is found by `current_name`: `Workspace::check_remote_rename` asks for the open project
+when it starts, when the project changes and when its settings open. A different answer is kept in `renamed_remotes`, puts a warning badge on the
+**Project settings** button and a notice with **Sync changes** at the top of General. Syncing sets the remote with `renamed_url` and renames the
+display name when it was the old repository name; the folder on disk is left alone.
 
 ## Pull requests in the interface
 

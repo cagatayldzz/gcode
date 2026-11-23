@@ -63,6 +63,21 @@ pub(crate) struct HostedRepository {
   pub full_name: String,
 }
 
+/// The repository behind a project's remote was renamed on its service, so the remote address and the project's name still say the old name.
+#[derive(Clone)]
+pub(crate) struct RenamedRemote {
+  /// The service's name ("GitHub").
+  pub service: SharedString,
+  /// What the remote names now: the old `owner/name`.
+  pub old_full_name: String,
+  /// The repository's name on the service today.
+  pub new_name: String,
+  /// The remote address with the new name, in the form the old one had.
+  pub new_url: String,
+  /// The old name of the repository.
+  pub old_name: String,
+}
+
 /// The look the user chose, sent when Save is pressed.
 #[derive(Clone)]
 pub(crate) struct AppearanceChosen {
@@ -81,6 +96,8 @@ pub(crate) struct AppearanceChosen {
 pub(crate) enum ProjectSettingsEvent {
   Save(AppearanceChosen),
   RemoveRequested(PathBuf),
+  /// Bring the remote address and the display name in line with the repository's new name.
+  SyncRenamed(PathBuf),
   /// Leave the view without saving.
   Close,
 }
@@ -137,6 +154,8 @@ pub(crate) struct ProjectSettings {
   rename_folder: bool,
   /// The repository this project's remote names on a connected service, when there is one.
   hosted: Option<HostedRepository>,
+  /// Set when the repository was renamed on its service and this project still names the old one.
+  renamed: Option<RenamedRemote>,
   rename_repository: bool,
   icon: Option<String>,
   color: Option<String>,
@@ -153,7 +172,13 @@ pub(crate) struct ProjectSettings {
 impl EventEmitter<ProjectSettingsEvent> for ProjectSettings {}
 
 impl ProjectSettings {
-  pub fn new(project: &Project, hosted: Option<HostedRepository>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+  pub fn new(
+    project: &Project,
+    hosted: Option<HostedRepository>,
+    renamed: Option<RenamedRemote>,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Self {
     let folder = project.folder_name();
     let current = project.name();
     let input = cx.new(|cx| InputState::new(window, cx).placeholder(folder).default_value(current));
@@ -172,6 +197,7 @@ impl ProjectSettings {
       remote,
       rename_folder: false,
       hosted,
+      renamed,
       rename_repository: true,
       icon: project.icon.clone(),
       color: project.color.clone(),
@@ -184,6 +210,55 @@ impl ProjectSettings {
     };
     this.refresh_index(None, cx);
     this
+  }
+
+  /// Shows, or takes away, the warning that the repository was renamed on its service.
+  pub fn set_renamed(&mut self, renamed: Option<RenamedRemote>, cx: &mut Context<Self>) {
+    self.renamed = renamed;
+    cx.notify();
+  }
+
+  /// The warning that the repository has another name on its service now, with the button that brings the project in line.
+  fn renamed_notice(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let renamed = self.renamed.clone()?;
+    let palette = colors(cx);
+    let theme = cx.theme().clone();
+    let path = self.project.path.clone();
+    let follows_name = self.project.name().eq_ignore_ascii_case(&renamed.old_name);
+    let effect = if follows_name {
+      format!("The Git remote becomes {} and the display name becomes {}.", renamed.new_url, renamed.new_name)
+    } else {
+      format!("The Git remote becomes {}.", renamed.new_url)
+    };
+    Some(
+      v_flex()
+        .gap_2()
+        .p_3()
+        .rounded_md()
+        .border_1()
+        .border_color(theme.warning)
+        .child(
+          h_flex()
+            .gap_2()
+            .items_center()
+            .child(Icon::empty().path("icons/triangle-alert.svg").size_4().text_color(theme.warning))
+            .child(div().font_semibold().child(format!("The repository was renamed on {}", renamed.service))),
+        )
+        .child(
+          Label::new(format!("{} is now called {}. {effect}", renamed.old_full_name, renamed.new_name))
+            .text_size(FONT_SIZE_SM)
+            .text_color(palette.text_secondary),
+        )
+        .child(
+          h_flex().child(
+            Button::new("sync-renamed")
+              .label("Sync changes")
+              .icon(Icon::empty().path("icons/refresh-cw.svg"))
+              .primary()
+              .on_click(cx.listener(move |_, _, _, cx| cx.emit(ProjectSettingsEvent::SyncRenamed(path.clone())))),
+          ),
+        ),
+    )
   }
 
   /// Runs `work` on the index of the project in the background, then reads what the saved index looks like now. `label` says what is
@@ -415,7 +490,12 @@ impl ProjectSettings {
       .gap_2()
       .child(crate::components::soft_input(&self.remote_input, cx))
       .child(hint("Change the address by hand when the repository moves.".into()));
-    section(Page::General, v_flex().gap_5().child(field("Display name", muted, name_field)).child(field("Git remote", muted, remote_field)), cx)
+    let notice = self.renamed_notice(cx);
+    section(
+      Page::General,
+      v_flex().gap_5().children(notice).child(field("Display name", muted, name_field)).child(field("Git remote", muted, remote_field)),
+      cx,
+    )
   }
 
   /// The color and the icon of the project's avatar.

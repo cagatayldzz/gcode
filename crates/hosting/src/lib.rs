@@ -8,7 +8,7 @@ mod remote;
 
 pub use accounts::{Account, Accounts, Connection, KeychainStore, MemoryStore, Provider, TokenGuide, TokenStore};
 pub use api::{
-  check_access, create_pull_request, default_branch, is_permission_problem, pull_requests, rename_repository, repositories, verify,
+  check_access, create_pull_request, current_name, default_branch, is_permission_problem, pull_requests, rename_repository, repositories, verify,
   verify_permissions, NewPullRequest, PermissionReport, PullRequest, Repository, TokenAccess,
 };
 pub use remote::{remote_host, renamed_url, web_repository, RepoRef, WebRepository};

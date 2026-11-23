@@ -234,6 +234,7 @@ impl Workspace {
       })
       .collect();
     let attention = self.settings.read(cx).accounts.items.iter().any(|account| account.issue.is_some());
+    let remote_renamed = self.projects.active.as_ref().is_some_and(|root| self.renamed_remotes.contains_key(root));
     let terminal_attention = self.terminal_tabs.values().any(|tabs| tabs.panes().iter().any(|terminal| terminal.read(cx).needs_attention()));
     let terminal_active = self.projects.active.as_ref().is_some_and(|root| self.project_has_terminal_activity(root, cx));
     let terminal = rail_button(
@@ -265,6 +266,30 @@ impl Workspace {
         &palette,
         |_, window, cx| window.dispatch_action(Box::new(ToggleProjectSettings), cx),
       ))
+      // While the repository of the open project has another name on its service, the badge opens the project settings.
+      .when(remote_renamed && !attention, |gear| {
+        gear.child(
+          div()
+            .id("remote-renamed")
+            .absolute()
+            .bottom_0()
+            .right_0()
+            .size_4()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .cursor_pointer()
+            .bg(theme.warning)
+            .tooltip(|window, cx| Tooltip::new("The repository was renamed: sync it in the project settings").build(window, cx))
+            .child(Icon::empty().path("icons/triangle-alert.svg").size_3().text_color(palette.on_accent))
+            .on_click(cx.listener(|this, _, window, cx| {
+              if let Some(path) = this.projects.active.clone() {
+                this.open_project_settings(&path, window, cx);
+              }
+            })),
+        )
+      })
       // While an account has a permission problem, the warning badge opens Accounts.
       .when(attention, |gear| {
         gear.child(

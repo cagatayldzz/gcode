@@ -489,6 +489,19 @@ pub fn rename_repository(connection: &Connection, repository: &RepoRef, new_name
   Ok(answer[key].as_str().filter(|name| !name.is_empty()).unwrap_or(new_name).to_string())
 }
 
+/// The name a repository has on its service now, for a repository that was renamed there: GitHub answers a request for the old name
+/// with a redirect to the renamed one, which is followed. `Err` when the service does not know the old name any more.
+pub fn current_name(connection: &Connection, repository: &RepoRef) -> Result<String, String> {
+  let api = connection.api();
+  let (url, key) = match connection.account.provider {
+    Provider::GitHub => (format!("{api}/repos/{}/{}", repository.namespace, repository.name), "name"),
+    Provider::GitLab => (format!("{api}/projects/{}", encode(&repository.full_name())), "path"),
+    Provider::AzureDevOps => (format!("{}?api-version={AZURE_VERSION}", azure_repository_path(&api, repository)), "name"),
+  };
+  let answer = connection.get(&url)?;
+  answer[key].as_str().filter(|name| !name.is_empty()).map(str::to_string).ok_or_else(|| "The service did not say the repository's name.".into())
+}
+
 /// The branch pull requests go into by default.
 pub fn default_branch(connection: &Connection, repository: &RepoRef) -> Result<String, String> {
   let api = connection.api();

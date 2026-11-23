@@ -14,7 +14,7 @@ use crate::{
   profiles::ProfileManager,
   project_manager::ProjectManager,
   project_search,
-  project_settings::{AppearanceChosen, HostedRepository, ProjectSettings, ProjectSettingsEvent},
+  project_settings::{AppearanceChosen, HostedRepository, ProjectSettings, ProjectSettingsEvent, RenamedRemote},
   project_setup::{ProjectReady, ProjectSetup},
   pull_request::{PullRequestEvent, PullRequestForm, PullRequestTarget},
   settings::{
@@ -307,6 +307,8 @@ pub struct Workspace {
   /// The project settings view, which takes the main area like the terminals do while it is open.
   project_settings: Option<Entity<ProjectSettings>>,
   _project_settings_subscription: Option<Subscription>,
+  /// Projects whose repository was renamed on its service, found by asking it, with what the remote should say now.
+  renamed_remotes: HashMap<PathBuf, RenamedRemote>,
   /// The scroll position of the folder tree.
   explorer_scroll: UniformListScrollHandle,
   search_open: bool,
@@ -469,6 +471,7 @@ impl Workspace {
       _dialog_subscription: None,
       project_settings: None,
       _project_settings_subscription: None,
+      renamed_remotes: HashMap::new(),
       explorer_scroll: UniformListScrollHandle::default(),
       search_open: false,
       search_state: cx.new(|cx| InputState::new(window, cx).placeholder("Search project files")),
@@ -666,6 +669,7 @@ impl Workspace {
       syncing: false,
     };
     this.sync_projects(window, cx);
+    this.check_remote_rename(cx);
     this.refresh_project();
     this.ensure_terminal(window, cx);
     this

@@ -5,8 +5,8 @@ use std::{
   thread,
 };
 use ws_hosting::{
-  check_access, create_pull_request, default_branch, pull_requests, repositories, verify, Account, Connection, NewPullRequest, Provider, RepoRef,
-  TokenAccess,
+  check_access, create_pull_request, current_name, default_branch, pull_requests, repositories, verify, Account, Connection, NewPullRequest,
+  Provider, RepoRef, TokenAccess,
 };
 
 struct Request {
@@ -371,4 +371,15 @@ fn renaming_a_repository_refuses_unusable_names_and_reports_the_services_refusal
 
   let error = rename_repository(&github, &github_repo(), "fine").unwrap_err();
   assert!(error.contains("renaming a repository needs") && error.contains("Administration"), "{error}");
+}
+
+#[test]
+fn a_renamed_repository_is_found_through_the_redirect_of_its_old_name() {
+  let (base, _requests) = serve_with_headers(|method, target| match (method, target) {
+    ("GET", "/api/v3/repos/octo/app") => (301, vec![("Location", "/api/v3/repositories/42")], "{}".into()),
+    ("GET", "/api/v3/repositories/42") => (200, Vec::new(), r#"{"name":"tool"}"#.into()),
+    _ => (404, Vec::new(), "{}".into()),
+  });
+  let github = connection(Provider::GitHub, &base, None);
+  assert_eq!(current_name(&github, &github_repo()).unwrap(), "tool");
 }

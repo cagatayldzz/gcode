@@ -230,11 +230,15 @@ impl Workspace {
     // The project list dialog may be what asked.
     window.close_all_dialogs(cx);
     let hosted = self.hosted_repository(&project.path, cx);
-    let settings = cx.new(|cx| ProjectSettings::new(&project, hosted, window, cx));
+    let settings = cx.new(|cx| ProjectSettings::new(&project, hosted, self.renamed_remotes.get(&project.path).cloned(), window, cx));
     self._project_settings_subscription = Some(cx.subscribe_in(&settings, window, |this, _, event: &ProjectSettingsEvent, window, cx| {
       let chosen = match event {
         ProjectSettingsEvent::RemoveRequested(path) => {
           this.confirm_remove_project(path.clone(), window, cx);
+          return;
+        }
+        ProjectSettingsEvent::SyncRenamed(path) => {
+          this.sync_renamed_remote(path.clone(), window, cx);
           return;
         }
         ProjectSettingsEvent::Close => {
@@ -252,7 +256,69 @@ impl Workspace {
     self.terminal_open = false;
     self.agent_open = false;
     self.project_settings = Some(settings);
+    self.check_remote_rename(cx);
     cx.notify();
+  }
+
+  /// Asks the service, off the interface thread, whether the repository the active project's remote names has another name now.
+  /// The answer is kept per project and shown in the project settings and on their button.
+  pub(super) fn check_remote_rename(&mut self, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    let accounts = self.settings.read(cx).accounts.clone();
+    let service_root = root.clone();
+    let work = cx.background_executor().spawn(async move {
+      let url = ws_git::remote_url(&service_root)?;
+      let (connection, repository) = accounts.for_remote(&url, &accounts.keychain())?;
+      // A service that no longer knows the old name answers with an error: nothing to tell then.
+      let name = ws_hosting::current_name(&connection, &repository).ok()?;
+      if name.eq_ignore_ascii_case(&repository.name) {
+        return None;
+      }
+      let new_url = ws_hosting::renamed_url(&url, &repository.name, &name)?;
+      Some(RenamedRemote {
+        service: connection.account.provider.label().into(),
+        old_full_name: repository.full_name(),
+        old_name: repository.name,
+        new_name: name,
+        new_url,
+      })
+    });
+    cx.spawn(async move |this, cx| {
+      let found = work.await;
+      let _ = this.update(cx, |this, cx| {
+        match &found {
+          Some(renamed) => this.renamed_remotes.insert(root.clone(), renamed.clone()),
+          None => this.renamed_remotes.remove(&root),
+        };
+        if let Some(settings) = &this.project_settings {
+          settings.update(cx, |settings, cx| settings.set_renamed(found, cx));
+        }
+        cx.notify();
+      });
+    })
+    .detach();
+  }
+
+  /// Points the remote at the repository's new address and, when the project was named like the old repository, names the project
+  /// like the new one. The folder on disk is left alone.
+  fn sync_renamed_remote(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(renamed) = self.renamed_remotes.get(&path).cloned() else { return };
+    if let Err(message) = ws_git::set_remote_url(&path, &renamed.new_url) {
+      window.push_notification(Notification::error(format!("Could not change the Git remote: {message}")), cx);
+      return;
+    }
+    if let Some(project) = self.projects.projects.iter().find(|project| project.path == path).cloned() {
+      if project.name().eq_ignore_ascii_case(&renamed.old_name) {
+        self.projects.set_appearance(&path, &renamed.new_name, project.icon.as_deref(), project.color.as_deref());
+        self.persist_projects();
+      }
+    }
+    self.renamed_remotes.remove(&path);
+    if self.projects.active.as_ref() == Some(&path) {
+      self.refresh_project();
+    }
+    window.push_notification(Notification::info(format!("Synced with the new repository name {}.", renamed.new_name)), cx);
+    self.hide_terminal(window, cx);
   }
 
   /// The repository a project's remote names on a service one of the connected accounts serves.
@@ -446,6 +512,7 @@ impl Workspace {
     }
     self.ensure_terminal(window, cx);
     self.warm_index(cx);
+    self.check_remote_rename(cx);
     if self.sidebar_tab == SidebarTab::Search {
       self.ensure_project_search(window, cx);
     }
