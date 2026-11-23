@@ -76,11 +76,23 @@ button again, or Explorer, Git or the terminal button, to leave.
 
 | Page | Does |
 | --- | --- |
-| **General** | **Name** replaces the folder's name in the menu and Explorer (the folder is not renamed). Clearing it goes back to the folder's name. |
+| **General** | **Display name** replaces the folder's name in the menu and Explorer. Clearing it goes back to the folder's name. When the name differs from the folder's, **Also rename the folder on disk** renames the folder too (terminals restart, open files close, unsaved files block it). **Git remote** holds the address of the remote; edit it by hand when the repository moves. |
 | **Appearance** | **Color** tints the avatar and fills it while the project is open; **Icon** shows one of 20 icons instead of the first letter. **Default** and **Aa** go back to the theme's blue and the first letter. |
-| **Git** | Changes the address of the remote. |
 | **Index** | Shows the saved list of the project's files that searching starts from: status (ready, out of date, not made yet), file count, size, when it was made and where it is kept. **Rebuild index** walks the project again; **Delete index** removes the saved one. |
 | **Remove project** | Takes the project out of gcode. The folder stays on disk. |
+
+### Renaming the repository with the project
+
+When the remote of the project belongs to a service a [connected account](./accounts.md) serves (GitHub, GitLab or Azure DevOps) and you
+change the display name to something other than the repository's name, **General** also offers **Also rename the repository on &lt;service&gt;**
+(ticked by default). On **Save**:
+
+1. a dialog asks first — *"owner/old will be renamed to new on GitHub…"* — because it changes the repository for everyone who uses it;
+2. the repository is renamed on the service (the service may adjust the name, for example GitHub turns spaces into hyphens);
+3. only when that worked, the project's remote address is updated to the new name (HTTPS and SSH forms alike) and the rest of the settings are saved.
+
+If the service refuses (the token needs permission to administer the repository), nothing is changed and the message says why. The option
+is hidden while you are editing the remote address by hand.
 
 **Save** is available once something changed; **Discard** leaves without saving. Enter in the name field also saves.
 

@@ -229,7 +229,8 @@ impl Workspace {
     let Some(project) = self.projects.projects.iter().find(|project| project.path == path).cloned() else { return };
     // The project list dialog may be what asked.
     window.close_all_dialogs(cx);
-    let settings = cx.new(|cx| ProjectSettings::new(&project, window, cx));
+    let hosted = self.hosted_repository(&project.path, cx);
+    let settings = cx.new(|cx| ProjectSettings::new(&project, hosted, window, cx));
     self._project_settings_subscription = Some(cx.subscribe_in(&settings, window, |this, _, event: &ProjectSettingsEvent, window, cx| {
       let chosen = match event {
         ProjectSettingsEvent::RemoveRequested(path) => {
@@ -240,50 +241,121 @@ impl Workspace {
           this.hide_terminal(window, cx);
           return;
         }
-        ProjectSettingsEvent::Save(chosen) => chosen,
+        ProjectSettingsEvent::Save(chosen) => chosen.clone(),
       };
-      let mut path = chosen.path.clone();
-      if chosen.rename_folder {
-        match this.rename_project_folder(&chosen.path, chosen.name.trim(), cx) {
-          Ok(moved) => path = moved,
-          Err(message) => {
-            window.push_notification(Notification::error(format!("Could not rename the folder: {message}")), cx);
-            return;
-          }
-        }
+      if chosen.rename_repository {
+        this.confirm_repository_rename(chosen, window, cx);
+      } else {
+        this.apply_project_settings(chosen, None, window, cx);
       }
-      this.projects.set_appearance(&path, &chosen.name, chosen.icon.as_deref(), chosen.color.as_deref());
-      this.persist_projects();
-      if chosen.rename_folder {
-        this.terminal_tabs.remove(&chosen.path);
-        this.agent_tabs.remove(&chosen.path);
-        this.views.remove(&chosen.path);
-        if this.projects.active.as_ref() == Some(&path) {
-          this.refresh_project();
-          this.ensure_terminal(window, cx);
-        }
-      }
-      if let Some(url) = &chosen.remote {
-        match ws_git::set_remote_url(&path, url) {
-          Ok(()) => {
-            if this.projects.active.as_ref() == Some(&path) {
-              this.refresh_project();
-            }
-            window.push_notification(Notification::info("Git remote updated."), cx);
-          }
-          Err(message) => {
-            window.push_notification(Notification::error(format!("Could not change the Git remote: {message}")), cx);
-            return;
-          }
-        }
-      }
-      window.push_notification(Notification::info("Project settings saved."), cx);
-      this.hide_terminal(window, cx);
     }));
     self.terminal_open = false;
     self.agent_open = false;
     self.project_settings = Some(settings);
     cx.notify();
+  }
+
+  /// The repository a project's remote names on a service one of the connected accounts serves.
+  fn hosted_repository(&self, path: &Path, cx: &App) -> Option<HostedRepository> {
+    let url = ws_git::remote_url(path)?;
+    let accounts = &self.settings.read(cx).accounts;
+    accounts.items.iter().find_map(|account| {
+      let repository = RepoRef::for_account(account, &url)?;
+      Some(HostedRepository { service: account.provider.label().into(), full_name: repository.full_name(), name: repository.name })
+    })
+  }
+
+  /// Asks before the repository is renamed on its service: it changes something for everyone who uses it, and it cannot be taken back
+  /// from here.
+  fn confirm_repository_rename(&mut self, chosen: AppearanceChosen, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(hosted) = self.hosted_repository(&chosen.path, cx) else {
+      // The account was disconnected since the page opened: the rest of the settings are still saved.
+      let chosen = AppearanceChosen { rename_repository: false, ..chosen };
+      self.apply_project_settings(chosen, None, window, cx);
+      return;
+    };
+    let workspace = cx.entity();
+    let (title, description) = (
+      SharedString::from(format!("Rename the repository on {}?", hosted.service)),
+      SharedString::from(format!(
+        "{} will be renamed to {} on {}. Anyone who cloned it has to update their remote address; this project's remote is updated for you.",
+        hosted.full_name,
+        chosen.name.trim(),
+        hosted.service
+      )),
+    );
+    window.open_alert_dialog(cx, move |alert, _, _| {
+      let (workspace, chosen) = (workspace.clone(), chosen.clone());
+      alert.title(title.clone()).description(description.clone()).width(px(460.)).confirm().ok_text("Rename").on_ok(move |_, window, cx| {
+        workspace.update(cx, |this, cx| this.rename_repository_then_save(chosen.clone(), window, cx));
+        true
+      })
+    });
+  }
+
+  /// Renames the repository on its service in the background; only when that worked are the settings applied, with the remote pointing
+  /// at the new address. A refusal changes nothing.
+  fn rename_repository_then_save(&mut self, chosen: AppearanceChosen, window: &mut Window, cx: &mut Context<Self>) {
+    let accounts = self.settings.read(cx).accounts.clone();
+    let path = chosen.path.clone();
+    let new_name = chosen.name.trim().to_string();
+    let work = cx.background_executor().spawn(async move {
+      let url = ws_git::remote_url(&path).ok_or("The project has no Git remote.")?;
+      let (connection, repository) = accounts
+        .for_remote(&url, &accounts.keychain())
+        .ok_or("The token for this account is not in the Keychain. Connect the account again in Settings → Accounts.")?;
+      let name = ws_hosting::rename_repository(&connection, &repository, &new_name)?;
+      let renamed = ws_hosting::renamed_url(&url, &repository.name, &name).ok_or("The remote address does not name the repository.")?;
+      Ok::<_, String>(renamed)
+    });
+    cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| match result {
+        Ok(url) => this.apply_project_settings(chosen, Some(url), window, cx),
+        Err(message) => window.push_notification(Notification::error(format!("Could not rename the repository: {message}")), cx),
+      });
+    })
+    .detach();
+  }
+
+  /// Saves what the settings view chose. `remote` is the new remote address when the repository was just renamed on its service;
+  /// otherwise the address typed in the view, if it changed, is used. The remote is changed first: if that fails, nothing else is.
+  fn apply_project_settings(&mut self, chosen: AppearanceChosen, remote: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+    let remote = remote.or_else(|| chosen.remote.clone());
+    if let Some(url) = &remote {
+      if let Err(message) = ws_git::set_remote_url(&chosen.path, url) {
+        window.push_notification(Notification::error(format!("Could not change the Git remote: {message}")), cx);
+        return;
+      }
+    }
+    let mut path = chosen.path.clone();
+    if chosen.rename_folder {
+      match self.rename_project_folder(&chosen.path, chosen.name.trim(), cx) {
+        Ok(moved) => path = moved,
+        Err(message) => {
+          window.push_notification(Notification::error(format!("Could not rename the folder: {message}")), cx);
+          return;
+        }
+      }
+    }
+    self.projects.set_appearance(&path, &chosen.name, chosen.icon.as_deref(), chosen.color.as_deref());
+    self.persist_projects();
+    if chosen.rename_folder {
+      self.terminal_tabs.remove(&chosen.path);
+      self.agent_tabs.remove(&chosen.path);
+      self.views.remove(&chosen.path);
+    }
+    if self.projects.active.as_ref() == Some(&path) {
+      self.refresh_project();
+      if chosen.rename_folder {
+        self.ensure_terminal(window, cx);
+      }
+    }
+    window.push_notification(
+      Notification::info(if chosen.rename_repository { "Project settings saved and the repository renamed." } else { "Project settings saved." }),
+      cx,
+    );
+    self.hide_terminal(window, cx);
   }
 
   /// Takes the project settings view off the main area (the caller decides what is shown instead and where the keyboard goes).

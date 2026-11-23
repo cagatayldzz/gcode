@@ -71,7 +71,7 @@ repository/
 | `quick_open.rs`, `command_palette.rs` | the Go to File and command palette dialogs |
 | `mention_picker.rs` | the project list opened by `⇧⌘M` |
 | `project_setup.rs` | the Add project dialog (New, Clone, Import) |
-| `project_settings.rs` | per-project settings (name, icon, color, remote, index, remove) |
+| `project_settings.rs` | per-project settings: General (display name, folder rename, repository rename, Git remote), Appearance, Index, Remove; the workspace applies a save in `workspace/projects.rs` (`apply_project_settings`) |
 | `project_manager.rs` | the Project list page of Settings |
 | `settings.rs` | the Settings pages and `SettingsModel`, shared by windows of a profile |
 | `profiles.rs` | the profile list, `open_window`, profile menus |

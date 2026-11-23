@@ -15,6 +15,8 @@ pub fn verify(connection: &Connection) -> Result<String, String>;
 pub fn repositories(connection: &Connection) -> Result<Vec<Repository>, String>;
 pub fn pull_requests(connection: &Connection, repository: &RepoRef) -> Result<Vec<PullRequest>, String>;
 pub fn create_pull_request(connection: &Connection, repository: &RepoRef, new: &NewPullRequest) -> Result<PullRequest, String>;
+pub fn rename_repository(connection: &Connection, repository: &RepoRef, new_name: &str) -> Result<String, String>;  // the name it has afterwards
+pub fn renamed_url(url: &str, old: &str, new: &str) -> Option<String>;                                             // the same remote form, new name
 pub fn verify_permissions(connection: &Connection, repository: &RepoRef, clone_url: &str) -> PermissionReport;
 ```
 
@@ -68,6 +70,13 @@ organization. `Credentials` redacts the token from `Debug` output.
 | --- | --- |
 | GitLab, classic GitHub | the token's **scopes**, so a missing one is named |
 | Fine-grained GitHub, Azure DevOps | only **reading** can be tried; the interface says pushing and pull requests were not checked |
+
+## Renaming a repository
+
+`rename_repository` uses `PATCH /repos/{owner}/{repo}` (GitHub), `PUT /projects/{id}` with a name and a path (GitLab) and `PATCH …/_apis/git/repositories/{repo}`
+(Azure DevOps), and returns the name the service ended up with. `renamed_url` then rewrites the project's remote address in whatever form it
+has (`https`, `ssh://`, `git@host:…`, with or without `.git`). The interface renames the repository **before** touching anything local, and asks
+first: see [Projects → Renaming the repository with the project](../guide/projects.md#renaming-the-repository-with-the-project).
 
 ## Pull requests in the interface
 

@@ -1,5 +1,5 @@
-//! The project settings view: how a project is named and looks in the project menu (name, icon, color), where its Git remote
-//! points, and removing it. It takes the main area like the terminals do, as one page with a bar of actions at the bottom.
+//! The project settings view: how a project is named and where its Git remote points (one page, since a rename can carry the
+//! repository's name along), how it looks in the project menu (icon, color), and removing it. It takes the main area like the terminals do, as one page with a bar of actions at the bottom.
 
 use crate::{
   components::{avatar_look, display_path, size_label, time_ago},
@@ -52,7 +52,19 @@ pub(crate) fn icon_path(name: &str) -> Option<SharedString> {
   PROJECT_ICONS.contains(&name).then(|| SharedString::from(format!("icons/{name}.svg")))
 }
 
+/// A project's repository on a service one of the connected accounts serves: what a rename can be carried to.
+#[derive(Clone)]
+pub(crate) struct HostedRepository {
+  /// The service's name ("GitHub").
+  pub service: SharedString,
+  /// The repository's name on the service, without its owner.
+  pub name: String,
+  /// `owner/name`, as the service shows it.
+  pub full_name: String,
+}
+
 /// The look the user chose, sent when Save is pressed.
+#[derive(Clone)]
 pub(crate) struct AppearanceChosen {
   pub path: PathBuf,
   pub name: String,
@@ -62,6 +74,8 @@ pub(crate) struct AppearanceChosen {
   pub remote: Option<String>,
   /// Also rename the project's folder on disk to the display name.
   pub rename_folder: bool,
+  /// Also rename the repository on its service to the display name, and point the remote at the new address.
+  pub rename_repository: bool,
 }
 
 pub(crate) enum ProjectSettingsEvent {
@@ -79,19 +93,17 @@ type IndexWork = (&'static str, fn(&Path, &Path) -> std::io::Result<()>);
 enum Page {
   General,
   Appearance,
-  Git,
   Index,
   Remove,
 }
 
 impl Page {
-  const ALL: [Self; 5] = [Self::General, Self::Appearance, Self::Git, Self::Index, Self::Remove];
+  const ALL: [Self; 4] = [Self::General, Self::Appearance, Self::Index, Self::Remove];
 
   fn label(self) -> &'static str {
     match self {
       Self::General => "General",
       Self::Appearance => "Appearance",
-      Self::Git => "Git",
       Self::Index => "Index",
       Self::Remove => "Remove project",
     }
@@ -101,7 +113,6 @@ impl Page {
     match self {
       Self::General => "icons/sliders-horizontal.svg",
       Self::Appearance => "icons/palette.svg",
-      Self::Git => "icons/git-branch.svg",
       Self::Index => "icons/database.svg",
       Self::Remove => "icons/trash.svg",
     }
@@ -109,9 +120,8 @@ impl Page {
 
   fn description(self) -> &'static str {
     match self {
-      Self::General => "The name shown in the project menu and on the project's tab.",
+      Self::General => "The name shown in the project menu and on the project's tab, and the address of its Git repository.",
       Self::Appearance => "The avatar of the project: a color, and an icon instead of its first letter.",
-      Self::Git => "Update the remote address when the repository moves.",
       Self::Index => "The list of the project's files, made once and kept, so that searching and opening the project start from a ready list.",
       Self::Remove => "The project leaves the list and its terminals stop. The folder and its files stay on disk.",
     }
@@ -125,6 +135,9 @@ pub(crate) struct ProjectSettings {
   remote_input: Entity<InputState>,
   remote: String,
   rename_folder: bool,
+  /// The repository this project's remote names on a connected service, when there is one.
+  hosted: Option<HostedRepository>,
+  rename_repository: bool,
   icon: Option<String>,
   color: Option<String>,
   scroll: ScrollHandle,
@@ -140,7 +153,7 @@ pub(crate) struct ProjectSettings {
 impl EventEmitter<ProjectSettingsEvent> for ProjectSettings {}
 
 impl ProjectSettings {
-  pub fn new(project: &Project, window: &mut Window, cx: &mut Context<Self>) -> Self {
+  pub fn new(project: &Project, hosted: Option<HostedRepository>, window: &mut Window, cx: &mut Context<Self>) -> Self {
     let folder = project.folder_name();
     let current = project.name();
     let input = cx.new(|cx| InputState::new(window, cx).placeholder(folder).default_value(current));
@@ -158,6 +171,8 @@ impl ProjectSettings {
       remote_input,
       remote,
       rename_folder: false,
+      hosted,
+      rename_repository: true,
       icon: project.icon.clone(),
       color: project.color.clone(),
       scroll: ScrollHandle::new(),
@@ -205,7 +220,17 @@ impl ProjectSettings {
       color: self.color.clone(),
       remote,
       rename_folder: self.rename_folder && self.folder_differs(cx),
+      rename_repository: self.repository_rename_offered(cx) && self.rename_repository,
     }));
+  }
+
+  /// Whether renaming the repository can be offered: the project has a repository on a connected service, its remote address is not
+  /// being edited by hand, and the display name was changed to something other than the repository's name.
+  fn repository_rename_offered(&self, cx: &Context<Self>) -> bool {
+    let Some(hosted) = &self.hosted else { return false };
+    let name = self.input.read(cx).value().trim().to_string();
+    let remote = self.remote_input.read(cx).value().trim().to_string();
+    !name.is_empty() && name != self.project.name() && !name.eq_ignore_ascii_case(&hosted.name) && (remote == self.remote || remote.is_empty())
   }
 
   /// Whether the display name is not the folder's name, so renaming the folder would change something.
@@ -347,25 +372,50 @@ impl ProjectSettings {
       }))
   }
 
-  /// The display name, and whether the folder on disk follows it.
+  /// The display name, whether the folder on disk and the repository on its service follow it, and the address of the Git remote.
   fn general(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let muted = cx.theme().muted_foreground;
-    let name_field = v_flex().gap_2().child(crate::components::soft_input(&self.input, cx)).when(self.folder_differs(cx), |column| {
-      column
-        .child(Checkbox::new("rename-folder").label("Also rename the folder on disk").checked(self.rename_folder).on_click(cx.listener(
-          |this, checked: &bool, _, cx| {
-            this.rename_folder = *checked;
-            cx.notify();
-          },
-        )))
-        .child(
-          Label::new("Terminals of this project restart and its open files close. Unsaved files block the rename.")
-            .text_size(FONT_SIZE_SM)
-            .text_color(palette.text_secondary),
-        )
-    });
-    section(Page::General, field("Display name", muted, name_field), cx)
+    let hint = |text: SharedString| Label::new(text).text_size(FONT_SIZE_SM).text_color(palette.text_secondary);
+    let offered = self.repository_rename_offered(cx);
+    let name_field = v_flex()
+      .gap_2()
+      .child(crate::components::soft_input(&self.input, cx))
+      .when(self.folder_differs(cx), |column| {
+        column
+          .child(Checkbox::new("rename-folder").label("Also rename the folder on disk").checked(self.rename_folder).on_click(cx.listener(
+            |this, checked: &bool, _, cx| {
+              this.rename_folder = *checked;
+              cx.notify();
+            },
+          )))
+          .child(hint("Terminals of this project restart and its open files close. Unsaved files block the rename.".into()))
+      })
+      .when_some(self.hosted.clone().filter(|_| offered), |column, hosted| {
+        let new_name = self.input.read(cx).value().trim().to_string();
+        column
+          .child(
+            Checkbox::new("rename-repository")
+              .label(format!("Also rename the repository on {}", hosted.service))
+              .checked(self.rename_repository)
+              .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                this.rename_repository = *checked;
+                cx.notify();
+              })),
+          )
+          .child(hint(
+            format!(
+              "{} becomes {new_name} and the Git remote follows. Anyone who cloned it has to update their remote address. You are asked before it happens.",
+              hosted.full_name
+            )
+            .into(),
+          ))
+      });
+    let remote_field = v_flex()
+      .gap_2()
+      .child(crate::components::soft_input(&self.remote_input, cx))
+      .child(hint("Change the address by hand when the repository moves.".into()));
+    section(Page::General, v_flex().gap_5().child(field("Display name", muted, name_field)).child(field("Git remote", muted, remote_field)), cx)
   }
 
   /// The color and the icon of the project's avatar.
@@ -400,11 +450,6 @@ impl ProjectSettings {
     let icons =
       h_flex().gap_0p5().flex_wrap().child(self.icon_button(None, cx)).children(PROJECT_ICONS.iter().map(|name| self.icon_button(Some(name), cx)));
     section(Page::Appearance, v_flex().gap_4().child(field("Color", muted, colors_row)).child(field("Icon", muted, icons)), cx)
-  }
-
-  fn git(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let muted = cx.theme().muted_foreground;
-    section(Page::Git, field("Git remote", muted, crate::components::soft_input(&self.remote_input, cx)), cx)
   }
 
   /// The saved index: what it holds, how old it is, and the buttons to make it again or delete it.
@@ -522,7 +567,6 @@ impl Render for ProjectSettings {
     let content = match self.page {
       Page::General => self.general(cx).into_any_element(),
       Page::Appearance => self.appearance(cx).into_any_element(),
-      Page::Git => self.git(cx).into_any_element(),
       Page::Index => self.index_page(cx).into_any_element(),
       Page::Remove => self.danger(cx).into_any_element(),
     };

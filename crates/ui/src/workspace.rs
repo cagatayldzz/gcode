@@ -14,7 +14,7 @@ use crate::{
   profiles::ProfileManager,
   project_manager::ProjectManager,
   project_search,
-  project_settings::{ProjectSettings, ProjectSettingsEvent},
+  project_settings::{AppearanceChosen, HostedRepository, ProjectSettings, ProjectSettingsEvent},
   project_setup::{ProjectReady, ProjectSetup},
   pull_request::{PullRequestEvent, PullRequestForm, PullRequestTarget},
   settings::{

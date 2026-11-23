@@ -341,14 +341,16 @@ fn a_repository_is_renamed_on_each_service_and_the_name_it_ends_up_with_is_retur
   assert_eq!(rename_repository(&github, &github_repo(), "new name").unwrap(), "new-name", "GitHub's own spelling comes back");
   let request = requests.recv().unwrap();
   assert_eq!((request.method.as_str(), request.target.as_str()), ("PATCH", "/api/v3/repos/octo/app"));
-  assert!(request.body.contains(r#""name":"new name""#), "{}", request.body);
+  let body: serde_json::Value = serde_json::from_str(&request.body).unwrap();
+  assert_eq!(body["name"], "new name");
 
   let gitlab = connection(Provider::GitLab, &base, None);
   let repository = RepoRef { provider: Provider::GitLab, namespace: "group/sub".into(), name: "app".into(), project: None };
   assert_eq!(rename_repository(&gitlab, &repository, "New Name").unwrap(), "New-Name", "GitLab's address uses the path");
   let request = requests.recv().unwrap();
   assert_eq!(request.method, "PUT");
-  assert!(request.body.contains(r#""path":"New-Name""#) && request.body.contains(r#""name":"New Name""#), "{}", request.body);
+  let body: serde_json::Value = serde_json::from_str(&request.body).unwrap();
+  assert_eq!((body["path"].as_str(), body["name"].as_str()), (Some("New-Name"), Some("New Name")));
 
   let azure = connection(Provider::AzureDevOps, &base, Some("org"));
   let repository = RepoRef { provider: Provider::AzureDevOps, namespace: "org".into(), name: "app".into(), project: Some("Proj".into()) };
