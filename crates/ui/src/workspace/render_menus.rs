@@ -123,7 +123,7 @@ impl Workspace {
       });
 
       // The list takes what the header and the tabs leave of the cap.
-      let list_height = (menu_height - px(64.)).min(MENU_LIST_MAX_HEIGHT);
+      let list_height = (menu_height - px(64.)).min(BRANCH_LIST_MAX_HEIGHT);
       let body = match tab {
         BranchTab::Branches => {
           // Sections, as in GitHub Desktop: the starred branches, the default one, the five most recently changed, then the rest.

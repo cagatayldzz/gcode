@@ -113,6 +113,10 @@ const PROJECT_MENU_WIDTH: Pixels = px(380.);
 /// How tall the lists of the project menu and of the branch menu get before they scroll.
 const MENU_LIST_MAX_HEIGHT: Pixels = px(320.);
 
+/// How tall the branch list gets before it scrolls. It is taller than the project menu's lists because a repository has many
+/// branches; a short window still caps it.
+const BRANCH_LIST_MAX_HEIGHT: Pixels = px(560.);
+
 /// The line under the Git bar: the branch menu starts below it, so that it does not cover it.
 const BAR_BORDER: Pixels = px(1.);
 
@@ -130,6 +134,9 @@ const REMOTE_FINISH: Duration = Duration::from_millis(300);
 /// the work goes on, and nothing redraws between the fades.
 const TERMINAL_PULSE_INTERVAL: Duration = Duration::from_secs(10);
 const TERMINAL_PULSE: Duration = Duration::from_millis(1200);
+
+/// One blink of the terminal icon on a project's tab.
+const TERMINAL_BLINK: Duration = Duration::from_millis(1400);
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
 
 /// How long the pointer must rest on a file in the Explorer before it is prepared for opening, so that moving past

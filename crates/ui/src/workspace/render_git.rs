@@ -66,7 +66,7 @@ impl Workspace {
                   .text_ellipsis(),
               )
               .children(project_status_marks("favorite", &path, status.as_ref(), false, cx))
-              .when(terminal_active, |row| row.child(terminal_activity_spinner(cx))),
+              .when(terminal_active, |row| row.child(terminal_activity_icon(cx))),
           )
           .when(terminal_active, |button| button.tooltip("Terminal command running"))
           .on_click({

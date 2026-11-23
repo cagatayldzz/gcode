@@ -317,7 +317,7 @@ impl Workspace {
         .child(terminal)
         .when(terminal_active, |button| {
           // A still dot that fades once in a while, instead of a spinner that redraws the window all the time.
-          let dot = status_badge(cx).absolute().top_0().right(-BADGE_OVERHANG).with_animation(
+          let dot = status_dot(cx).absolute().top_1().right_1().with_animation(
             ("terminal-pulse", self.terminal_pulse),
             Animation::new(TERMINAL_PULSE),
             |dot, delta| dot.opacity(1. - 0.7 * (delta * std::f32::consts::PI).sin()),

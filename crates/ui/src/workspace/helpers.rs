@@ -2,8 +2,13 @@
 
 use super::*;
 
-pub(super) fn terminal_activity_spinner(cx: &App) -> Spinner {
-  Spinner::new().xsmall().color(colors(cx).text_secondary)
+/// A small terminal icon that blinks while a command runs in the project's terminal, shown on the project's tab.
+pub(super) fn terminal_activity_icon(cx: &App) -> impl IntoElement {
+  div().flex_none().child(Icon::empty().path("icons/terminal.svg").size_3p5().text_color(colors(cx).text_secondary)).with_animation(
+    "terminal-activity",
+    Animation::new(TERMINAL_BLINK).repeat().with_easing(pulsating_between(0.25, 1.)),
+    |icon, delta| icon.opacity(delta),
+  )
 }
 
 pub(super) fn project_bar_button(id: impl Into<ElementId>, selected: bool, cx: &App) -> Button {
@@ -193,6 +198,13 @@ pub(super) fn category_label(index: usize, category: &Category) -> String {
 pub(super) fn status_badge(cx: &App) -> Div {
   let palette = colors(cx);
   div().min_w_4().h_4().flex().flex_none().items_center().justify_center().rounded_full().bg(cx.theme().primary).text_color(palette.on_accent)
+}
+
+/// A plain green dot for a button that has something running but nothing to count. The count badge is blue, so the two never
+/// read as the same signal; the ring in the rail's color separates the dot from the icon under it.
+pub(super) fn status_dot(cx: &App) -> Div {
+  let palette = colors(cx);
+  div().size_3().flex_none().rounded_full().bg(palette.new).border_2().border_color(palette.rail)
 }
 
 pub(super) fn count_badge(count: usize, cx: &App) -> Div {
