@@ -32,6 +32,12 @@ fn scratch_data_dir() -> Scratch {
   Scratch { dir, _turn: turn }
 }
 
+/// A window with a project starts a real shell, and its PTY thread wakes the foreground executor from outside the test thread.
+/// The test scheduler reports that as non-determinism unless it is told that other threads are expected.
+fn allow_shell_threads(cx: &TestAppContext) {
+  cx.executor().allow_parking();
+}
+
 fn draw_every_window(cx: &mut TestAppContext) {
   cx.run_until_parked();
   for handle in cx.windows() {
@@ -61,6 +67,7 @@ fn a_window_with_a_project_draws_its_explorer(cx: &mut TestAppContext) {
   fs::write(project.join("README.md"), "# Project\n").expect("write a file");
   fs::write(data.path().join("projects.json"), serde_json::json!({ "projects": [{ "path": project }], "active": project }).to_string())
     .expect("write the project list");
+  allow_shell_threads(cx);
   cx.update(|cx| {
     gpui_kit::init(cx);
     ws_ui::init(cx);
@@ -111,6 +118,7 @@ fn open_window_with_project(cx: &mut TestAppContext) -> (Scratch, gpui_kit::AnyW
   fs::create_dir_all(&project).expect("create the project");
   fs::write(data.path().join("projects.json"), serde_json::json!({ "projects": [{ "path": project }], "active": project }).to_string())
     .expect("write the project list");
+  allow_shell_threads(cx);
   cx.update(|cx| {
     gpui_kit::init(cx);
     ws_ui::init(cx);
