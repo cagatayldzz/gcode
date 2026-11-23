@@ -370,5 +370,5 @@ fn renaming_a_repository_refuses_unusable_names_and_reports_the_services_refusal
   assert!(requests.try_recv().is_err(), "nothing was sent for an unusable name");
 
   let error = rename_repository(&github, &github_repo(), "fine").unwrap_err();
-  assert!(error.contains("admin rights") || error.contains("permission"), "{error}");
+  assert!(error.contains("renaming a repository needs") && error.contains("Administration"), "{error}");
 }

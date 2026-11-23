@@ -91,7 +91,7 @@ change the display name to something other than the repository's name, **General
 2. the repository is renamed on the service (the service may adjust the name, for example GitHub turns spaces into hyphens);
 3. only when that worked, the project's remote address is updated to the new name (HTTPS and SSH forms alike) and the rest of the settings are saved.
 
-If the service refuses (the token needs permission to administer the repository), nothing is changed and the message says why. The option
+If the service refuses, nothing is changed and the message names what the token lacks: renaming needs permission to administer the repository (GitHub: **Administration: Read and write** on a fine-grained token, or the `repo` scope on a classic one). Change the token's permissions, or connect the account again in **Settings → Accounts**, then save again. The option
 is hidden while you are editing the remote address by hand.
 
 **Save** is available once something changed; **Discard** leaves without saving. Enter in the name field also saves.

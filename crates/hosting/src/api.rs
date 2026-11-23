@@ -470,7 +470,22 @@ pub fn rename_repository(connection: &Connection, repository: &RepoRef, new_name
     }
   };
   let method = if connection.account.provider == Provider::GitLab { "PUT" } else { "PATCH" };
-  let answer = connection.request(method, &url, Some(body))?;
+  let answer = connection.request(method, &url, Some(body)).map_err(|error| {
+    // The generic message names the permissions for reading and pushing; renaming needs more than those.
+    if error.contains("the token lacks a permission") {
+      let needs = match connection.account.provider {
+        Provider::GitHub => "the Administration permission: Read and write (a fine-grained token), or the `repo` scope (a classic token)",
+        Provider::GitLab => "the `api` scope and the Owner or Maintainer role on the project",
+        Provider::AzureDevOps => "the permission Code: Read, write & manage, and the right to manage the repository",
+      };
+      format!(
+        "{} refused the request: renaming a repository needs {needs}. Change the token's permissions, or connect the account again with a new token in Settings → Accounts.",
+        connection.account.provider.label()
+      )
+    } else {
+      error
+    }
+  })?;
   Ok(answer[key].as_str().filter(|name| !name.is_empty()).unwrap_or(new_name).to_string())
 }
 

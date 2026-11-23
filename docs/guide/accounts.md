@@ -30,6 +30,7 @@ After connecting, gcode reports what it could confirm:
 | --- | --- |
 | Browse repositories | **Add project → Clone → Browse my repositories…** |
 | Pull requests | List the open ones in the branch menu and create one (**Create pull request…**) |
+| Rename a repository | [Project settings → General](./projects.md#renaming-the-repository-with-the-project) renames the repository on the service. This needs **more** than the permissions above: GitHub **Administration: Read and write** (fine-grained token) or the `repo` scope (classic token); GitLab the Owner or Maintainer role plus `api`; Azure DevOps **Code: Read, write & manage**. |
 | Git over HTTPS | `clone`, `fetch`, `pull` and `push` get the token for that host. **SSH remotes keep using your keys.** |
 | **View on …** | **Repository → View on GitHub / GitLab / Azure DevOps** (`⇧⌘G`) finds the service from the remote's address, or from an account for a self-hosted host |
 
