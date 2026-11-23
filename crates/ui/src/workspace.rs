@@ -473,7 +473,7 @@ impl Workspace {
     window.set_window_title(&format!("{} — {}", ws_product::NAME, profile.name));
     {
       let preferences = &settings.read(cx).preferences;
-      apply_theme(preferences.theme, preferences.code_font_size, window, cx);
+      apply_theme(preferences.theme, preferences.font, preferences.code_font_size, window, cx);
     }
     let placement = Rc::new(Cell::new(None));
     let (dock, _skin) = DockSkin::dock_area("workspace-dock", Some(1), window, cx);
@@ -623,7 +623,7 @@ impl Workspace {
           if let Err(error) = preferences.save(&settings.read(cx).profile.preferences_path()) {
             eprintln!("Could not save the settings: {error}");
           }
-          apply_theme(preferences.theme, preferences.code_font_size, window, cx);
+          apply_theme(preferences.theme, preferences.font, preferences.code_font_size, window, cx);
           cx.notify();
         }),
         cx.subscribe_in(&settings, window, |this, _, _: &ConnectAccountRequested, window, cx| {
@@ -665,7 +665,7 @@ impl Workspace {
       _terminal_subscriptions: Vec::new(),
       _appearance: cx.observe_window_appearance(window, |this, window, cx| {
         let preferences = &this.settings.read(cx).preferences;
-        apply_theme(preferences.theme, preferences.code_font_size, window, cx)
+        apply_theme(preferences.theme, preferences.font, preferences.code_font_size, window, cx)
       }),
       // Changes made in another app (an editor, another Git client, a terminal) show up as soon as the window is back.
       _editor: cx.observe(&editor_panel, |_, _, cx| cx.notify()),

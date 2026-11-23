@@ -25,7 +25,7 @@ use gpui_kit::{
   *,
 };
 use std::path::PathBuf;
-use ws_storage::{Preferences, ThemeChoice, DEFAULT_CODE_FONT_SIZE, DEFAULT_EXPLORER_FONT_SIZE, FONT_SIZES};
+use ws_storage::{FontChoice, Preferences, ThemeChoice, DEFAULT_CODE_FONT_SIZE, DEFAULT_EXPLORER_FONT_SIZE, FONT_SIZES};
 
 /// The pages of Settings.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -281,6 +281,25 @@ impl SettingsWindow {
     }))
   }
 
+  /// The choice of fonts for the interface and the code.
+  fn font_control(&self, cx: &App) -> impl IntoElement {
+    let current = self.store.0.read(cx).preferences.font;
+    let palette = colors(cx);
+    h_flex().gap_1().children([("GitHub", FontChoice::GitHub), ("Geist", FontChoice::Geist), ("Inter", FontChoice::Inter)].map(|(label, choice)| {
+      let store = self.store.clone();
+      Button::new(SharedString::from(format!("font-{label}")))
+        .label(label)
+        .small()
+        .when(current == choice, |button| {
+          button.custom(
+            ButtonCustomVariant::new(cx).color(palette.accent).foreground(palette.on_accent).hover(palette.accent_hover).active(palette.accent_hover),
+          )
+        })
+        .when(current != choice, |button| button.outline())
+        .on_click(move |_, _, cx| store.update(cx, |preferences| preferences.font = choice))
+    }))
+  }
+
   /// A size in pixels with buttons to make it smaller and larger, and one to bring back the default.
   fn size_control(&self, id: &'static str, default: u32, size: fn(&mut Preferences) -> &mut u32, cx: &App) -> impl IntoElement {
     let value = *size(&mut self.store.preferences(cx));
@@ -342,6 +361,12 @@ impl SettingsWindow {
       .child(card(
         &palette,
         vec![
+          row(
+            "Font",
+            "GitHub: the system font and Menlo. Geist: Geist and Geist Mono. Inter: Inter, with Geist Mono for code.",
+            self.font_control(cx),
+            &palette,
+          ),
           row(
             "Code font size",
             "The size of code in the editor and in a file's changes.",

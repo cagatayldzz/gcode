@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use ws_storage::{ActivityBarLayout, Preferences, ThemeChoice};
+use ws_storage::{ActivityBarLayout, FontChoice, Preferences, ThemeChoice};
 
 #[test]
 fn preferences_survive_a_save_and_load() {
@@ -7,6 +7,7 @@ fn preferences_survive_a_save_and_load() {
   let file = dir.join("preferences.json");
   let saved = Preferences {
     theme: ThemeChoice::Dark,
+    font: FontChoice::Inter,
     projects_dir: Some(PathBuf::from("/work")),
     code_font_size: 15,
     explorer_font_size: 18,
@@ -104,4 +105,17 @@ fn moving_and_hiding_activity_buttons_changes_what_the_bar_shows() {
 fn unknown_activity_ids_are_ignored_and_new_buttons_come_last() {
   let layout = ActivityBarLayout { order: vec!["git".into(), "gone".into(), "explorer".into()], hidden: vec!["gone".into()] };
   assert_eq!(layout.arranged(&ITEMS), ["git", "explorer", "search", "terminal"]);
+}
+
+#[test]
+fn the_font_defaults_to_geist_and_an_unknown_name_gives_it() {
+  let dir = std::env::temp_dir().join(format!("ws-preferences-font-{}", std::process::id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  let file = dir.join("preferences.json");
+  assert_eq!(Preferences::default().font, FontChoice::Geist);
+  std::fs::write(&file, r#"{"font": "github"}"#).unwrap();
+  assert_eq!(Preferences::load(&file).font, FontChoice::GitHub);
+  std::fs::write(&file, r#"{"font": "comic"}"#).unwrap();
+  assert_eq!(Preferences::load(&file).font, FontChoice::Geist);
+  std::fs::remove_dir_all(dir).unwrap();
 }

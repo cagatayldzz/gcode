@@ -6,7 +6,7 @@ saved as soon as you make them and apply at once.
 | Page | Contains |
 | --- | --- |
 | **General** | **Appearance → Theme**: System (follows macOS), Light or Dark. Applies in every window. |
-| **Editor** | **Code → Font size** (9–24 px, 13 by default) for the editor and file changes; **Explorer → Font size** (14 px by default). The terminal keeps its own size. |
+| **Editor** | **Font**: GitHub (the system font and Menlo), Geist (the default) or Inter (with Geist Mono for code); it applies to the interface, the editor and the terminals. **Code → Font size** (9–24 px, 13 by default) for the editor and file changes; **Explorer → Font size** (14 px by default). The terminal keeps its own size. |
 | **Activity bar** | **Buttons**: reorder the activity bar's buttons and hide the ones you do not use. |
 | **Projects** | **Folder**: where new and cloned projects are created (the *Local Path* of the Add project dialog starts here). **Change…** chooses it; **Reset** returns to the default — the folder containing the open project, else your home folder. **Add all** adds every Git repository directly inside it. |
 | **Project list** | Every project and category, with actions ([details](./projects.md#the-project-list-page)). |

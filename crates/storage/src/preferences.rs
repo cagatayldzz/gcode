@@ -32,6 +32,53 @@ impl ThemeChoice {
   }
 }
 
+/// Which fonts the interface and the code use.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FontChoice {
+  /// Geist and Geist Mono, bundled.
+  #[default]
+  Geist,
+  /// Inter for the interface, bundled; code stays in Geist Mono, which Inter has no counterpart for.
+  Inter,
+  /// What GitHub shows: the system's interface font and Menlo.
+  GitHub,
+}
+
+impl FontChoice {
+  fn name(self) -> &'static str {
+    match self {
+      Self::Geist => "geist",
+      Self::Inter => "inter",
+      Self::GitHub => "github",
+    }
+  }
+
+  fn from_name(name: &str) -> Self {
+    match name {
+      "inter" => Self::Inter,
+      "github" => Self::GitHub,
+      _ => Self::Geist,
+    }
+  }
+
+  /// The family of the interface text.
+  pub fn sans_family(self) -> &'static str {
+    match self {
+      Self::Geist => "Geist",
+      Self::Inter => "Inter",
+      Self::GitHub => ".SystemUIFont",
+    }
+  }
+
+  /// The family of code and of the terminals.
+  pub fn mono_family(self) -> &'static str {
+    match self {
+      Self::Geist | Self::Inter => "Geist Mono",
+      Self::GitHub => "Menlo",
+    }
+  }
+}
+
 /// The smallest and largest configurable font sizes, in pixels.
 pub const FONT_SIZES: std::ops::RangeInclusive<u32> = 9..=24;
 
@@ -95,6 +142,8 @@ impl ActivityBarLayout {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Preferences {
   pub theme: ThemeChoice,
+  /// The fonts of the interface and of the code.
+  pub font: FontChoice,
   /// The folder new and cloned projects go into; `None` is the folder of the open project, else home.
   pub projects_dir: Option<PathBuf>,
   /// The size of the code in the editor and in changes, in pixels, within [`FONT_SIZES`].
@@ -113,6 +162,7 @@ impl Default for Preferences {
   fn default() -> Self {
     Self {
       theme: ThemeChoice::default(),
+      font: FontChoice::default(),
       projects_dir: None,
       code_font_size: DEFAULT_CODE_FONT_SIZE,
       explorer_font_size: DEFAULT_EXPLORER_FONT_SIZE,
@@ -131,6 +181,7 @@ impl Preferences {
     };
     Self {
       theme: root.get("theme").and_then(Value::as_str).map(ThemeChoice::from_name).unwrap_or_default(),
+      font: root.get("font").and_then(Value::as_str).map(FontChoice::from_name).unwrap_or_default(),
       projects_dir: root.get("projects_dir").and_then(Value::as_str).map(PathBuf::from),
       code_font_size: font_size(root.get("code_font_size"), DEFAULT_CODE_FONT_SIZE),
       explorer_font_size: font_size(root.get("explorer_font_size"), DEFAULT_EXPLORER_FONT_SIZE),
@@ -143,6 +194,7 @@ impl Preferences {
   pub fn save(&self, path: &Path) -> io::Result<()> {
     let value = json!({
       "theme": self.theme.name(),
+      "font": self.font.name(),
       "projects_dir": self.projects_dir.as_ref().map(|path| path.to_string_lossy()),
       "code_font_size": self.code_font_size,
       "explorer_font_size": self.explorer_font_size,

@@ -31,7 +31,6 @@ use ws_terminal::{
   MouseEvent as TermMouse, Palette, Rgb, Session, SessionEvent, SessionOptions, Snapshot,
 };
 
-const FONT_FAMILY: &str = "Geist Mono";
 const FONT_SIZE: Pixels = px(12.);
 const LINE_HEIGHT: Pixels = px(18.);
 const PADDING: Pixels = px(10.);
@@ -408,7 +407,7 @@ impl Render for Terminal {
     let palette = palette(cx);
     self.session.set_palette(palette.clone());
     let snapshot = Rc::new(self.session.snapshot(&palette));
-    let font = font(FONT_FAMILY);
+    let font = font(cx.theme().mono_font_family.clone());
     let text_system = window.text_system();
     let font_id = text_system.resolve_font(&font);
     let cell_width_px = text_system.advance(font_id, FONT_SIZE, 'm').map(|size| size.width).unwrap_or(FONT_SIZE * 0.6);

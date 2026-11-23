@@ -8,7 +8,7 @@ use gpui_kit::{
   },
   *,
 };
-use ws_storage::ThemeChoice;
+use ws_storage::{FontChoice, ThemeChoice};
 
 /// The size of the text the interface draws itself. The kit's own parts (icons, dock tabs) are sized in `rem`,
 /// which stays at the theme's 16 px.
@@ -16,12 +16,6 @@ pub(crate) const FONT_SIZE: Pixels = px(14.);
 
 /// Secondary text, such as a changed file's folder.
 pub(crate) const FONT_SIZE_SM: Pixels = px(12.);
-
-/// The interface font (bundled, see `init`).
-const SANS_FONT: &str = "Geist";
-
-/// The code font, used by the editor and the diff.
-const MONO_FONT: &str = "Geist Mono";
 
 /// The colors of one appearance.
 #[derive(Clone, Copy)]
@@ -225,7 +219,7 @@ fn github_dark(syntax: &mut SyntaxColors, c: &Colors) {
 }
 
 /// Applies the chosen appearance (the system's, unless the user picked one) with the app's colors and fonts.
-pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut Window, cx: &mut App) {
+pub(crate) fn apply_theme(choice: ThemeChoice, font: FontChoice, code_font_size: u32, window: &mut Window, cx: &mut App) {
   match choice {
     ThemeChoice::System => Theme::sync_system_appearance(Some(window), cx),
     ThemeChoice::Light => Theme::change(ThemeMode::Light, Some(window), cx),
@@ -234,8 +228,8 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
   let c = colors(cx);
   let dark = cx.theme().is_dark();
   Theme::update(cx, |theme| {
-    theme.font_family = SANS_FONT.into();
-    theme.mono_font_family = MONO_FONT.into();
+    theme.font_family = font.sans_family().into();
+    theme.mono_font_family = font.mono_family().into();
     theme.mono_font_size = px(code_font_size as f32);
     // Dialogs and notifications are rounded with `radius_lg`; fields, buttons and menu items with `radius`.
     theme.radius = px(6.);
