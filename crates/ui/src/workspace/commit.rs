@@ -87,11 +87,13 @@ impl Workspace {
     )
   }
 
-  /// Opens the dialog that connects a GitHub, GitLab or Azure DevOps account.
-  pub(crate) fn open_connect_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+  /// Opens the dialog that connects a GitHub, GitLab or Azure DevOps account. With `existing`, the service and host are filled
+  /// in and only a new token is needed: the account keeps its place in the list and its warning is replaced by the new check.
+  pub(crate) fn open_connect_account(&mut self, existing: Option<ws_hosting::Account>, window: &mut Window, cx: &mut Context<Self>) {
+    let title = if existing.is_some() { "Reconnect the account" } else { "Connect an account" };
     let form = {
       let keychain = self.settings.read(cx).accounts.keychain();
-      cx.new(|cx| ConnectAccount::new(keychain, window, cx))
+      cx.new(|cx| ConnectAccount::new(keychain, existing, window, cx))
     };
     self._dialog_subscription = Some(cx.subscribe_in(&form, window, |this, _, connected: &AccountConnected, window, cx| {
       let (mut account, warnings, unchecked) = (connected.0.clone(), connected.1.clone(), connected.2.clone());
@@ -114,7 +116,7 @@ impl Workspace {
         window.push_notification(Notification::info(format!("Connected {described}.")), cx);
       }
     }));
-    window.open_dialog(cx, move |dialog, _, _| dialog.title("Connect an account").width(px(580.)).p_5().child(form.clone()));
+    window.open_dialog(cx, move |dialog, _, _| dialog.title(title).width(px(580.)).p_5().child(form.clone()));
   }
 
   /// Disconnects an account: it leaves the list and its token leaves the Keychain.

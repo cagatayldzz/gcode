@@ -638,6 +638,10 @@ fn finish(result: (bool, String), failure: &str) -> Result<String, String> {
 
 /// What the message of a failed push, fetch or pull says when the server turned down the connected account's token (and the user's own
 /// login could not be used either): the interface looks for it to mark the account as having a problem.
+/// What the message says when no login could be given to Git at all: no account serves the address, or its token is missing
+/// from the Keychain.
+pub const NO_LOGIN: &str = "The app had no login to give Git";
+
 pub const TOKEN_REFUSED: &str = "refused the token of the connected account";
 
 /// Whether git's message says the server turned the login down (rather than, say, a network failure).
@@ -664,7 +668,7 @@ fn with_login(credentials: Option<&Credentials>, mut command: impl FnMut(Option<
     // Nothing to give git: no account serves the address, or its token is not in the Keychain. git's own words ("could not read
     // Username") do not say what to do about it.
     (Err(error), None) if login_refused(&error) => Err(format!(
-      "{} The app had no login to give Git (no account is connected for this address, or the account's token is missing from the Keychain), and your own Git login has no saved password. Connect the account again in Settings → Accounts, or sign in once with `git push` in a terminal.",
+      "{} {NO_LOGIN} (no account is connected for this address, or the account's token is missing from the Keychain), and your own Git login has no saved password. Connect the account again in Settings → Accounts, or sign in once with `git push` in a terminal.",
       error.trim_end()
     )),
     (result, _) => result,

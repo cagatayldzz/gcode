@@ -27,6 +27,8 @@ pub(crate) struct ConnectAccount {
   /// Where the token goes: the Keychain entries of the profile.
   keychain: KeychainStore,
   provider: Provider,
+  /// Reconnecting an existing account: the service and where it lives stay as they are, only the token is new.
+  reconnecting: bool,
   host: Entity<InputState>,
   organization: Entity<InputState>,
   token: Entity<InputState>,
@@ -36,20 +38,25 @@ pub(crate) struct ConnectAccount {
 }
 
 impl ConnectAccount {
-  pub fn new(keychain: KeychainStore, window: &mut Window, cx: &mut Context<Self>) -> Self {
+  pub fn new(keychain: KeychainStore, existing: Option<Account>, window: &mut Window, cx: &mut Context<Self>) -> Self {
     let host = cx.new(|cx| InputState::new(window, cx).placeholder(Provider::GitHub.default_host()));
     let organization = cx.new(|cx| InputState::new(window, cx).placeholder("your-organization"));
     let token = cx.new(|cx| InputState::new(window, cx).masked(true).placeholder("Paste the token"));
+    let provider = existing.as_ref().map_or(Provider::GitHub, |account| account.provider);
+    if let Some(account) = &existing {
+      host.update(cx, |input, cx| input.set_value(account.host.clone(), window, cx));
+      organization.update(cx, |input, cx| input.set_value(account.organization.clone().unwrap_or_default(), window, cx));
+    }
     let subscription = cx.subscribe_in(&token, window, |this, _, event: &InputEvent, _, cx| {
       if let InputEvent::PressEnter { .. } = event {
         this.connect(cx);
       }
     });
-    Self { keychain, provider: Provider::GitHub, host, organization, token, busy: false, error: None, _subscription: subscription }
+    Self { keychain, provider, reconnecting: existing.is_some(), host, organization, token, busy: false, error: None, _subscription: subscription }
   }
 
   fn choose(&mut self, provider: Provider, window: &mut Window, cx: &mut Context<Self>) {
-    if self.busy || self.provider == provider {
+    if self.busy || self.reconnecting || self.provider == provider {
       return;
     }
     self.provider = provider;
@@ -154,7 +161,7 @@ impl Render for ConnectAccount {
     v_flex()
       .text_size(FONT_SIZE)
       .gap_4()
-      .child(h_flex().gap_2().children(Provider::ALL.map(|provider| self.provider_button(provider, cx))))
+      .when(!self.reconnecting, |form| form.child(h_flex().gap_2().children(Provider::ALL.map(|provider| self.provider_button(provider, cx)))))
       .child(self.guide(cx))
       .when(azure, |form| form.child(field("Organization", crate::components::soft_input(&self.organization, cx).into_any_element())))
       .when(!azure, |form| {
@@ -173,7 +180,13 @@ impl Render for ConnectAccount {
       .child(
         h_flex().gap_2().justify_end().child(Button::new("connect-cancel").label("Cancel").on_click(|_, window, cx| window.close_dialog(cx))).child(
           Button::new("connect-submit")
-            .label(if self.busy { "Checking…" } else { "Connect" })
+            .label(if self.busy {
+              "Checking…"
+            } else if self.reconnecting {
+              "Reconnect"
+            } else {
+              "Connect"
+            })
             .primary()
             .loading(self.busy)
             .disabled(self.busy)

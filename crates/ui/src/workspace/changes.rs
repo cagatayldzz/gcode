@@ -205,7 +205,7 @@ impl Workspace {
                 if let Some(kind) = refusal_kind(&message) {
                   this.flag_account_issue(&remote_url, kind, cx);
                 }
-                window.push_notification(Notification::error(format!("Committed {id}, but the push failed: {message}")), cx)
+                this.push_remote_failure(format!("Committed {id}, but the push failed: {message}"), &remote_url, window, cx)
               }
             }
           }

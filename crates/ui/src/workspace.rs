@@ -18,8 +18,8 @@ use crate::{
   project_setup::{ProjectReady, ProjectSetup},
   pull_request::{PullRequestEvent, PullRequestForm, PullRequestTarget},
   settings::{
-    activity_ids, settings_for, AccountRecheckRequested, AccountRemoveRequested, AddAllProjectsRequested, CommitSettingsRequested,
-    ConnectAccountRequested, SettingsModel,
+    activity_ids, settings_for, AccountRecheckRequested, AccountReconnectRequested, AccountRemoveRequested, AddAllProjectsRequested,
+    CommitSettingsRequested, ConnectAccountRequested, SettingsModel,
   },
   settings_window::SettingsWindow,
   terminal::{Terminal, TerminalActivityChanged, TerminalAttentionChanged, TerminalExited},
@@ -593,12 +593,17 @@ impl Workspace {
         }),
         cx.subscribe_in(&settings, window, |this, _, _: &ConnectAccountRequested, window, cx| {
           if window.is_window_active() {
-            this.open_connect_account(window, cx);
+            this.open_connect_account(None, window, cx);
           }
         }),
         cx.subscribe_in(&settings, window, |this, _, event: &AccountRecheckRequested, window, cx| {
           if window.is_window_active() {
             this.recheck_account(event.0.clone(), window, cx);
+          }
+        }),
+        cx.subscribe_in(&settings, window, |this, _, event: &AccountReconnectRequested, window, cx| {
+          if window.is_window_active() {
+            this.open_connect_account(this.settings.read(cx).accounts.items.iter().find(|account| account.key() == event.0).cloned(), window, cx);
           }
         }),
         cx.subscribe_in(&settings, window, |this, _, event: &AccountRemoveRequested, window, cx| {

@@ -1,7 +1,7 @@
 //! Connected accounts (GitHub, GitLab, Azure DevOps): the helpers every part of the interface shares, and the list in Settings.
 
 use crate::{
-  settings::{AccountRecheckRequested, AccountRemoveRequested, ConnectAccountRequested, SettingsModel},
+  settings::{AccountRecheckRequested, AccountReconnectRequested, AccountRemoveRequested, ConnectAccountRequested, SettingsModel},
   theme::{colors, FONT_SIZE_SM},
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -83,6 +83,14 @@ impl Render for AccountsList {
             .child(Label::new(account.provider.label()).font_weight(FontWeight::SEMIBOLD))
             .child(Label::new(account.label()).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground)),
         )
+        .child(Button::new(SharedString::from(format!("account-reconnect-{key}"))).label("Reconnect").small().outline().on_click({
+          let key = key.clone();
+          let model = self.model.clone();
+          move |_, _, cx| {
+            let key = key.clone();
+            model.update(cx, |_, cx| cx.emit(AccountReconnectRequested(key)));
+          }
+        }))
         .child(Button::new(SharedString::from(format!("account-remove-{key}"))).label("Disconnect").small().outline().on_click({
           let key = key.clone();
           let model = self.model.clone();

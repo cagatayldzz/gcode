@@ -154,6 +154,12 @@ pub(super) fn refusal_kind(message: &str) -> Option<IssueKind> {
   }
 }
 
+/// Whether a failed push, pull or fetch is fixed by connecting the account again: there was no login to give Git, or the host
+/// turned the account's token down.
+pub(super) fn needs_reconnect(message: &str) -> bool {
+  message.contains(ws_git::NO_LOGIN) || message.contains(ws_git::TOKEN_REFUSED)
+}
+
 /// How long ago a commit was made, in words: "2 minutes ago", "3 hours ago", "yesterday".
 pub(super) fn ago_long(seconds_since_epoch: i64) -> String {
   let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs() as i64);

@@ -99,7 +99,7 @@ impl Workspace {
             if let Some(kind) = refusal_kind(&message) {
               this.flag_account_issue(&remote_url, kind, cx);
             }
-            window.push_notification(Notification::error(message), cx)
+            this.push_remote_failure(message, &remote_url, window, cx)
           }
         }
         cx.notify();

@@ -48,6 +48,11 @@ pub(crate) struct AccountRecheckRequested(pub String);
 
 impl EventEmitter<AccountRecheckRequested> for SettingsModel {}
 
+/// Sent when the user asks to connect the account with this key again, with a new token.
+pub(crate) struct AccountReconnectRequested(pub String);
+
+impl EventEmitter<AccountReconnectRequested> for SettingsModel {}
+
 /// Sent when the user disconnects the account with this key.
 pub(crate) struct AccountRemoveRequested(pub String);
 

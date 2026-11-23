@@ -63,6 +63,25 @@ impl Workspace {
     });
   }
 
+  /// Shows a failed push, pull or fetch. When connecting the account again would fix it, the notification has a **Reconnect
+  /// account** button that opens the connect dialog for the account that serves `url` (or an empty one when none does).
+  pub(super) fn push_remote_failure(&mut self, message: String, url: &str, window: &mut Window, cx: &mut Context<Self>) {
+    let mut notification = Notification::error(message.clone());
+    if needs_reconnect(&message) {
+      let account = self.settings.read(cx).accounts.items.iter().find(|account| RepoRef::for_account(account, url).is_some()).cloned();
+      let workspace = cx.entity().downgrade();
+      notification = notification.action(move |_, _, cx| {
+        let (workspace, account) = (workspace.clone(), account.clone());
+        Button::new("reconnect-account").label("Reconnect account").small().primary().on_click(cx.listener(move |this, _, window, cx| {
+          this.dismiss(window, cx);
+          let account = account.clone();
+          let _ = workspace.update(cx, |workspace, cx| workspace.open_connect_account(account, window, cx));
+        }))
+      });
+    }
+    window.push_notification(notification, cx);
+  }
+
   /// Sets or clears what is wrong with an account's token.
   pub(super) fn set_account_issue(&mut self, key: &str, issue: Option<String>, cx: &mut Context<Self>) {
     self.settings.update(cx, |model, cx| {

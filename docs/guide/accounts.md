@@ -51,6 +51,10 @@ The warning stays until it is fixed. After changing the token's permissions (or 
 again**: it asks the service what the token may do — it can start a push and open a pull request, without changing anything — in the open
 project's repository, else in the account's first repository.
 
+**Reconnect** opens the connect dialog for that account with its service and host already filled in: paste a new token and it replaces the old one in the Keychain, keeping the account in the list. Use it when the token expired, was revoked, or is missing from the Keychain.
+
+When a push fails because no login could be given to Git (no account serves the remote, or its token is missing from the Keychain) or the host refused the token, the error notification has a **Reconnect account** button that opens the same dialog.
+
 **Disconnect** removes the account and its token from the Keychain.
 
 ## Privacy
