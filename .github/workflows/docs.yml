@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
+      # `actions: read` lets deploy-pages list the uploaded artifact: without it a private repository finds "0 artifacts".
+      actions: read
       contents: read
       pages: write
       id-token: write
@@ -38,6 +40,8 @@ jobs:
       - run: bun run docs:build
         env:
           VEKRO_DOCS_BASE: ${{ steps.pages.outputs.base_path }}
+      - name: List the built site
+        run: ls -la docs-site | head -20
       - uses: actions/upload-pages-artifact@v5
         with:
           path: docs-site
