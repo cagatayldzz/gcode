@@ -9,7 +9,7 @@ edition = "2021"
 rust-version = "1.92"
 publish = false
 license = "UNLICENSED"
-repository = "https://github.com/cagatayldzz/vekro"
+repository = "https://github.com/cagatayldzz/gcode"
 
 [workspace.dependencies]
 ws-product = { path = "crates/product" }

@@ -30,6 +30,7 @@ mod quick_open;
 mod repository_picker;
 mod selection;
 mod settings;
+mod settings_window;
 mod syntax;
 mod terminal;
 mod terminal_layout;

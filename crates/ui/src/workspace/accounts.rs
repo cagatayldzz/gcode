@@ -159,28 +159,9 @@ impl Workspace {
       |cx| UpdatePanel::new(settings, cx)
     });
     let settings = self.settings.clone();
-    window.open_dialog(cx, move |dialog, _, cx| {
-      // Read on every draw, so that a theme change while the dialog is open recolors it.
-      let palette = colors(cx);
-      // The dialog's own padding is removed so that the page list reaches the edges of the window.
-      dialog.p_0().width(px(820.)).child(
-        v_flex()
-          .rounded_b_lg()
-          .overflow_hidden()
-          .child(
-            div().border_b_1().border_color(palette.border).child(Label::new("Settings").text_base().font_weight(FontWeight::SEMIBOLD).px_6().py_4()),
-          )
-          .child(div().h(px(486.)).child(settings_view(
-            settings.clone(),
-            fallback.clone(),
-            projects.clone(),
-            profiles.clone(),
-            accounts.clone(),
-            updates.clone(),
-            page,
-            palette.background,
-          ))),
-      )
-    });
+    let view = cx.new(|cx| SettingsWindow::new(settings, fallback, projects, profiles, accounts, updates, page, window, cx));
+    // The dialog's own padding is removed so that the page list reaches the edges of the window.
+    window
+      .open_dialog(cx, move |dialog, _, _| dialog.p_0().width(px(900.)).child(div().h(px(580.)).rounded_lg().overflow_hidden().child(view.clone())));
   }
 }

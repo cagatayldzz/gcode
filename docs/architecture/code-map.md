@@ -73,7 +73,8 @@ repository/
 | `project_setup.rs` | the Add project dialog (New, Clone, Import) |
 | `project_settings.rs` | per-project settings: General (display name, folder rename, repository rename, Git remote), Appearance, Index, Remove; the workspace applies a save in `workspace/projects.rs` (`apply_project_settings`) |
 | `project_manager.rs` | the Project list page of Settings |
-| `settings.rs` | the Settings pages and `SettingsModel`, shared by windows of a profile |
+| `settings.rs` | `SettingsModel`, shared by windows of a profile, and the helpers its pages use |
+| `settings_window.rs` | the Settings dialog: pages grouped in a searchable list, each page cards of rows (name, description, control) |
 | `profiles.rs` | the profile list, `open_window`, profile menus |
 | `commit_settings.rs` | the OpenCommit dialog |
 | `connections.rs`, `connect_account.rs`, `repository_picker.rs`, `pull_request.rs` | accounts list, the Connect dialog, the repository list of Clone, the Create pull request dialog |
@@ -116,7 +117,7 @@ repository/
 | a menu item | `crates/ui/src/menus.rs` |
 | what the branch menu shows | `workspace/render_menus.rs` (rows) and `workspace/branches.rs` (actions) |
 | a Git operation | `crates/git/src/` — add it there with a test in `crates/git/tests/`, then wire it in `workspace/` |
-| a Settings page | `crates/ui/src/settings.rs`, and `crates/storage/src/preferences.rs` for the stored value |
+| a Settings page | `crates/ui/src/settings_window.rs`, and `crates/storage/src/preferences.rs` for the stored value |
 | colors | `crates/ui/src/theme.rs` |
 | the product's name, bundle id or environment prefix | `product.toml` (nowhere else) |
 | a language's highlighting | `crates/ui/src/syntax.rs`, and `crates/ui/src/editor.rs` (`language_for`) |

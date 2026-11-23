@@ -18,9 +18,10 @@ use crate::{
   project_setup::{ProjectReady, ProjectSetup},
   pull_request::{PullRequestEvent, PullRequestForm, PullRequestTarget},
   settings::{
-    activity_ids, settings_for, settings_view, AccountRecheckRequested, AccountRemoveRequested, AddAllProjectsRequested, CommitSettingsRequested,
+    activity_ids, settings_for, AccountRecheckRequested, AccountRemoveRequested, AddAllProjectsRequested, CommitSettingsRequested,
     ConnectAccountRequested, SettingsModel,
   },
+  settings_window::SettingsWindow,
   terminal::{Terminal, TerminalActivityChanged, TerminalAttentionChanged, TerminalExited},
   terminal_layout::{Arrangement, Direction, Node},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
