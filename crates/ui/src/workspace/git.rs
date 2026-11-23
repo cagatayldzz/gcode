@@ -467,8 +467,6 @@ impl Workspace {
     }
     self.branch_tab = tab;
     self.branch_filter.update(cx, |input, cx| input.set_value("", window, cx));
-    let focus = self.branch_filter.read(cx).focus_handle(cx);
-    window.defer(cx, move |window, cx| focus.focus(window, cx));
     if tab == BranchTab::PullRequests {
       self.load_pull_requests(cx);
     }
@@ -542,8 +540,6 @@ impl Workspace {
         self.branches = ws_git::branch_entries(root).unwrap_or_default();
       }
       self.branch_filter.update(cx, |input, cx| input.set_value("", window, cx));
-      let focus = self.branch_filter.read(cx).focus_handle(cx);
-      window.defer(cx, move |window, cx| focus.focus(window, cx));
     }
     cx.notify();
   }

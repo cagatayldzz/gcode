@@ -32,7 +32,7 @@ Click a file to open it in a tab. The tabs sit in a row on top, and the shown on
 - **Closing keeps your text** — closing a tab keeps its unsaved text in memory; opening the file again brings it back. Text is only
   written by saving. Each project keeps its own tabs.
 - **Limits** — other than images, files must be text and at most 2 MB, or they are refused with a notification.
-- `⌘W` closes the shown tab; pressed again, the remaining tabs from the last to the first. It never closes the window.
+- `⌘W` closes the shown tab; pressed again, the remaining tabs from the last to the first. It never closes the window. The red close button minimizes the window instead, so terminals and agents keep running; `⌘Q` quits the app.
 
 ### Syntax highlighting
 

@@ -95,6 +95,11 @@ pub fn open_window(profile: Profile, cx: &mut App) {
     .expect("Failed to open the window");
   // The keyboard starts in the window, so its shortcuts work before anything is clicked.
   let _ = handle.update(cx, |_, window, cx| {
+    // The close button minimizes the window, so the terminals and agents keep running; ⌘Q quits the app.
+    window.on_window_should_close(cx, |window, _| {
+      window.minimize_window();
+      false
+    });
     workspace.update(cx, |workspace, cx| workspace.warm_index(cx));
     let focus = workspace.read(cx).focus_handle().clone();
     focus.focus(window, cx);

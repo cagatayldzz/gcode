@@ -145,9 +145,7 @@ impl Workspace {
         }
       };
       Button::new("sync-remote")
-        .custom(
-          ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.rail_item_hover).active(palette.rail_item_hover),
-        )
+        .custom(ButtonCustomVariant::new(cx).color(palette.surface).foreground(palette.text).hover(palette.hover).active(palette.hover))
         .cursor_pointer()
         .border_0()
         .h_12()
@@ -214,7 +212,7 @@ impl Workspace {
       h_flex()
         .flex_none()
         .h_12()
-        .bg(palette.rail)
+        .bg(palette.surface)
         .border_b_1()
         .border_color(palette.border)
         .child({

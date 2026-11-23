@@ -117,13 +117,23 @@ bundle() {
   fi
 }
 
+# The identity that signs local builds. macOS remembers a folder permission (Desktop, Documents) per code signature, and an ad-hoc
+# signature is different on every build, so the prompt would come back each time. An Apple Development certificate keeps the
+# signature's identity stable. `SIGN_IDENTITY` overrides it; with no certificate the build falls back to ad-hoc.
+signing_identity() {
+  [[ -n "${SIGN_IDENTITY:-}" ]] && { echo "$SIGN_IDENTITY"; return; }
+  security find-identity -v -p codesigning 2>/dev/null | awk '/"Apple Development:/ { print $2; exit }' || true
+}
+
 # Local development signature. Distribution requires Developer ID + notarization.
 sign() {
-  local output helper="$app_dir/Contents/MacOS/$product_slug-apple-intelligence"
+  local output identity helper="$app_dir/Contents/MacOS/$product_slug-apple-intelligence"
+  identity="$(signing_identity)"
+  identity="${identity:--}"
   if [[ -x "$helper" ]]; then
-    output="$(codesign --force --sign - "$helper" 2>&1)" || fail "$output"
+    output="$(codesign --force --sign "$identity" "$helper" 2>&1)" || fail "$output"
   fi
-  output="$(codesign --force --sign - "$app_dir" 2>&1)" || fail "$output"
+  output="$(codesign --force --sign "$identity" "$app_dir" 2>&1)" || fail "$output"
 }
 
 # `open` only brings an already running instance forward, so quit the running development app first: politely, then by force.

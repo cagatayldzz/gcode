@@ -41,9 +41,7 @@ impl Workspace {
     let current = SharedString::from(current.to_string());
     let open = self.branch_menu_open;
     Button::new("branch-trigger")
-      .custom(
-        ButtonCustomVariant::new(cx).color(palette.rail).foreground(palette.text).hover(palette.rail_item_hover).active(palette.rail_item_hover),
-      )
+      .custom(ButtonCustomVariant::new(cx).color(palette.surface).foreground(palette.text).hover(palette.hover).active(palette.hover))
       .selected(open)
       .cursor_pointer()
       .border_0()

@@ -335,8 +335,9 @@ impl Workspace {
               .items_center()
               .justify_center()
               .rounded_full()
-              .bg(theme.warning)
-              .child(Icon::empty().path("icons/triangle-alert.svg").size_3().text_color(palette.on_accent)),
+              // A bell on the accent color: the program asks for a look, which is not an error.
+              .bg(theme.primary)
+              .child(Icon::empty().path("icons/bell.svg").size_3().text_color(palette.on_accent)),
           )
         })
         .into_any_element(),

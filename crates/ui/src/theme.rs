@@ -203,6 +203,8 @@ pub(crate) fn apply_theme(choice: ThemeChoice, code_font_size: u32, window: &mut
     // Dialogs and notifications are rounded with `radius_lg`; fields, buttons and menu items with `radius`.
     theme.radius = px(6.);
     theme.radius_lg = px(10.);
+    // A focused control only tints its border; the Kit's extra ring around it is off.
+    theme.focus_ring = false;
     theme.notification.width = px(360.);
     let style = &mut std::sync::Arc::make_mut(&mut theme.highlight_theme).style;
     // The design shows no highlight on the line of the cursor.
