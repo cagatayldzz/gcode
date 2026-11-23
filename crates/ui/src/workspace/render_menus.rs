@@ -47,7 +47,7 @@ impl Workspace {
       )
       .cursor_pointer()
       .border_0()
-      .h_12()
+      .h_full()
       .w_48()
       .rounded_none()
       .child(
@@ -76,6 +76,8 @@ impl Workspace {
     // The popover has no padding of its own: the lists' scrollbars then run along the menu's right edge, and the padding sits
     // inside the header and inside the lists, so a scrollbar never covers a row.
     Popover::new("branch-menu")
+      // The button's slot is as tall as the bar and the button fills it, so the menu opens right under the bar.
+      .trigger_style(StyleRefinement::default().h_full())
       .p_0()
       .rounded_none()
       .shadow_none()
@@ -140,7 +142,10 @@ impl Workspace {
             let mut newest: Vec<&ws_git::BranchEntry> = rest.iter().collect();
             newest.sort_by_key(|entry| std::cmp::Reverse(entry.time));
             let recent_names: Vec<String> = newest.into_iter().take(RECENT_BRANCHES).map(|entry| entry.name.clone()).collect();
-            let (recent, others): (Vec<_>, Vec<_>) = rest.into_iter().partition(|entry| recent_names.contains(&entry.name));
+            let (mut recent, mut others): (Vec<_>, Vec<_>) = rest.into_iter().partition(|entry| recent_names.contains(&entry.name));
+            // The newest first, in the recent branches and among the others; a branch with no known time goes last.
+            recent.sort_by_key(|entry| std::cmp::Reverse(entry.time));
+            others.sort_by_key(|entry| std::cmp::Reverse(entry.time));
             let make_row = |entry: &ws_git::BranchEntry| -> AnyElement {
               let ws_git::BranchEntry { name, remote, time, .. } = entry.clone();
               let favorite = starred.contains(&name);
@@ -152,11 +157,13 @@ impl Workspace {
               h_flex()
                 .id(SharedString::from(format!("branch-{name}")))
                 .gap_2()
-                .px_2()
-                .py_1()
-                .rounded_md()
+                .px_3()
+                .py_1p5()
                 .items_center()
+                .border_b_1()
+                .border_color(crate::theme::row_divider(&palette))
                 .cursor_pointer()
+                .when(selected, |row| row.bg(palette.selected))
                 .hover(|row| row.bg(palette.hover))
                 // The star, at the left: filled for a starred branch, an outline otherwise.
                 .child(
@@ -184,10 +191,9 @@ impl Workspace {
                     }),
                 )
                 .child(div().size_4().flex_none().when(selected, |mark| mark.child(Icon::new(IconName::Check).size_4())))
-                .child(Label::new(name.clone()).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
-                .when_some(remote.clone(), |row, remote| {
-                  row.child(Label::new(remote).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).flex_none())
-                })
+                .child(
+                  Label::new(name.clone()).font_weight(FontWeight::MEDIUM).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis(),
+                )
                 // When work last landed on the branch: its latest commit.
                 .when_some(time, |row, time| {
                   row.child(Label::new(ago_long(time)).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).flex_none())
@@ -218,8 +224,9 @@ impl Workspace {
               }
               rows.push(
                 Label::new(label)
-                  .px_2()
+                  .px_3()
                   .pt_2()
+                  .pb_1()
                   .text_size(FONT_SIZE_SM)
                   .font_weight(FontWeight::SEMIBOLD)
                   .text_color(theme.muted_foreground)
@@ -242,10 +249,7 @@ impl Workspace {
               .child(
                 div().id("branch-list").flex_1().min_h_0().overflow_y_scrollbar().child(
                   v_flex()
-                    .gap_0p5()
-                    .px_3()
-                    .pb_3()
-                    .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground)))
+                    .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_3().py_1().text_color(theme.muted_foreground)))
                     .children(rows),
                 ),
               )

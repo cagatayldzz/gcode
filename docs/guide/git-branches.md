@@ -44,19 +44,19 @@ Click the current branch. The menu has two tabs: **Branches** and, when a connec
  │ Recent Branches                              │
  │   hotfix                    7 days ago       │
  │ Other Branches                               │
- │   teammate-work   origin    5 months ago     │  ← exists only on the remote
+ │   teammate-work              5 months ago     │  ← may exist only on the remote
  └──────────────────────────────────────────────┘
 ```
 
 The list has four sections, as in GitHub Desktop: **Favorites** (starred branches), the **Default Branch** (where the remote's `HEAD`
-points), the five **Recent Branches** (the latest commits), and **Other Branches**. Each row says when the branch's **latest commit**
+points), the five **Recent Branches** (the latest commits), and **Other Branches**. Recent and Other are sorted from the newest commit to the oldest. Each row says when the branch's **latest commit**
 was made. The menu reaches from the button down to the bottom of the window, and its list scrolls when it holds more.
 
 - **Type** to filter. **New Branch** creates a branch at the current commit and switches to it (uncommitted changes come along); the
   filter text is used as the suggested name.
 - The **star** at the left of a branch marks it as a favorite: favorites are listed first. The stars belong to the project and live in
   the app's own data (`projects.json`), never in the repository, so they are not shared and do not change Git.
-- A branch that **only a remote has** is listed with the remote's name beside it. Choosing it creates a local branch that
+- A branch that **only a remote has** is listed like the others. Choosing it creates a local branch that
   **follows** the remote one and switches to it, like `git switch`.
 - **Right-click** a branch:
 
