@@ -35,6 +35,8 @@ impl Workspace {
         let picked = path.clone();
         let target = path.clone();
         let swapper = workspace.clone();
+        let menu_workspace = workspace.clone();
+        let menu_path = path.clone();
         let button = project_bar_button(SharedString::from(format!("favorite-project-{}", path.display())), selected, cx)
           .child(
             h_flex()
@@ -101,6 +103,14 @@ impl Workspace {
             });
           })
           .child(button)
+          .context_menu(move |menu, _, _| {
+            let (workspace, path) = (menu_workspace.clone(), menu_path.clone());
+            menu.item(
+              PopupMenuItem::new("Remove from favorites")
+                .icon(Icon::empty().path("icons/star.svg"))
+                .on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.toggle_favorite(&path, cx))),
+            )
+          })
           .into_any_element()
       })
       .collect()
