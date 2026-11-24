@@ -44,10 +44,9 @@ repository's own download URLs (see [Updates](../architecture/updates.md)).
 
 | Job | Runner | Does |
 | --- | --- | --- |
-| `core` | Linux | shell tests, `cargo fmt --check`, clippy (warnings are errors) and tests of the plain-Rust crates |
-| `interface` | macOS | `cargo check` of `ws-ui` and `ws-app`, and the headless `window_render` test |
+| `core` | macOS | shell tests, formatting, core lint and tests, interface compilation, and the headless `window_render` test |
 
-The GPUI crates need macOS, so the full workspace is linted and tested by the release workflow's build job.
+The release workflow also lints and tests the full workspace on macOS.
 
 ## Documentation site
 
