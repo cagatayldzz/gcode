@@ -8,7 +8,6 @@ use gpui_kit::{
     h_flex,
     label::Label,
     menu::{DropdownMenu as _, PopupMenuItem},
-    progress::Progress,
     scroll::ScrollableElement as _,
     v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _,
   },
@@ -39,6 +38,8 @@ pub(crate) struct MergeDialog {
   source: SharedString,
   state: MergeState,
   paths: BTreeMap<String, Option<MergeSide>>,
+  /// Files resolved by taking the side that has no such file, so the file is deleted.
+  deleted: std::collections::HashSet<String>,
   task: Option<Task<()>>,
 }
 
@@ -47,7 +48,7 @@ impl EventEmitter<MergeEvent> for MergeDialog {}
 impl MergeDialog {
   pub fn new(root: PathBuf, source: SharedString, state: MergeState) -> Self {
     let paths = state.files.iter().map(|file| (file.path.clone(), None)).collect();
-    Self { root, source, state, paths, task: None }
+    Self { root, source, state, paths, deleted: Default::default(), task: None }
   }
 
   pub fn source(&self) -> &SharedString {
@@ -91,6 +92,18 @@ impl MergeDialog {
         match result {
           Ok(Some(state)) => {
             if let Operation::Choose(file, side) = operation {
+              let kept =
+                this
+                  .state
+                  .files
+                  .iter()
+                  .find(|found| found.path == file)
+                  .map(|found| if side == MergeSide::Current { found.ours } else { found.theirs });
+              if kept == Some(false) {
+                this.deleted.insert(file.clone());
+              } else {
+                this.deleted.remove(&file);
+              }
               this.paths.insert(file, Some(side));
             }
             this.set_state(state, cx);
@@ -151,13 +164,55 @@ impl MergeDialog {
       None => (None, name.clone()),
     };
     let muted = cx.theme().muted_foreground;
-    let status = if file.is_some() {
+    // A file one branch deleted and the other changed: nothing to merge, only a choice, made in a menu.
+    let one_sided = sides.filter(|(ours, theirs)| ours != theirs).map(|(ours, _)| {
+      let (current, incoming) = (branches.0.to_string(), branches.1.to_string());
+      if ours {
+        (MergeSide::Current, current, MergeSide::Incoming, incoming)
+      } else {
+        (MergeSide::Incoming, incoming, MergeSide::Current, current)
+      }
+    });
+    let resolve = one_sided.clone().map(|(keep_side, keep_branch, drop_side, drop_branch)| {
+      let (keep_view, drop_view) = (view.clone(), view.clone());
+      let (keep_path, drop_path) = (menu_path.to_string(), menu_path.to_string());
+      Button::new(SharedString::from(format!("merge-resolve-{name}")))
+        .small()
+        .outline()
+        .label("Resolve")
+        .dropdown_caret(true)
+        .disabled(busy)
+        .dropdown_menu(move |menu, _, _| {
+          let (keep_view, keep_path) = (keep_view.clone(), keep_path.clone());
+          let (drop_view, drop_path) = (drop_view.clone(), drop_path.clone());
+          menu
+            .item(PopupMenuItem::new(format!("Use the modified file from {keep_branch}")).on_click(move |_, window, cx| {
+              let _ = keep_view.update(cx, |this, cx| this.run(Operation::Choose(keep_path.clone(), keep_side), window, cx));
+            }))
+            .item(PopupMenuItem::new(format!("Do not include this file, as {drop_branch} did")).on_click(move |_, window, cx| {
+              let _ = drop_view.update(cx, |this, cx| this.run(Operation::Choose(drop_path.clone(), drop_side), window, cx));
+            }))
+        })
+    });
+    let note = match (&one_sided, chosen) {
+      (Some((_, _, _, drop_branch)), _) if file.is_some() => Some((format!("File does not exist on {drop_branch}."), palette.conflicted)),
+      (_, Some(side)) if file.is_none() => {
+        let branch = if side == MergeSide::Current { self.state.current_branch.clone() } else { self.source.to_string() };
+        let what = if self.deleted.contains(path) { "the deleted file" } else { "the file" };
+        Some((format!("Using {what} from {branch}"), palette.new))
+      }
+      _ => None,
+    };
+    let flat = file.is_none() || resolve.is_some();
+    let status = if flat {
+      Icon::new(IconName::File).size_4().flex_none().text_color(muted)
+    } else if file.is_some() {
       Icon::empty().path("icons/triangle-alert.svg").size_4().flex_none().text_color(palette.conflicted)
     } else {
       Icon::new(IconName::Check).size_4().flex_none().text_color(palette.new)
     };
     // The buttons of a conflicted file: take one side whole, or edit it by hand.
-    let actions = file.map(|_| {
+    let actions = file.filter(|_| resolve.is_none()).map(|_| {
       let choose = sides.map(|(ours, theirs)| {
         [(MergeSide::Current, ours, branches.0.clone()), (MergeSide::Incoming, theirs, branches.1.to_string())].map(|(side, exists, branch)| {
           let view = view.clone();
@@ -225,11 +280,8 @@ impl MergeDialog {
     v_flex()
       .id(SharedString::from(format!("merge-file-{name}")))
       .gap_2()
-      .p_3()
-      .rounded_md()
-      .border_1()
-      .border_color(palette.border)
-      .when(file.is_none(), |row| row.bg(palette.diff_added.opacity(0.4)))
+      .when(flat, |row| row.px_1().py_2())
+      .when(!flat, |row| row.p_3().rounded_md().border_1().border_color(palette.border))
       .child(
         h_flex()
           .gap_3()
@@ -240,9 +292,13 @@ impl MergeDialog {
               .flex_1()
               .min_w_0()
               .child(div().truncate().text_sm().font_weight(FontWeight::MEDIUM).child(file_name))
-              .children(directory.map(|directory| div().truncate().text_xs().text_color(muted).child(directory))),
+              .children(directory.map(|directory| div().truncate().text_xs().text_color(muted).child(directory)))
+              .children(note.clone().map(|(note, color)| div().text_xs().text_color(color).child(note))),
           )
-          .child(Label::new(detail).text_xs().font_weight(FontWeight::MEDIUM).text_color(color).flex_none())
+          .when(resolve.is_none() && note.is_none(), |row| {
+            row.child(Label::new(detail).text_xs().font_weight(FontWeight::MEDIUM).text_color(color).flex_none())
+          })
+          .children(resolve)
           .when(file.is_none() && chosen.is_some(), |row| {
             row.child(
               Button::new(SharedString::from(format!("undo-merge-{name}")))
@@ -253,6 +309,19 @@ impl MergeDialog {
                 .disabled(busy)
                 .on_click(cx.listener(move |this, _, window, cx| this.run(Operation::Undo(undo_path.clone()), window, cx))),
             )
+          })
+          .when(file.is_none(), |row| {
+            row.child(
+              div()
+                .size_5()
+                .flex_none()
+                .rounded_full()
+                .bg(palette.new)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(Icon::new(IconName::Check).size_3().text_color(palette.on_accent)),
+            )
           }),
       )
       .children(actions)
@@ -262,15 +331,11 @@ impl MergeDialog {
 impl Render for MergeDialog {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let remaining = self.state.files.len();
-    let total = self.paths.len().max(remaining);
-    let resolved = total - remaining;
     let busy = self.task.is_some();
     let palette = colors(cx);
     let muted = cx.theme().muted_foreground;
     // The files that still need a decision come first.
     let (open, done): (Vec<_>, Vec<_>) = self.paths.clone().into_iter().partition(|(path, _)| self.state.files.iter().any(|file| &file.path == path));
-    let conflicts: usize = self.state.files.iter().map(|file| file.conflicts).sum();
-    let section = |label: String| Label::new(label).text_xs().font_weight(FontWeight::SEMIBOLD).text_color(muted);
     let bold = |text: SharedString| Label::new(text).font_weight(FontWeight::SEMIBOLD);
     v_flex()
       .gap_3()
@@ -306,90 +371,68 @@ impl Render for MergeDialog {
               .child(Button::new("close-merge").ghost().small().label("Close").disabled(busy).on_click(|_, window, cx| window.close_dialog(cx))),
           ),
       )
-      .child(
-        v_flex()
-          .gap_1p5()
-          .child(
-            h_flex()
-              .justify_between()
-              .child(
-                Label::new(format!("{resolved} of {total} file{} resolved", if total == 1 { "" } else { "s" })).font_weight(FontWeight::SEMIBOLD),
-              )
-              .child(
-                Label::new(if remaining == 0 {
-                  "No conflicts left".to_string()
-                } else {
-                  format!("{conflicts} conflict{} left", if conflicts == 1 { "" } else { "s" })
-                })
-                .text_sm()
-                .text_color(if remaining == 0 { palette.new } else { palette.conflicted }),
-              ),
-          )
-          .child(Progress::new("merge-progress").value(100. * resolved as f32 / total.max(1) as f32).color(palette.new)),
-      )
       .when(remaining == 0, |body| {
         body.child(
           h_flex()
             .gap_2()
-            .p_3()
+            .px_3()
+            .py_2()
             .rounded_md()
             .bg(palette.diff_added)
             .child(Icon::new(IconName::Check).size_4().text_color(palette.new))
-            .child(Label::new("All conflicts are resolved. Continue the merge to create the merge commit.")),
+            .child(Label::new("All conflicted files have been resolved.")),
         )
       })
+      .child(Label::new(format!("{remaining} conflicted file{}", if remaining == 1 { "" } else { "s" })).font_weight(FontWeight::SEMIBOLD))
       .child(
         v_flex()
           .id("merge-files")
           .max_h(rems(24.))
           .overflow_y_scrollbar()
           .gap_2()
-          .when(!open.is_empty(), |list| list.child(section(format!("NEEDS RESOLUTION ({})", open.len()))))
           .children(open.iter().map(|(path, side)| self.file_row(path, *side, cx)))
-          .when(!done.is_empty(), |list| list.child(div().pt_1().child(section(format!("RESOLVED ({})", done.len())))))
           .children(done.iter().map(|(path, side)| self.file_row(path, *side, cx))),
       )
-      .child(Label::new("Edited a file by hand? Stage it in Git, then press Refresh to mark it resolved.").text_sm().text_color(muted))
       .child(
         h_flex()
-          .gap_2()
-          .justify_between()
-          .items_center()
-          .pt_2()
+          .flex_wrap()
+          .text_sm()
+          .text_color(muted)
           .child(
-            Button::new("merge-terminal")
-              .ghost()
-              .small()
-              .icon(Icon::empty().path("icons/terminal.svg"))
-              .label("Open terminal")
-              .disabled(busy)
+            div()
+              .id("merge-command-line")
+              .cursor_pointer()
+              .text_color(palette.link)
+              .hover(|link| link.text_color(palette.link_hover).underline())
+              .child("Open in command line")
               .on_click(|_, window, cx| {
                 window.close_dialog(cx);
                 window.defer(cx, |window, cx| window.dispatch_action(Box::new(ToggleTerminal), cx));
               }),
           )
+          .child(", your tool of choice, or close to resolve manually."),
+      )
+      .child(
+        h_flex()
+          .gap_2()
+          .justify_end()
+          .items_center()
+          .pt_3()
+          .border_t_1()
+          .border_color(palette.border)
           .child(
-            h_flex()
-              .gap_2()
-              .items_center()
-              .when(remaining > 0, |row| {
-                row
-                  .child(Label::new(format!("{remaining} file{} left to resolve", if remaining == 1 { "" } else { "s" })).text_sm().text_color(muted))
-              })
-              .child(
-                Button::new("abort-merge")
-                  .label("Abort merge")
-                  .disabled(busy)
-                  .on_click(cx.listener(|this, _, window, cx| this.confirm_abort(window, cx))),
-              )
-              .child(
-                Button::new("continue-merge")
-                  .primary()
-                  .label("Continue merge")
-                  .loading(busy)
-                  .disabled(busy || remaining != 0)
-                  .on_click(cx.listener(|this, _, window, cx| this.run(Operation::Finish(false), window, cx))),
-              ),
+            Button::new("abort-merge")
+              .label("Abort merge")
+              .disabled(busy)
+              .on_click(cx.listener(|this, _, window, cx| this.confirm_abort(window, cx))),
+          )
+          .child(
+            Button::new("continue-merge")
+              .primary()
+              .label("Continue merge")
+              .loading(busy)
+              .disabled(busy || remaining != 0)
+              .on_click(cx.listener(|this, _, window, cx| this.run(Operation::Finish(false), window, cx))),
           ),
       )
   }

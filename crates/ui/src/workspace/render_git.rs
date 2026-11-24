@@ -777,12 +777,10 @@ impl Workspace {
             .on_click(cx.listener(|this, _, _, cx| this.clear_compare(cx))),
         )
         .into_any_element(),
-      None => h_flex()
-        .gap_1()
-        .items_center()
-        .child(div().flex_1().child(crate::components::soft_input(&self.compare_filter, cx).prefix(branch_icon())))
-        .when(self.compare_open, |row| {
-          row.child(
+      None => {
+        // The close button sits inside the field, at its right edge.
+        let input = crate::components::soft_input(&self.compare_filter, cx).prefix(branch_icon()).when(self.compare_open, |input| {
+          input.suffix(
             Button::new("compare-close")
               .ghost()
               .xsmall()
@@ -790,8 +788,9 @@ impl Workspace {
               .tooltip("Close")
               .on_click(cx.listener(|this, _, window, cx| this.close_compare_list(window, cx))),
           )
-        })
-        .into_any_element(),
+        });
+        div().w_full().child(input).into_any_element()
+      }
     };
     div().child(field).into_any_element()
   }
