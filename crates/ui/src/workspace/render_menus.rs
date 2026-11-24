@@ -138,7 +138,7 @@ impl Workspace {
           recent.sort_by_key(|entry| std::cmp::Reverse(entry.time));
           others.sort_by_key(|entry| std::cmp::Reverse(entry.time));
           let make_row = |entry: &ws_git::BranchEntry| -> AnyElement {
-            let ws_git::BranchEntry { name, remote, time, .. } = entry.clone();
+            let ws_git::BranchEntry { name, remote, time, default, .. } = entry.clone();
             let favorite = starred.contains(&name);
             let (star_workspace, star_name) = (workspace.clone(), name.clone());
             let selected = name == current.as_ref() && remote.is_none();
@@ -167,6 +167,8 @@ impl Workspace {
                   .rounded_md()
                   .cursor_pointer()
                   .hover(|star| star.bg(palette.hover))
+                  // The default branch is always on top, so it is never starred; the space stays so the names line up.
+                  .when(default, |star| star.invisible())
                   .when(!favorite, |star| star.opacity(0.5))
                   .tooltip(move |window, cx| Tooltip::new(if favorite { "Remove from favorites" } else { "Add to favorites" }).build(window, cx))
                   .child(Icon::empty().path(if favorite { "icons/star-fill.svg" } else { "icons/star.svg" }).size_4().text_color(if favorite {
