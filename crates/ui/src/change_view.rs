@@ -111,10 +111,9 @@ impl ChangeView {
   }
 
   /// Shows the changes of another file of the repository at `root`.
+  /// Always starts from a read: the view keeps the last file it showed after the file was committed or deselected, and showing
+  /// the same file again must not bring back what it looked like then.
   pub fn show(&mut self, root: PathBuf, file: PathBuf, cx: &mut Context<Self>) {
-    if self.root == root && self.file == file {
-      return;
-    }
     self.root = root;
     self.file = file;
     self.diff = Load::Loading;

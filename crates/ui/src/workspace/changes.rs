@@ -26,7 +26,10 @@ impl Workspace {
       return;
     }
     self.all_changes_open = false;
-    self.change_view.update(cx, |view, cx| view.show(root, file.clone(), cx));
+    // Choosing the file already shown leaves its diff (and scroll position) alone.
+    if self.selected_change.as_ref() != Some(&file) {
+      self.change_view.update(cx, |view, cx| view.show(root, file.clone(), cx));
+    }
     self.selected_change = Some(file);
     self.selected_entry = None;
     cx.notify();
