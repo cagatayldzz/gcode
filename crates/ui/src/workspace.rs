@@ -939,21 +939,30 @@ impl Render for Workspace {
         // The terminals take everything right of the activity bar: no sidebar and no status bar, like a terminal window.
         div().flex_1().min_w_0().h_full().child(main_area).into_any_element()
       } else {
-        h_resizable("sidebar-split")
-          // `fixed`: the sidebar keeps the width the user gave it when the window is resized; only the main area changes.
-          .child(resizable_panel().size(SIDEBAR_WIDTH).size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH).fixed().child(self.render_sidebar(cx)))
-          // The status bar belongs to the editor: the sidebar runs down to the bottom of the window.
+        // The group's content (the all-changes toolbar, for one) has a minimum width; `min_w_0` keeps it from pushing the group past
+        // the window edge when the window is made narrow.
+        div()
+          .flex_1()
+          .min_w_0()
+          .h_full()
+          .overflow_hidden()
           .child(
-            resizable_panel().child(
-              v_flex()
-                .size_full()
-                .min_w_0()
-                .overflow_hidden()
-                .when(self.sidebar_tab == SidebarTab::Git, |column| column.children(self.render_git_toolbar(cx)))
-                .child(div().flex_1().min_h_0().min_w_0().w_full().overflow_hidden().child(main_area))
-                // The Git view has the branch in its own bar: no status bar there.
-                .when(self.sidebar_tab != SidebarTab::Git, |column| column.child(self.render_status_bar(cx))),
-            ),
+            h_resizable("sidebar-split")
+              // `fixed`: the sidebar keeps the width the user gave it when the window is resized; only the main area changes.
+              .child(resizable_panel().size(SIDEBAR_WIDTH).size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH).fixed().child(self.render_sidebar(cx)))
+              // The status bar belongs to the editor: the sidebar runs down to the bottom of the window.
+              .child(
+                resizable_panel().child(
+                  v_flex()
+                    .size_full()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .when(self.sidebar_tab == SidebarTab::Git, |column| column.children(self.render_git_toolbar(cx)))
+                    .child(div().flex_1().min_h_0().min_w_0().w_full().overflow_hidden().child(main_area))
+                    // The Git view has the branch in its own bar: no status bar there.
+                    .when(self.sidebar_tab != SidebarTab::Git, |column| column.child(self.render_status_bar(cx))),
+                ),
+              ),
           )
           .into_any_element()
       }))

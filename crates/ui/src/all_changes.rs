@@ -21,7 +21,14 @@ use gpui_kit::{
   },
   *,
 };
-use std::{cell::RefCell, collections::HashSet, path::PathBuf, rc::Rc, sync::Arc};
+use std::{
+  cell::RefCell,
+  collections::{hash_map::DefaultHasher, HashMap, HashSet},
+  hash::{Hash, Hasher},
+  path::PathBuf,
+  rc::Rc,
+  sync::Arc,
+};
 
 // The Kit adds a one-pixel separator above every header after the first one.
 const FILE_HEADER_SEPARATOR: Pixels = px(1.);
@@ -42,7 +49,10 @@ pub(crate) struct AllChanges {
   settings: Entity<SettingsModel>,
   diff: Option<ShownDiff>,
   patch: Option<Arc<str>>,
-  viewed: HashSet<SharedString>,
+  /// The files marked as viewed, with the fingerprint of their change at that time: a file that changes afterwards needs a new review.
+  viewed: HashMap<SharedString, u64>,
+  /// The fingerprint of each file's change in the diff on screen.
+  fingerprints: HashMap<SharedString, u64>,
   error: Option<SharedString>,
   task: Option<Task<()>>,
   current_file: Rc<RefCell<Option<SharedString>>>,
@@ -51,7 +61,17 @@ pub(crate) struct AllChanges {
 
 impl AllChanges {
   pub fn new(settings: Entity<SettingsModel>) -> Self {
-    Self { settings, diff: None, patch: None, viewed: HashSet::new(), error: None, task: None, current_file: Rc::default(), line_probes: Vec::new() }
+    Self {
+      settings,
+      diff: None,
+      patch: None,
+      viewed: HashMap::new(),
+      fingerprints: HashMap::new(),
+      error: None,
+      task: None,
+      current_file: Rc::default(),
+      line_probes: Vec::new(),
+    }
   }
 
   pub fn reset(&mut self, cx: &mut Context<Self>) {
@@ -71,7 +91,8 @@ impl AllChanges {
       }
       let files = crate::diff_view::parse_patch(&patch)?;
       let line_probes = line_probes(&patch, &files);
-      Ok::<_, String>(Some((patch, files, line_probes)))
+      let fingerprints = file_fingerprints(&patch, &files);
+      Ok::<_, String>(Some((patch, files, line_probes, fingerprints)))
     });
     self.task = Some(cx.spawn(async move |this, cx| {
       let result = work.await;
@@ -79,10 +100,11 @@ impl AllChanges {
         this.task = None;
         match result {
           Ok(None) => return,
-          Ok(Some((patch, files, line_probes))) => {
+          Ok(Some((patch, files, line_probes, fingerprints))) => {
             this.line_probes = line_probes;
-            let paths: HashSet<_> = files.iter().map(DiffFile::path).collect();
-            this.viewed.retain(|path| paths.contains(path));
+            // A file whose change differs from the one that was reviewed loses its mark.
+            this.viewed.retain(|path, fingerprint| fingerprints.get(path) == Some(fingerprint));
+            this.fingerprints = fingerprints;
             if let Some(diff) = &mut this.diff {
               diff.set_files(files, &patch, cx);
             } else {
@@ -113,7 +135,7 @@ impl AllChanges {
   /// Jumps to the first file not marked as viewed.
   fn next_unviewed(&mut self, cx: &mut Context<Self>) {
     let Some(diff) = &self.diff else { return };
-    let next = diff.state().read(cx).files().iter().map(|file| file.path().clone()).find(|path| !self.viewed.contains(path));
+    let next = diff.state().read(cx).files().iter().map(|file| file.path().clone()).find(|path| !self.viewed.contains_key(path));
     if let Some(path) = next {
       self.scroll_to(&path, cx);
     }
@@ -135,7 +157,7 @@ impl AllChanges {
     let (count, viewed) = (files.len(), self.viewed.len());
     let (added, removed) = files.iter().fold((0, 0), |(added, removed), (_, a, d)| (added + a, removed + d));
     let all_viewed = viewed >= count;
-    let reviewed = self.viewed.clone();
+    let reviewed: HashSet<SharedString> = self.viewed.keys().cloned().collect();
     let menu_state = state.clone();
     let jump = Button::new("all-changes-files")
       .ghost()
@@ -153,6 +175,8 @@ impl AllChanges {
       });
     h_flex()
       .flex_none()
+      .min_w_0()
+      .overflow_hidden()
       .gap_3()
       .px_4()
       .py_1p5()
@@ -343,6 +367,38 @@ impl Render for AllChanges {
   }
 }
 
+/// A fingerprint of each file's part of the patch, to tell whether a reviewed file has changed since. The patch has one `diff --git`
+/// section per file, in the same order as the parsed files; if they do not line up, nothing is fingerprinted.
+fn file_fingerprints(patch: &str, files: &[DiffFile]) -> HashMap<SharedString, u64> {
+  let mut sections: Vec<&str> = Vec::new();
+  let mut start = None;
+  let mut offset = 0;
+  for line in patch.split_inclusive('\n') {
+    if line.starts_with("diff --git ") {
+      if let Some(from) = start {
+        sections.push(&patch[from..offset]);
+      }
+      start = Some(offset);
+    }
+    offset += line.len();
+  }
+  if let Some(from) = start {
+    sections.push(&patch[from..]);
+  }
+  if sections.len() != files.len() {
+    return HashMap::new();
+  }
+  files
+    .iter()
+    .zip(sections)
+    .map(|(file, section)| {
+      let mut hasher = DefaultHasher::new();
+      section.hash(&mut hasher);
+      (file.path().clone(), hasher.finish())
+    })
+    .collect()
+}
+
 /// Sparse row probes identify the file after a scroll skips its original header.
 fn line_probes(patch: &str, files: &[DiffFile]) -> Vec<DiffGutterMarker> {
   const PROBE_INTERVAL: usize = 8;
@@ -369,7 +425,7 @@ fn file_header(file: &DiffFile, view: &WeakEntity<AllChanges>, cx: &App) -> Div 
     _ => ((added as f64 / total as f64 * blocks as f64).round() as usize).clamp(1, blocks - 1),
   };
   let path = file.path().clone();
-  let checked = view.upgrade().is_some_and(|view| view.read(cx).viewed.contains(&path));
+  let checked = view.upgrade().is_some_and(|view| view.read(cx).viewed.contains_key(&path));
   let modified = file.modified_path().cloned();
   let title = match (file.original_path(), file.modified_path()) {
     (Some(old), Some(new)) if old != new => SharedString::from(format!("{old} → {new}")),
@@ -429,7 +485,8 @@ fn file_header(file: &DiffFile, view: &WeakEntity<AllChanges>, cx: &App) -> Div 
       move |checked, _, cx| {
         let _ = view.update(cx, |this, cx| {
           if *checked {
-            this.viewed.insert(path.clone());
+            let fingerprint = this.fingerprints.get(&path).copied().unwrap_or_default();
+            this.viewed.insert(path.clone(), fingerprint);
           } else {
             this.viewed.remove(&path);
           }
