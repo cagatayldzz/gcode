@@ -85,7 +85,7 @@ jobs:
   macos_arm64:
     name: 3 · macOS build
     needs: prepare
-    runs-on: macos-26
+    runs-on: macos-15
     timeout-minutes: 120
     env:
       APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
@@ -105,7 +105,7 @@ jobs:
   macos_checks:
     name: 3 · macOS lint and tests
     needs: prepare
-    runs-on: macos-26
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
