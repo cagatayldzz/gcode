@@ -333,13 +333,13 @@ impl Workspace {
                 cx.notify();
               })),
           )
-          .child(crate::components::soft_input(&self.search_state, cx).small().w_full().disabled(self.projects.active.is_none()).suffix(flags)),
+          .child(crate::components::soft_input(&self.search_state, cx).w_full().disabled(self.projects.active.is_none()).suffix(flags)),
       )
       .when(self.search_show_replace, |panel| {
         panel.child(
           h_flex()
             .gap_1()
-            .child(crate::components::soft_input(&self.search_replace, cx).small().w_full().disabled(self.projects.active.is_none()).suffix(
+            .child(crate::components::soft_input(&self.search_replace, cx).w_full().disabled(self.projects.active.is_none()).suffix(
               option("AB", "Preserve case", self.search_preserve_case).on_click(cx.listener(|this, _, _, cx| {
                 this.search_preserve_case = !this.search_preserve_case;
                 cx.notify();
@@ -369,12 +369,8 @@ impl Workspace {
         panel.child(
           v_flex()
             .gap_2()
-            .child(
-              v_flex().gap_1().child(Label::new("Files to include").text_xs()).child(crate::components::soft_input(&self.search_include, cx).small()),
-            )
-            .child(
-              v_flex().gap_1().child(Label::new("Files to exclude").text_xs()).child(crate::components::soft_input(&self.search_exclude, cx).small()),
-            ),
+            .child(v_flex().gap_1().child(Label::new("Files to include").text_xs()).child(crate::components::soft_input(&self.search_include, cx)))
+            .child(v_flex().gap_1().child(Label::new("Files to exclude").text_xs()).child(crate::components::soft_input(&self.search_exclude, cx))),
         )
       })
       .when(!status.is_empty(), |panel| {
