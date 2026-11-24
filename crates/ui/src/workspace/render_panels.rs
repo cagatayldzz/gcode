@@ -402,21 +402,26 @@ impl Workspace {
       )
     });
     let headers = node.panes().len() > 1;
+    // The shortcuts sit above the panes (and their headers), under the tab strip.
     v_flex()
       .size_full()
       .children(strip)
+      .child(
+        shortcut_bar(
+          vec![
+            shortcut_hint("New tab", &NewTerminal, window),
+            shortcut_hint("Split right", &SplitRight, window),
+            shortcut_hint("Split down", &SplitDown, window),
+            shortcut_hint("Clear", &ClearBuffer, window),
+            shortcut_hint("Mention projects", &MentionProjects, window),
+            shortcut_hint("Hide", &ToggleTerminal, window),
+          ],
+          cx,
+        )
+        .border_t_0()
+        .border_b_1(),
+      )
       .child(div().flex_1().min_h_0().child(self.render_pane_node(&node, headers, &root.to_string_lossy(), cx)))
-      .child(shortcut_bar(
-        vec![
-          shortcut_hint("New tab", &NewTerminal, window),
-          shortcut_hint("Split right", &SplitRight, window),
-          shortcut_hint("Split down", &SplitDown, window),
-          shortcut_hint("Clear", &ClearBuffer, window),
-          shortcut_hint("Mention projects", &MentionProjects, window),
-          shortcut_hint("Hide", &ToggleTerminal, window),
-        ],
-        cx,
-      ))
       .into_any_element()
   }
 
