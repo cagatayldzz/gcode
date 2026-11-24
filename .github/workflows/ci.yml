@@ -10,7 +10,9 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push to a pull request makes the older run pointless. Pushes to main are all kept: cancelling one leaves its commit with a
+  # red cross ("cancelled") although nothing is wrong.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Use the same lightweight Rust profile for lint and tests.
