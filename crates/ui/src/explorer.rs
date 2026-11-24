@@ -123,11 +123,33 @@ fn copy_to_new_file(source: &Path, target: &Path, metadata: &fs::Metadata) -> st
   if metadata.is_symlink() {
     return std::os::unix::fs::symlink(fs::read_link(source)?, target);
   }
+  if metadata.is_dir() {
+    return copy_directory(source, target, metadata);
+  }
   let mut input = fs::File::open(source)?;
   let mut output = fs::File::create_new(target)?;
   let result = std::io::copy(&mut input, &mut output).and_then(|_| output.set_permissions(metadata.permissions()));
   if result.is_err() {
     let _ = fs::remove_file(target);
+  }
+  result
+}
+
+fn copy_directory(source: &Path, target: &Path, metadata: &fs::Metadata) -> std::io::Result<()> {
+  if target.starts_with(source) {
+    return Err(std::io::Error::other("A folder cannot be copied into itself."));
+  }
+  fs::create_dir(target)?;
+  let result = (|| {
+    for entry in fs::read_dir(source)? {
+      let entry = entry?;
+      let child = fs::symlink_metadata(entry.path())?;
+      copy_to_new_file(&entry.path(), &target.join(entry.file_name()), &child)?;
+    }
+    fs::set_permissions(target, metadata.permissions())
+  })();
+  if result.is_err() {
+    let _ = fs::remove_dir_all(target);
   }
   result
 }

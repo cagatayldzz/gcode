@@ -102,3 +102,19 @@ fn names_are_sorted_by_bytes_as_on_github() {
   );
   fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn copying_a_folder_copies_its_contents_and_refuses_to_enter_itself() {
+  let root = tempfile::tempdir().unwrap();
+  let source = root.path().join("pages");
+  fs::create_dir_all(source.join("nested")).unwrap();
+  fs::write(source.join("nested/page.tsx"), "page").unwrap();
+  let metadata = fs::symlink_metadata(&source).unwrap();
+
+  let copy = explorer::copy_file(&source, &source, &metadata, true).unwrap();
+  assert_eq!(copy, root.path().join("pages copy"));
+  assert_eq!(fs::read_to_string(copy.join("nested/page.tsx")).unwrap(), "page");
+
+  assert!(explorer::copy_file(&source, &source.join("nested/pages"), &metadata, false).is_err());
+  assert!(!source.join("nested/pages").exists());
+}

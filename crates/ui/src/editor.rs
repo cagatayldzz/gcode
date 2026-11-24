@@ -880,6 +880,21 @@ impl EditorPanel {
     self.files.get(path).is_some_and(|file| file.dirty)
   }
 
+  /// Whether `path` or any open file below it has unsaved changes.
+  pub fn is_dirty_under(&self, path: &Path) -> bool {
+    self.files.iter().any(|(open, file)| file.dirty && open.starts_with(path))
+  }
+
+  /// Forgets `path` and every open file below it.
+  pub fn forget_under(&mut self, path: &Path, cx: &mut Context<Self>) {
+    let open: Vec<PathBuf> =
+      self.files.keys().chain(self.images.keys()).chain(self.tabs.items.iter()).filter(|open| open.starts_with(path)).cloned().collect();
+    for open in open {
+      self.forget(&open, cx);
+    }
+    self.forget(path, cx);
+  }
+
   /// What the status bar says about the open file, left to right: the cursor, the indentation, the encoding, the line
   /// ending and the language.
   pub fn status(&self, cx: &App) -> Vec<String> {

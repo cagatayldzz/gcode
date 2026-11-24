@@ -129,7 +129,7 @@ impl Workspace {
       }
       Paste => {
         let Some(source) = self.file_actions.clipboard_file(cx).cloned() else {
-          window.push_notification(Notification::info("Cut or copy a file in Explorer before pasting."), cx);
+          window.push_notification(Notification::info("Cut or copy an item in Explorer before pasting."), cx);
           return;
         };
         let folder = if *directory { path.as_path() } else { path.parent().unwrap_or(root) };
@@ -146,13 +146,13 @@ impl Workspace {
         let Some(name) = path.file_name() else { return };
         let (root, path) = (root.clone(), path.clone());
         let initial = name.to_string_lossy().into_owned();
-        self.ask_name("Rename file", "File name", "Press Enter to rename it.", &initial, window, cx, move |this, name, window, cx| {
+        self.ask_name("Rename", "Name", "Press Enter to rename it.", &initial, window, cx, move |this, name, window, cx| {
           if this.projects.active.as_ref() != Some(&root) {
             return Err("The active project changed. Open Rename from the current project.".into());
           }
           let name = name.trim();
           if name.is_empty() || name.contains('/') || name == "." || name == ".." {
-            return Err("Enter a single file name.".into());
+            return Err("Enter a single name.".into());
           }
           let target = path.with_file_name(name);
           if target != path {
@@ -165,11 +165,12 @@ impl Workspace {
         let workspace = cx.entity().downgrade();
         let (root, path) = (root.clone(), path.clone());
         let title = SharedString::from(format!("Delete {}?", display_path(&path)));
+        let directory = *directory;
         window.open_alert_dialog(cx, move |alert, _, _| {
           let (workspace, root, path) = (workspace.clone(), root.clone(), path.clone());
           alert
             .title(title.clone())
-            .description("The file will be moved to the Trash.")
+            .description(if directory { "The folder will be moved to the Trash." } else { "The file will be moved to the Trash." })
             .confirm()
             .ok_text("Delete")
             .ok_variant(ButtonVariant::Danger)
@@ -193,7 +194,7 @@ impl Workspace {
     }
     let moves_source = !matches!(edit, FileEdit::Copy { .. });
     if moves_source {
-      if self.editor_panel.read(cx).is_dirty(&path) {
+      if self.editor_panel.read(cx).is_dirty_under(&path) {
         window.push_notification(Notification::error("Save the file before moving or deleting it."), cx);
         return;
       }
@@ -219,12 +220,12 @@ impl Workspace {
               }
             }
             if moves_source {
-              this.editor_panel.update(cx, |editor, cx| editor.forget(&path, cx));
+              this.editor_panel.update(cx, |editor, cx| editor.forget_under(&path, cx));
               if let Some(side) = &this.file_actions.side {
-                side.update(cx, |editor, cx| editor.forget(&path, cx));
+                side.update(cx, |editor, cx| editor.forget_under(&path, cx));
               }
               for view in this.views.values_mut() {
-                if view.selected_entry.as_ref() == Some(&path) {
+                if view.selected_entry.as_ref().is_some_and(|selected| selected.starts_with(&path)) {
                   view.selected_entry = None;
                 }
               }
@@ -340,7 +341,18 @@ fn file_menu(menu: PopupMenu, root: &Path, path: &Path, directory: bool, can_pas
   use CommandKind::*;
   let item = |label, kind| PopupMenuItem::new(label).action(Box::new(FileCommand { kind, root: root.into(), path: path.into(), directory }));
   if directory {
-    return menu.item(item("Paste", Paste).disabled(!can_paste));
+    return menu
+      .item(item("Reveal in Finder", Reveal))
+      .separator()
+      .item(item("Cut", Cut))
+      .item(item("Copy", Copy))
+      .item(item("Paste", Paste).disabled(!can_paste))
+      .separator()
+      .item(item("Copy Path", CopyPath))
+      .item(item("Copy Relative Path", CopyRelativePath))
+      .separator()
+      .item(item("Rename…", Rename))
+      .item(item("Delete…", Delete));
   }
   menu
     .item(item("Open Preview", Preview))
@@ -370,8 +382,13 @@ enum FileEdit {
 impl FileEdit {
   fn apply(self, source: &Path) -> std::io::Result<(Option<PathBuf>, Option<String>)> {
     let metadata = fs::symlink_metadata(source)?;
-    if !(metadata.is_file() || metadata.is_symlink()) {
-      return Err(std::io::Error::other("Select a file."));
+    if !(metadata.is_file() || metadata.is_symlink() || metadata.is_dir()) {
+      return Err(std::io::Error::other("Select a file or a folder."));
+    }
+    if let Self::Move { target, .. } = &self {
+      if metadata.is_dir() && target.starts_with(source) {
+        return Err(std::io::Error::other("A folder cannot be moved into itself."));
+      }
     }
     match self {
       Self::Move { target, clipboard } => {
