@@ -19,7 +19,7 @@ The version comes from Conventional Commits since the latest `v*` tag:
                 · write RELEASE_NOTES.md (New Features / Bug Fixes / Documentation / Chores + changelog link)
    3 Build      ONE macOS job: release build · Developer ID signature · notarization
                 · gCode-<tag>-macos-arm64.zip · then workspace clippy and tests on the same runner
-   4 Verify     exactly the expected assets, none empty, SHA256SUMS.txt
+   4 Verify     expected archive, SHA256SUMS.txt and install.sh
    5 Publish    checksums verified · draft GitHub release · published as latest
 ```
 
@@ -35,7 +35,7 @@ Required Actions secrets:
 | `APPLE_TEAM_ID` | signing and the updater's same-developer check |
 | `APPLE_APP_SPECIFIC_PASSWORD` | notarization |
 
-The release's assets must be exactly `gCode-<tag>-macos-arm64.zip` and `SHA256SUMS.txt`: the in-app updater only trusts those names under the
+The updater's required assets are `gCode-<tag>-macos-arm64.zip` and `SHA256SUMS.txt`: the in-app updater only trusts those names under the
 repository's own download URLs (see [Updates](../architecture/updates.md)).
 
 ## Continuous integration
@@ -94,3 +94,8 @@ It prints the image size, the RGBA value at image pixel `(200, 100)`, and that p
 the PNG contains exactly the window, without shadow or cropping, and returns coordinates **relative to the window** — add the window's screen
 origin when a tool expects screen coordinates. The tool does not capture the screen or send input. Screenshots can contain private paths or
 terminal history: keep them in a scratch location and never commit them.
+
+
+Each release also publishes a version-specific `install.sh` that reads the archive checksum from `SHA256SUMS.txt`.
+Download the installer from the release's Assets and run `bash install.sh`. It checks the archive's SHA-256 and macOS signature
+before installing into `~/Applications`. Existing installs in that folder use the in-app updater.

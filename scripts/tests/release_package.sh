@@ -36,6 +36,13 @@ echo payload >"$dist/$product_name-v1.2.3-macos-arm64.zip"
 finalize_assets "$dist" v1.2.3
 expected="$(sha256_of "$dist/$product_name-v1.2.3-macos-arm64.zip")  $product_name-v1.2.3-macos-arm64.zip"
 assert_eq "$expected" "$(cat "$dist/SHA256SUMS.txt")" "checksum file"
+test ! -e "$dist/$product_name-v1.2.3-macos-arm64.zip.sha256"
+write_installer "$dist" v1.2.3 example/project
+bash -n "$dist/install.sh"
+assert_contains "SHA256SUMS.txt" "$(cat "$dist/install.sh")" "installer uses the shared checksum manifest"
+assert_contains "https://github.com/example/project/releases/download/v1.2.3" "$(cat "$dist/install.sh")" "installer uses the release tag"
+assert_contains "$product_name-v1.2.3-macos-arm64.zip" "$(cat "$dist/install.sh")" "installer uses the verified archive name"
+assert_fails "rejects an invalid repository" write_installer "$dist" v1.2.3 "example/project/extra"
 echo extra >"$dist/$product_name-v1.2.3-linux.tar.gz"
 assert_fails "unexpected assets" finalize_assets "$dist" v1.2.3
 rm "$dist/$product_name-v1.2.3-linux.tar.gz"

@@ -4,7 +4,7 @@
 #   scripts/release.sh prepare    (CI) choose the next version from commits and stamp the build inputs
 #   scripts/release.sh notes      (CI) write dist/RELEASE_NOTES.md from commit titles
 #   scripts/release.sh package    (CI, macOS) zip dist/<name>.app as dist/<name>-<tag>-macos-arm64.zip
-#   scripts/release.sh finalize   (CI) check the assets and write dist/SHA256SUMS.txt
+#   scripts/release.sh finalize   (CI) check the assets and write checksums and dist/install.sh
 #
 # The version follows Conventional Commits: a breaking change is major, `feat` is minor, anything else is patch.
 # The script can be sourced (the tests do) without running anything.
@@ -143,7 +143,7 @@ stamp_version() {
   rm -f "$root/package.json.bak" "$plist.bak"
 }
 
-# finalize_assets <directory> <tag>: check the asset set, then write SHA256SUMS.txt.
+# finalize_assets <directory> <tag>: check the archives, then write the shared checksum manifest.
 finalize_assets() {
   local directory="$1" tag="$2" names name expected found
   names="$(artifact_names "$tag")"
@@ -228,8 +228,23 @@ package() {
   ditto -c -k --sequesterRsrc --keepParent "dist/$product_name.app" "dist/$product_name-$tag-macos-arm64.zip"
 }
 
+write_installer() {
+  local directory="$1" tag="$2" repository="$3" archive bundle_id
+  [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || fail "Invalid release repository."
+  archive="$(artifact_names "$tag")"
+  bundle_id="$(scripts/product.sh bundle_id)"
+  {
+    printf '#!/bin/bash\nset -euo pipefail\n'
+    printf 'product_name=%q\nbundle_id=%q\narchive=%q\nrelease_url=%q\n' \
+      "$product_name" "$bundle_id" "$archive" "https://github.com/$repository/releases/download/$tag"
+    cat scripts/install-release.sh
+  } >"$directory/install.sh"
+  chmod +x "$directory/install.sh"
+}
+
 finalize() {
   finalize_assets dist "${RELEASE_TAG:-}"
+  write_installer dist "$RELEASE_TAG" "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 }
 
 main() {

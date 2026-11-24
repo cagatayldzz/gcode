@@ -149,6 +149,7 @@ jobs:
           path: |
             dist/*-macos-arm64.zip
             dist/SHA256SUMS.txt
+            dist/install.sh
             dist/RELEASE_NOTES.md
 
   publish:
@@ -173,11 +174,12 @@ jobs:
         run: |
           cd dist
           sha256sum --check SHA256SUMS.txt
+          bash -n install.sh
           # The product's name is the start of the archive's name: <name>-<tag>-macos-arm64.zip.
           archive="$(ls ./*-macos-arm64.zip | head -n 1)"
           product="${archive#./}"
           product="${product%%-"$RELEASE_TAG"-*}"
-          gh release create "$RELEASE_TAG" ./*-macos-arm64.zip SHA256SUMS.txt \
+          gh release create "$RELEASE_TAG" ./*-macos-arm64.zip SHA256SUMS.txt install.sh \
             --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA" --title "$product ${RELEASE_TAG#v}" \
             --notes-file RELEASE_NOTES.md --draft
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

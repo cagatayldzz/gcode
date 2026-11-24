@@ -86,7 +86,7 @@ impl ShownDiff {
       .size_full()
       .min_h_0()
       .child(h_flex().px_2().py_1().border_b_1().border_color(cx.theme().border).child(diff_controls(&self.state)))
-      .child(div().flex_1().min_h_0().child(diff))
+      .child(div().flex_1().min_h_0().min_w_0().overflow_hidden().child(diff))
   }
 
   /// The Kit diff, to be given the sizes and options of the place that shows it.

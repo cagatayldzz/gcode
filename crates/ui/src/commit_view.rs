@@ -380,7 +380,7 @@ impl Render for CommitView {
       Load::Ready(state) => div()
         .size_full()
         .cursor_text()
-        .child(state.with_controls(state.view(cx).soft_wrap(true).border_0().text_size(code_font_size(&self.settings, cx)).size_full(), cx))
+        .child(state.with_controls(state.view(cx).border_0().text_size(code_font_size(&self.settings, cx)).size_full(), cx))
         .into_any_element(),
     };
     v_flex()
