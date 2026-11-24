@@ -73,3 +73,10 @@ fn fences_and_quotes_around_the_answer_are_removed() {
   assert_eq!(parse_message("```\nfix: a crash\n```", true).summary, "fix: a crash");
   assert_eq!(parse_message("\"fix: a crash\"", true).summary, "fix: a crash");
 }
+
+#[test]
+fn shortening_keeps_the_start_of_each_file_and_marks_the_cut() {
+  let diff = "diff --git a/a b/a\n1\n2\n3\n4\ndiff --git a/b b/b\n1\n";
+  let short = ws_commitgen::shorten_files(diff, 3);
+  assert_eq!(short, "diff --git a/a b/a\n1\n2\n[2 more lines left out]\ndiff --git a/b b/b\n1\n");
+}

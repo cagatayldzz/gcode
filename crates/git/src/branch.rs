@@ -42,15 +42,24 @@ fn message(error: git2::Error) -> String {
 }
 
 fn git(path: &Path, arguments: &[&str]) -> Result<Output, String> {
-  Command::new("git")
-    .arg("-C")
-    .arg(path)
-    .args(arguments)
-    .env("GIT_TERMINAL_PROMPT", "0")
-    .env("GIT_EDITOR", "true")
-    .stdin(Stdio::null())
-    .output()
-    .map_err(|error| format!("Could not run git: {error}"))
+  ws_activity::timed(
+    "git",
+    || crate::describe_git(path, arguments),
+    || {
+      let mut command = Command::new("git");
+      crate::shell_path::apply(&mut command);
+      command
+        .arg("-C")
+        .arg(path)
+        .args(arguments)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_EDITOR", "true")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("Could not run git: {error}"))
+    },
+    crate::describe_output,
+  )
 }
 
 fn checked(output: Output) -> Result<String, String> {

@@ -140,6 +140,12 @@ impl Workspace {
     self.read_history(true, cx);
   }
 
+  /// Reads the commits again without replacing the list by the loader, for the periodic refresh: the list stays as it is until
+  /// the new commits differ.
+  pub(super) fn refresh_history(&mut self, cx: &mut Context<Self>) {
+    self.read_history(false, cx);
+  }
+
   /// `show_loader` is off when a page is added to a list that stays on screen.
   fn read_history(&mut self, show_loader: bool, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };

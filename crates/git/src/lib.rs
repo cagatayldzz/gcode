@@ -502,17 +502,36 @@ pub fn switch_branch(path: &Path, name: &str) -> Result<(), String> {
   repository.set_head(&format!("refs/heads/{name}")).map_err(|error| error.message().to_string())
 }
 
-/// The unified diff of several files against the last commit, one file after the other (see [`file_diff`]); the input for a
-/// generated commit message. `files` are relative to the repository.
+/// The unified diff of several files against the last commit, in one pass over the repository (one pass per file would scan
+/// the whole working tree every time, which takes minutes for a thousand files). `files` are relative to the repository and
+/// match literally, so a path such as `app/[id]/page.tsx` is not read as a pattern.
 pub fn diff_files(path: &Path, files: &[PathBuf]) -> Result<String, String> {
-  let mut diff = String::new();
-  for file in files {
-    diff.push_str(&file_diff(path, file)?);
-    if !diff.ends_with('\n') {
-      diff.push('\n');
-    }
+  if files.is_empty() {
+    return Ok(String::new());
   }
-  Ok(diff)
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  let head = repository.head().ok().and_then(|head| head.peel_to_tree().ok());
+  let mut options = DiffOptions::new();
+  options.include_untracked(true).show_untracked_content(true).recurse_untracked_dirs(true).disable_pathspec_match(true);
+  for file in files {
+    options.pathspec(file);
+  }
+  let diff = repository.diff_tree_to_workdir_with_index(head.as_ref(), Some(&mut options)).map_err(|error| error.message().to_string())?;
+  patch_text(&diff)
+}
+
+/// The Git command as the activity log shows it: the repository and the arguments, never credentials.
+pub(crate) fn describe_git(path: &Path, arguments: &[&str]) -> String {
+  format!("git -C {} {}", path.display(), arguments.join(" "))
+}
+
+/// How a finished Git command ended, for the activity log.
+pub(crate) fn describe_output(output: &Result<std::process::Output, String>) -> String {
+  match output {
+    Ok(output) if output.status.success() => "ok".into(),
+    Ok(output) => format!("failed ({}): {}", output.status, last_line(&String::from_utf8_lossy(&output.stderr))),
+    Err(error) => format!("not run: {error}"),
+  }
 }
 
 /// A user name and a password (an access token) for Git over HTTPS, given to `git` for one command through a credential
@@ -546,7 +565,25 @@ fn credential_options(command: &mut std::process::Command, credentials: Option<&
 /// Runs the `git` program in `path` with `--progress` and hands each line it reports (git redraws progress lines with a carriage
 /// return) to `on_progress` while it runs. It never asks for input, so the user's own credentials apply and a login prompt becomes
 /// git's error message. Returns whether it succeeded and everything it wrote to stderr.
-fn run_git(path: &Path, arguments: &[&str], credentials: Option<&Credentials>, mut on_progress: impl FnMut(&str)) -> Result<(bool, String), String> {
+fn run_git(path: &Path, arguments: &[&str], credentials: Option<&Credentials>, on_progress: impl FnMut(&str)) -> Result<(bool, String), String> {
+  ws_activity::timed(
+    "git",
+    || describe_git(path, arguments),
+    || run_git_untimed(path, arguments, credentials, on_progress),
+    |result| match result {
+      Ok((true, _)) => "ok".into(),
+      Ok((false, stderr)) => format!("failed: {}", last_line(stderr)),
+      Err(error) => format!("not run: {error}"),
+    },
+  )
+}
+
+fn run_git_untimed(
+  path: &Path,
+  arguments: &[&str],
+  credentials: Option<&Credentials>,
+  mut on_progress: impl FnMut(&str),
+) -> Result<(bool, String), String> {
   use std::io::Read as _;
   let mut command = std::process::Command::new("git");
   shell_path::apply(&mut command);
@@ -601,9 +638,25 @@ fn is_progress(line: &str) -> bool {
   STEPS.iter().any(|step| line.starts_with(step)) || line.contains("% (")
 }
 
+/// A hook (Husky, for one) that stopped because a program it runs is not found: `.husky/pre-push: line 1: bun: command not found`.
+fn missing_hook_command(stderr: &str) -> Option<String> {
+  stderr.lines().find_map(|line| {
+    let (hook, rest) = line.trim().split_once(": line ")?;
+    let (_, rest) = rest.split_once(": ")?;
+    let program = rest.strip_suffix(": command not found")?;
+    let name = hook.rsplit('/').next().unwrap_or(hook);
+    Some(format!(
+      "The {name} hook could not run `{program}`: it is not installed or not on your PATH. Install it, or add it to your login shell's PATH (for example in ~/.zprofile), then try again."
+    ))
+  })
+}
+
 /// Why a git command failed, in a sentence. git ends its output with a line such as "failed to push some refs", which says nothing;
 /// the reason is in the line about the rejected branch or in what the remote said.
 fn failure_reason(stderr: &str, failure: &str) -> String {
+  if let Some(message) = missing_hook_command(stderr) {
+    return message;
+  }
   let lines: Vec<&str> = stderr.split(['\r', '\n']).map(str::trim).filter(|line| !line.is_empty()).collect();
   let mut message = match lines.iter().find(|line| line.contains("[remote rejected]") || line.contains("[rejected]")) {
     Some(rejected) => {

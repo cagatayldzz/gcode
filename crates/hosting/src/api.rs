@@ -101,6 +101,18 @@ impl Connection {
 
   /// Like [`Connection::request`], and the values of the response headers named in `capture` (in that order).
   fn request_with(&self, method: &str, url: &str, body: Option<Value>, capture: &[&str]) -> Result<(Value, Vec<Option<String>>), String> {
+    ws_activity::timed(
+      "http",
+      || format!("{method} {url}"),
+      || self.request_untimed(method, url, body, capture),
+      |result| match result {
+        Ok(_) => "ok".into(),
+        Err(error) => format!("failed: {error}"),
+      },
+    )
+  }
+
+  fn request_untimed(&self, method: &str, url: &str, body: Option<Value>, capture: &[&str]) -> Result<(Value, Vec<Option<String>>), String> {
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).http_status_as_error(false).build().into();
     let service = self.account.provider.label();
     let sent = match (method, body) {

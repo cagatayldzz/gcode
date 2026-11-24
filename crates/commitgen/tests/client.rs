@@ -93,11 +93,11 @@ fn a_large_diff_is_summarized_in_parts_and_merged() {
   let config = Config { max_input_tokens: 2_200, ..config(&url) };
   let message = generate(&config, "", &diff).unwrap();
   assert_eq!(message.summary, "feat: both parts");
-  let first = requests.recv().unwrap();
-  let second = requests.recv().unwrap();
+  // The parts are sent at the same time, so they arrive in either order; the merge always comes last.
+  let parts = [requests.recv().unwrap(), requests.recv().unwrap()];
   let merge = requests.recv().unwrap();
-  assert!(first.contains("a/a") && !first.contains("a/b"));
-  assert!(second.contains("a/b") && !second.contains("a/a b/a"));
+  assert!(parts.iter().any(|part| part.contains("a/a") && !part.contains("a/b")));
+  assert!(parts.iter().any(|part| part.contains("a/b") && !part.contains("a/a b/a")));
   assert!(merge.contains("feat: part one") && merge.contains("fix: part two"));
 }
 

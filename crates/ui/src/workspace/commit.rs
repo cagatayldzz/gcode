@@ -47,6 +47,46 @@ impl Workspace {
 
   /// The blue Update button at the right of the title bar, shown while a newer version is available. It downloads the update
   /// (the button turns into a loader) and restarts into it.
+  /// The debug button of the title bar: switches the activity log on and off. Only debug builds have it.
+  pub(super) fn render_activity_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    if !cfg!(debug_assertions) {
+      return None;
+    }
+    let palette = colors(cx);
+    let active = ws_activity::is_active();
+    Some(
+      rail_button(
+        "title-activity",
+        Icon::empty().path(if active { "icons/bug-play.svg" } else { "icons/bug.svg" }),
+        if active { "Stop logging activity" } else { "Log Git commands and requests" },
+        active,
+        false,
+        &palette,
+        cx.listener(|this, _, window, cx| this.toggle_activity_log(window, cx)),
+      )
+      .into_any_element(),
+    )
+  }
+
+  /// Starts or stops the activity log, a file in the data folder that grows while it is on.
+  fn toggle_activity_log(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if ws_activity::is_active() {
+      let path = ws_activity::current_path();
+      ws_activity::stop();
+      let saved = path.map_or(String::new(), |path| format!(" It was saved to {}.", path.display()));
+      window.push_notification(Notification::info(format!("Stopped logging activity.{saved}")), cx);
+    } else {
+      let path = ws_storage::data_dir().join("activity.log");
+      match ws_activity::start(&path) {
+        Ok(()) => {
+          window.push_notification(Notification::info(format!("Logging Git commands and requests to {} (times are UTC).", path.display())), cx)
+        }
+        Err(error) => window.push_notification(Notification::error(format!("Could not start the activity log: {error}")), cx),
+      }
+    }
+    cx.notify();
+  }
+
   pub(super) fn render_update_button(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     let (update, restarting) = {
       let state = &self.settings.read(cx).updates;

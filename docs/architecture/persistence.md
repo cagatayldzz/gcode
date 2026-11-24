@@ -6,6 +6,7 @@ Everything gCode owns lives in one data directory:
 ~/Library/Application Support/gCode/          (override with GCODE_DATA_DIR)
 ├── profiles.json            list of profiles, the one used last
 ├── commit.json              commit message generation settings (mode 0600, holds the API key)
+├── activity.log             debug builds only: what the title bar's bug button recorded
 ├── window.json              window placement, shared by all profiles
 ├── index/<hash>.idx         per-project file index (binary; a cache)
 ├── projects.json            ┐

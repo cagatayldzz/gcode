@@ -13,6 +13,7 @@ repository = "https://github.com/cagatayldzz/gcode"
 
 [workspace.dependencies]
 ws-product = { path = "crates/product" }
+ws-activity = { path = "crates/activity" }
 ws-terminal = { path = "crates/terminal" }
 ws-storage = { path = "crates/storage" }
 ws-index = { path = "crates/index" }

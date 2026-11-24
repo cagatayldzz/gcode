@@ -14,6 +14,7 @@ workspace = true
 doctest = false
 
 [dependencies]
+ws-activity.workspace = true
 git2.workspace = true
 
 [dev-dependencies]

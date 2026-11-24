@@ -20,6 +20,7 @@ repository/
 │   ├── storage/           files gCode owns
 │   ├── index/             project file index, fuzzy matching, line highlighters
 │   ├── hosting/           hosting-service accounts and APIs
+│   ├── activity/         switchable activity log (debug button)
 │   ├── commitgen/        commit message generation
 │   ├── updater/           self-update
 │   ├── version/           version comparison
@@ -106,6 +107,7 @@ repository/
 | **`ws-index`** | `ProjectIndex` (every file the ignore rules let through), `fuzzy::{score, rank}`, `highlight::{Language, Role, Highlights}` |
 | **`ws-hosting`** | `Account`, `Accounts`, `TokenStore` (`KeychainStore`, `MemoryStore`), `verify`, `repositories`, `pull_requests`, `create_pull_request`, `RepoRef`, `web_repository` |
 | **`ws-commitgen`** | `Config` (`commit.json`), `generate`, `split_diff`, `parse_message`, `system_prompt` |
+| **`ws-activity`** | `start`, `stop`, `timed`, `record`: one line per Git command or request, in `activity.log` |
 | **`ws-updater`** | `check`, `prepare`, `install`, `SWAP_SCRIPT`, `Release` |
 | **`ws-version`** | `is_newer` |
 | **`ws-capture`** | `cargo run -p ws-capture -- window\|screen [--out FILE] [--delay SECONDS]`: saves a PNG (default `<data dir>/captures/`) with macOS `screencapture`; needs Accessibility and Screen Recording access for the terminal |

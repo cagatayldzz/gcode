@@ -157,15 +157,24 @@ pub fn merge_branch(path: &Path, branch: &str) -> Result<(), String> {
     return Err(format!("\"{branch}\" is not a branch."));
   }
   let git = |arguments: &[&str]| {
-    std::process::Command::new("git")
-      .arg("-C")
-      .arg(path)
-      .args(arguments)
-      .env("GIT_TERMINAL_PROMPT", "0")
-      .env("GIT_EDITOR", "true")
-      .stdin(std::process::Stdio::null())
-      .output()
-      .map_err(|error| format!("Could not run git: {error}"))
+    ws_activity::timed(
+      "git",
+      || crate::describe_git(path, arguments),
+      || {
+        let mut command = std::process::Command::new("git");
+        crate::shell_path::apply(&mut command);
+        command
+          .arg("-C")
+          .arg(path)
+          .args(arguments)
+          .env("GIT_TERMINAL_PROMPT", "0")
+          .env("GIT_EDITOR", "true")
+          .stdin(std::process::Stdio::null())
+          .output()
+          .map_err(|error| format!("Could not run git: {error}"))
+      },
+      crate::describe_output,
+    )
   };
   let output = git(&["merge", "--no-edit", branch])?;
   if output.status.success() {

@@ -635,7 +635,7 @@ impl Workspace {
           }
         }
         if this.sidebar_tab == SidebarTab::Git && this.git_view == GitView::History {
-          this.load_history(cx);
+          this.refresh_history(cx);
         }
         this.sync_menus(false, cx);
         // While the project menu is open, what each project holds is kept up to date; otherwise the favorites' tabs are, less often.

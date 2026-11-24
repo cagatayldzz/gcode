@@ -290,3 +290,19 @@ fn merging_over_uncommitted_changes_to_the_same_file_is_refused_and_loses_nothin
   assert_eq!(fs::read_to_string(remote.mine.join("a.txt")).unwrap(), "one\ntwo\nthree\nmine\n");
   assert!(!ws_git::summary(&remote.mine).unwrap().merging);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_hook_that_cannot_find_its_program_is_explained() {
+  use std::os::unix::fs::PermissionsExt as _;
+  let remote = Remote::new("hook");
+  commit_file(&remote.mine, "f.txt", "f", "work");
+  let hook = remote.mine.join(".git/hooks/pre-push");
+  fs::write(&hook, "#!/bin/bash\ndefinitely-missing-program-xyz\n").unwrap();
+  fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+
+  let error = ws_git::push(&remote.mine, None, |_| {}).unwrap_err();
+
+  assert!(error.contains("pre-push hook could not run `definitely-missing-program-xyz`"), "{error}");
+  assert!(error.contains("PATH"));
+}

@@ -9034,6 +9034,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
+name = "ws-activity"
+version = "0.1.0"
+
+[[package]]
 name = "ws-app"
 version = "0.1.0"
 dependencies = [
@@ -9056,6 +9060,7 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "ureq",
+ "ws-activity",
  "ws-product",
  "ws-storage",
 ]
@@ -9072,6 +9077,7 @@ name = "ws-git"
 version = "0.1.0"
 dependencies = [
  "git2",
+ "ws-activity",
 ]
 
 [[package]]
@@ -9080,6 +9086,7 @@ version = "0.1.0"
 dependencies = [
  "serde_json",
  "ureq",
+ "ws-activity",
  "ws-product",
  "ws-storage",
 ]
@@ -9133,6 +9140,7 @@ dependencies = [
  "tree-sitter-kotlin-ng",
  "tree-sitter-swift",
  "unicode-width",
+ "ws-activity",
  "ws-commitgen",
  "ws-git",
  "ws-hosting",

@@ -13,4 +13,4 @@ pub use client::generate;
 pub use config::{
   config_path, Config, Provider, DEFAULT_INSTRUCTIONS, DEFAULT_LANGUAGE, DEFAULT_MAX_INPUT_TOKENS, DEFAULT_MODEL, LANGUAGES, MODELS, TOKEN_LIMITS,
 };
-pub use prompt::{estimate_tokens, parse_message, split_diff, system_prompt, Message};
+pub use prompt::{estimate_tokens, parse_message, shorten_files, split_diff, system_prompt, Message};

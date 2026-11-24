@@ -1,4 +1,4 @@
-use crate::{estimate_tokens, parse_message, split_diff, system_prompt, Config, Message, Provider};
+use crate::{estimate_tokens, parse_message, shorten_files, split_diff, system_prompt, Config, Message, Provider};
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -16,6 +16,18 @@ fn endpoint(config: &Config) -> String {
 
 /// One request to the chat API; the answer's text.
 fn complete(config: &Config, system: &str, user: &str) -> Result<String, String> {
+  ws_activity::timed(
+    "http",
+    || format!("POST {} model={} prompt={} chars", endpoint(config), config.model, system.len() + user.len()),
+    || complete_untimed(config, system, user),
+    |result| match result {
+      Ok(text) => format!("ok, answer {} chars", text.len()),
+      Err(error) => format!("failed: {error}"),
+    },
+  )
+}
+
+fn complete_untimed(config: &Config, system: &str, user: &str) -> Result<String, String> {
   let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(90))).http_status_as_error(false).build().into();
   let body = json!({
     "model": config.model,
@@ -74,17 +86,24 @@ pub fn generate(config: &Config, instructions: &str, diff: &str) -> Result<Messa
   Ok(message)
 }
 
+/// More requests than this and the diff is shortened per file first: a message for a thousand files does not need every line.
+const MAX_PARTS: usize = 4;
+const SHORT_FILE_LINES: usize = 40;
+
 fn generate_openai(config: &Config, system: &str, diff: &str) -> Result<String, String> {
   let budget = (config.max_input_tokens as usize).saturating_sub(estimate_tokens(system) + RESERVED_TOKENS).max(RESERVED_TOKENS);
-  let parts = split_diff(diff, budget);
-  if let [only] = parts.as_slice() {
-    complete(config, system, only)
-  } else {
-    let mut summaries = Vec::new();
-    for part in &parts {
-      summaries.push(complete(config, system, part)?);
-    }
-    let merge = format!("These commit messages describe parts of one change. Merge them into a single commit message:\n\n{}", summaries.join("\n\n"));
-    complete(config, system, &merge)
+  let mut parts = split_diff(diff, budget);
+  if parts.len() > MAX_PARTS {
+    parts = split_diff(&shorten_files(diff, SHORT_FILE_LINES), budget);
   }
+  if let [only] = parts.as_slice() {
+    return complete(config, system, only);
+  }
+  // The parts do not depend on each other, so they are summarized at the same time.
+  let summaries = std::thread::scope(|scope| {
+    let handles: Vec<_> = parts.iter().map(|part| scope.spawn(|| complete(config, system, part))).collect();
+    handles.into_iter().map(|handle| handle.join().unwrap_or_else(|_| Err("The request stopped unexpectedly.".into()))).collect::<Result<Vec<_>, _>>()
+  })?;
+  let merge = format!("These commit messages describe parts of one change. Merge them into a single commit message:\n\n{}", summaries.join("\n\n"));
+  complete(config, system, &merge)
 }

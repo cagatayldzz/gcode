@@ -938,6 +938,7 @@ impl Render for Workspace {
               window.dispatch_action(Box::new(AddProject), cx)
             }))
             .child(div().flex_1())
+            .children(self.render_activity_button(cx))
             .children(self.render_update_button(cx)),
         ),
       )

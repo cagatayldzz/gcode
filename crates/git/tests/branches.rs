@@ -434,3 +434,17 @@ fn the_working_tree_patch_includes_staged_unstaged_and_untracked_files() {
   assert!(patch.contains("+untracked change"));
   fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn a_diff_of_many_files_matches_bracketed_paths_literally() {
+  let dir = std::env::temp_dir().join(format!("ws-diff-literal-{}", std::process::id()));
+  let _ = fs::remove_dir_all(&dir);
+  fs::create_dir_all(dir.join("app/[id]")).unwrap();
+  git2::Repository::init(&dir).unwrap();
+  fs::write(dir.join("app/[id]/page.tsx"), "page\n").unwrap();
+  fs::write(dir.join("app/i/other.tsx"), "other\n").ok();
+  let diff = diff_files(&dir, &[PathBuf::from("app/[id]/page.tsx")]).unwrap();
+  assert!(diff.contains("+page"));
+  assert!(!diff.contains("other"));
+  let _ = fs::remove_dir_all(&dir);
+}

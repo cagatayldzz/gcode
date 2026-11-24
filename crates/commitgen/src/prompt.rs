@@ -111,3 +111,28 @@ pub fn parse_message(raw: &str, one_line: bool) -> Message {
   let (summary, description) = text.split_once('\n').unwrap_or((text, ""));
   Message { summary: summary.trim().to_string(), description: if one_line { String::new() } else { description.trim().to_string() } }
 }
+
+/// Keeps at most `max_lines` lines of each file of a unified diff, and marks the files that were cut. The start of a file's change
+/// says most about it; this keeps a diff of a thousand files small enough for a few requests.
+pub fn shorten_files(diff: &str, max_lines: usize) -> String {
+  let mut out = String::new();
+  let (mut lines, mut skipped) = (0usize, 0usize);
+  for line in diff.split_inclusive('\n') {
+    if line.starts_with("diff --git ") {
+      if skipped > 0 {
+        out.push_str(&format!("[{skipped} more lines left out]\n"));
+      }
+      (lines, skipped) = (0, 0);
+    }
+    lines += 1;
+    if lines <= max_lines {
+      out.push_str(line);
+    } else {
+      skipped += 1;
+    }
+  }
+  if skipped > 0 {
+    out.push_str(&format!("[{skipped} more lines left out]\n"));
+  }
+  out
+}
