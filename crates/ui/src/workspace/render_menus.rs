@@ -276,7 +276,7 @@ impl Workspace {
               .outline()
               .icon(Icon::empty().path("icons/refresh-cw.svg"))
               .tooltip("Refresh")
-              .on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.load_pull_requests(cx)))
+              .on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.load_pull_requests(true, cx)))
           };
           let list = match state {
             PullRequests::Idle | PullRequests::Loading => h_flex()

@@ -151,6 +151,11 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 const FAVORITE_STATUS_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Width of the sidebar when the window opens.
+/// The activity log panel at the bottom: its height when opened and the range the user can drag it through.
+const ACTIVITY_LOG_HEIGHT: Pixels = px(280.);
+const ACTIVITY_LOG_MIN_HEIGHT: Pixels = px(120.);
+const ACTIVITY_LOG_MAX_HEIGHT: Pixels = px(720.);
+
 const SIDEBAR_WIDTH: Pixels = px(280.);
 
 /// How narrow and how wide the sidebar can be dragged.
@@ -417,6 +422,8 @@ pub struct Workspace {
   /// The terminals fill the main area (the right part of the window) in place of the editor.
   /// The Problems panel is open under the editor.
   problems_open: bool,
+  /// The activity log panel at the bottom of the window (the debug button), while it is open, with what hears its close button.
+  activity_log: Option<(Entity<crate::activity_panel::ActivityLog>, Subscription)>,
   terminal_open: bool,
   /// The AI view (Codex, Claude) fills the main area, like the terminals do; the two never show together.
   agent_open: bool,
@@ -583,6 +590,7 @@ impl Workspace {
       menu_host: None,
       menu_profiles: Vec::new(),
       problems_open: false,
+      activity_log: None,
       terminal_open: false,
       agent_open: false,
       dragged_tab: None,
@@ -887,6 +895,43 @@ impl Render for Workspace {
     } else {
       editor_area
     };
+    let content = h_flex()
+      .flex_1()
+      .min_h_0()
+      .child(self.render_activity_bar(cx))
+      .child(if self.full_area_open() {
+        // The terminals take everything right of the activity bar: no sidebar and no status bar, like a terminal window.
+        div().flex_1().min_w_0().h_full().child(main_area).into_any_element()
+      } else {
+        // The group's content (the all-changes toolbar, for one) has a minimum width; `min_w_0` keeps it from pushing the group past
+        // the window edge when the window is made narrow.
+        div()
+          .flex_1()
+          .min_w_0()
+          .h_full()
+          .overflow_hidden()
+          .child(
+            h_resizable("sidebar-split")
+              // `fixed`: the sidebar keeps the width the user gave it when the window is resized; only the main area changes.
+              .child(resizable_panel().size(SIDEBAR_WIDTH).size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH).fixed().child(self.render_sidebar(cx)))
+              // The status bar belongs to the editor: the sidebar runs down to the bottom of the window.
+              .child(
+                resizable_panel().child(
+                  v_flex()
+                    .size_full()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .when(self.sidebar_tab == SidebarTab::Git, |column| column.children(self.render_git_toolbar(cx)))
+                    .child(div().flex_1().min_h_0().min_w_0().w_full().overflow_hidden().child(main_area))
+                    .when(self.problems_open && self.sidebar_tab != SidebarTab::Git, |column| column.children(self.render_problems_panel(cx)))
+                    // The Git view has the branch in its own bar: no status bar there.
+                    .when(self.sidebar_tab != SidebarTab::Git, |column| column.child(self.render_status_bar(cx))),
+                ),
+              ),
+          )
+          .into_any_element()
+      })
+      .into_any_element();
     v_flex()
       .id("workspace")
       .key_context("Workspace")
@@ -954,38 +999,17 @@ impl Render for Workspace {
             .children(self.render_update_button(cx)),
         ),
       )
-      .child(h_flex().flex_1().min_h_0().child(self.render_activity_bar(cx)).child(if self.full_area_open() {
-        // The terminals take everything right of the activity bar: no sidebar and no status bar, like a terminal window.
-        div().flex_1().min_w_0().h_full().child(main_area).into_any_element()
-      } else {
-        // The group's content (the all-changes toolbar, for one) has a minimum width; `min_w_0` keeps it from pushing the group past
-        // the window edge when the window is made narrow.
-        div()
+      .child(match &self.activity_log {
+        // The activity log panel under everything else; its edge can be dragged.
+        Some((log, _)) => div()
           .flex_1()
-          .min_w_0()
-          .h_full()
-          .overflow_hidden()
-          .child(
-            h_resizable("sidebar-split")
-              // `fixed`: the sidebar keeps the width the user gave it when the window is resized; only the main area changes.
-              .child(resizable_panel().size(SIDEBAR_WIDTH).size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH).fixed().child(self.render_sidebar(cx)))
-              // The status bar belongs to the editor: the sidebar runs down to the bottom of the window.
-              .child(
-                resizable_panel().child(
-                  v_flex()
-                    .size_full()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .when(self.sidebar_tab == SidebarTab::Git, |column| column.children(self.render_git_toolbar(cx)))
-                    .child(div().flex_1().min_h_0().min_w_0().w_full().overflow_hidden().child(main_area))
-                    .when(self.problems_open && self.sidebar_tab != SidebarTab::Git, |column| column.children(self.render_problems_panel(cx)))
-                    // The Git view has the branch in its own bar: no status bar there.
-                    .when(self.sidebar_tab != SidebarTab::Git, |column| column.child(self.render_status_bar(cx))),
-                ),
-              ),
-          )
-          .into_any_element()
-      }))
+          .min_h_0()
+          .child(v_resizable("activity-split").child(resizable_panel().child(v_flex().size_full().child(content))).child(
+            resizable_panel().size(ACTIVITY_LOG_HEIGHT).size_range(ACTIVITY_LOG_MIN_HEIGHT..ACTIVITY_LOG_MAX_HEIGHT).fixed().child(log.clone()),
+          ))
+          .into_any_element(),
+        None => content,
+      })
   }
 }
 

@@ -20,7 +20,7 @@ repository/
 │   ├── storage/           files gCode owns
 │   ├── index/             project file index, fuzzy matching, line highlighters
 │   ├── hosting/           hosting-service accounts and APIs
-│   ├── activity/         switchable activity log (debug button)
+│   ├── activity/         activity log (debug button opens its bottom panel)
 │   ├── commitgen/        commit message generation
 │   ├── language/          language server client: errors and warnings of open files
 │   ├── updater/           self-update
@@ -109,7 +109,7 @@ repository/
 | **`ws-hosting`** | `Account`, `Accounts`, `TokenStore` (`KeychainStore`, `MemoryStore`), `verify`, `repositories`, `pull_requests`, `create_pull_request`, `RepoRef`, `web_repository` |
 | **`ws-commitgen`** | `Config` (`commit.json`), `generate`, `split_diff`, `parse_message`, `system_prompt` |
 | **`ws-language`** | `find_server` (the project's own TypeScript server, else `typescript-language-server`), `Session` (`start`, `sync`, `close`), `Update`, `Problem`, `Severity` |
-| **`ws-activity`** | `start`, `stop`, `timed`, `record`, `error`: `activity.log` lines marked `INFO`, `SLOW` (over 500 ms) or `ERROR`: Git commands, requests, refresh and history reads, the commit message steps, and every error notification |
+| **`ws-activity`** | `timed`, `record`, `error`, `entries`, `version`, `clear` (the newest 2000 lines are always kept in memory; `start`/`stop` also write a file): lines marked `INFO`, `SLOW` (over 500 ms) or `ERROR`: Git commands, requests, refresh and history reads, the commit message steps, and every error notification |
 | **`ws-updater`** | `check`, `prepare`, `install`, `SWAP_SCRIPT`, `Release` |
 | **`ws-version`** | `is_newer` |
 | **`ws-capture`** | `cargo run -p ws-capture -- window\|screen [--out FILE] [--delay SECONDS]`: saves a PNG (default `<data dir>/captures/`) with macOS `screencapture`; needs Accessibility and Screen Recording access for the terminal |

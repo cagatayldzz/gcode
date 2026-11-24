@@ -66,7 +66,7 @@ changes. The VitePress dependency is managed separately through Bun.
 | `ws-storage` | lib | data directory, projects, preferences, profiles |
 | `ws-commitgen` | lib | commit message generation, `commit.json` settings |
 | `ws-language` | lib | language server client (JavaScript and TypeScript problems) |
-| `ws-activity` | lib | the switchable activity log written by the debug button |
+| `ws-activity` | lib | the activity log (kept in memory; shown by the debug button in a bottom panel) |
 | `ws-hosting` | lib | GitHub, GitLab and Azure DevOps accounts, repositories and pull requests |
 | `ws-version` | lib | version comparison for update detection |
 | `ws-updater` | lib | self-update from GitHub releases |

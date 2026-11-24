@@ -1,7 +1,11 @@
-use std::fs;
+use std::{fs, sync::Mutex};
+
+/// The log is shared by the whole process, so the tests take turns.
+static TURN: Mutex<()> = Mutex::new(());
 
 #[test]
 fn work_is_recorded_only_while_recording_is_on() {
+  let _turn = TURN.lock().unwrap_or_else(|error| error.into_inner());
   let dir = std::env::temp_dir().join(format!("ws-activity-{}", std::process::id()));
   let _ = fs::remove_dir_all(&dir);
   let path = dir.join("nested").join("activity.log");
@@ -29,4 +33,30 @@ fn work_is_recorded_only_while_recording_is_on() {
   assert!(text.contains("recording started") && text.contains("recording stopped"));
   assert!(!text.contains("before") && !text.contains("after"));
   let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_newest_lines_are_kept_in_memory_and_can_be_cleared() {
+  let _turn = TURN.lock().unwrap_or_else(|error| error.into_inner());
+  ws_activity::clear();
+  let before = ws_activity::version();
+  ws_activity::record("http", || "GET https://example.com/memory".into());
+  ws_activity::timed("git", || "git memory".into(), || (), |_| "failed: nope".into());
+  assert!(ws_activity::version() >= before + 2);
+
+  let entries = ws_activity::entries();
+  let line = entries.iter().find(|entry| entry.message.contains("example.com/memory")).unwrap();
+  assert_eq!(line.level, ws_activity::Level::Info);
+  let failed = entries.iter().find(|entry| entry.message.starts_with("git memory")).unwrap();
+  assert_eq!(failed.level, ws_activity::Level::Error);
+  assert!(failed.id > line.id);
+  assert!(failed.text().contains("ERROR [git] git memory → failed: nope ("));
+
+  for index in 0..ws_activity::CAPACITY + 10 {
+    ws_activity::record("flood", || index.to_string());
+  }
+  assert_eq!(ws_activity::entries().len(), ws_activity::CAPACITY);
+
+  ws_activity::clear();
+  assert!(ws_activity::entries().is_empty());
 }

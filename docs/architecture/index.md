@@ -20,7 +20,7 @@ gCode is a Cargo workspace of small libraries and one thin executable. The rule 
      ├──► hosting    GitHub / GitLab / Azure DevOps accounts, repositories, PRs
      ├──► commitgen   commit message generation, commit.json
      ├──► language    language server client: problems of JavaScript and TypeScript files
-     ├──► activity    the debug activity log (Git commands, requests)
+     ├──► activity    the activity log (Git commands, requests), shown in a panel at the bottom of the window
      ├──► updater ──► version    release lookup, verified self-update
      └──► product    the product's name (generated from product.toml); the lower crates use it too
 

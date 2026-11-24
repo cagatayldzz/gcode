@@ -1,9 +1,30 @@
 use crate::{process, UpdateError};
+use std::{
+  sync::Mutex,
+  time::{Duration, Instant},
+};
 use ws_version::is_newer;
 
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const CHECKSUMS_NAME: &str = "SHA256SUMS.txt";
 const MAX_NOTES: usize = 4000;
+
+/// How long the answer of a check is used again without asking GitHub (unauthenticated requests to its API are limited to 60 an hour
+/// per address, and a release does not appear every few minutes).
+const CHECK_FRESH_FOR: Duration = Duration::from_secs(600);
+
+/// How long a check is not repeated after GitHub said it is limiting requests.
+const CHECK_COOL_DOWN: Duration = Duration::from_secs(900);
+
+/// The last check: when, for which running version, and what it found.
+static LAST_CHECK: Mutex<Option<LastCheck>> = Mutex::new(None);
+
+struct LastCheck {
+  at: Instant,
+  version: String,
+  outcome: Result<Option<Release>, UpdateError>,
+  fresh_for: Duration,
+}
 
 /// A published release that is newer than the running version.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,8 +84,35 @@ pub fn repository_slug() -> Option<&'static str> {
 }
 
 /// The newest published release when it is newer than `current`; `None` when
-/// The app is up to date or no release exists yet.
+/// The app is up to date or no release exists yet. The answer is kept for ten minutes, so checking again (at launch, then by hand)
+/// does not ask GitHub again; a refusal because of its rate limit is kept for fifteen.
 pub fn check(current: &str) -> Result<Option<Release>, UpdateError> {
+  let kept = LAST_CHECK.lock().unwrap_or_else(|error| error.into_inner());
+  if let Some(LastCheck { at, version, outcome, fresh_for }) = kept.as_ref() {
+    if version == current && at.elapsed() < *fresh_for {
+      ws_activity::record("http", || "check for a newer release → kept from the last check, GitHub not asked again".into());
+      return outcome.clone();
+    }
+  }
+  // Held while asking, so a check that starts meanwhile waits for this one instead of sending its own.
+  let outcome = ws_activity::timed(
+    "http",
+    || "GET releases/latest (check for a newer release)".into(),
+    || ask(current),
+    |result| match result {
+      Ok(Some(release)) => format!("ok, {} is available", release.tag),
+      Ok(None) => "ok, up to date".into(),
+      Err(error) => format!("failed: {error}"),
+    },
+  );
+  let limited = outcome.as_ref().is_err_and(|error| error.to_string().contains("rate limiting"));
+  let mut kept = kept;
+  let fresh_for = if limited { CHECK_COOL_DOWN } else { CHECK_FRESH_FOR };
+  *kept = (outcome.is_ok() || limited).then(|| LastCheck { at: Instant::now(), version: current.to_string(), outcome: outcome.clone(), fresh_for });
+  outcome
+}
+
+fn ask(current: &str) -> Result<Option<Release>, UpdateError> {
   if !cfg!(target_arch = "aarch64") {
     return Err(UpdateError::new(format!("{} releases are published for Apple Silicon Macs only.", ws_product::NAME)));
   }

@@ -1,5 +1,6 @@
 //! The interface: projects, editor, terminal and Git in one window, built with GPUI Kit.
 
+mod activity_panel;
 mod agents;
 mod all_changes;
 mod assets;

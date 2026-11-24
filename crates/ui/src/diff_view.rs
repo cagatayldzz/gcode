@@ -10,7 +10,7 @@ use gpui_kit::{
     h_flex,
     highlighter::SyntaxHighlighter,
     menu::{DropdownMenu as _, PopupMenuItem},
-    v_flex, ActiveTheme as _, Sizable as _, Theme,
+    v_flex, ActiveTheme as _, Icon, IconName, Sizable as _, Theme,
   },
   *,
 };
@@ -85,7 +85,7 @@ impl ShownDiff {
     v_flex()
       .size_full()
       .min_h_0()
-      .child(h_flex().px_2().py_1().border_b_1().border_color(cx.theme().border).child(diff_controls(&self.state)))
+      .child(h_flex().px_2().py_1().justify_end().border_b_1().border_color(cx.theme().border).child(diff_controls(&self.state)))
       .child(div().flex_1().min_h_0().min_w_0().overflow_hidden().child(diff))
   }
 
@@ -106,51 +106,69 @@ pub(crate) fn diff_controls(state: &Entity<DiffState>) -> impl IntoElement {
   let options = state.clone();
   h_flex()
     .gap_1()
-    .child(Button::new("diff-previous").ghost().xsmall().label("Previous change").on_click(move |_, _, cx| {
-      previous.update(cx, DiffState::previous_change);
-    }))
-    .child(Button::new("diff-next").ghost().xsmall().label("Next change").on_click(move |_, _, cx| {
-      next.update(cx, DiffState::next_change);
-    }))
-    .child(Button::new("diff-options").ghost().xsmall().label("Diff options").dropdown_menu(move |menu, _, cx| {
-      let state = options.read(cx);
-      let mode = state.mode();
-      let emphasis = state.inline_unit();
-      let mut menu = menu;
-      for (label, choice) in [("Unified", DiffMode::Unified), ("Side by side", DiffMode::Split)] {
-        let target = options.clone();
-        menu = menu.item(PopupMenuItem::new(label).checked(mode == choice).on_click(move |_, _, cx| {
-          target.update(cx, |state, cx| state.set_mode(choice, cx));
-        }));
-      }
-      menu = menu.separator();
-      for (label, choice) in [
-        ("Highlight changed words", Some(DiffInlineUnit::Word)),
-        ("Highlight changed characters", Some(DiffInlineUnit::Character)),
-        ("Highlight whole lines", None),
-      ] {
-        let target = options.clone();
-        menu = menu.item(PopupMenuItem::new(label).checked(emphasis == choice).on_click(move |_, _, cx| {
-          target.update(cx, |state, cx| state.set_inline_unit(choice, cx));
-        }));
-      }
-      let action = |label, command: fn(&mut DiffState, &mut Context<DiffState>)| {
-        let target = options.clone();
-        PopupMenuItem::new(label).on_click(move |_, _, cx| {
-          target.update(cx, command);
-        })
-      };
-      let copy = options.clone();
-      menu
-        .separator()
-        .item(action("Expand unchanged lines", DiffState::expand_unchanged))
-        .item(action("Collapse unchanged lines", DiffState::collapse_unchanged))
-        .separator()
-        .item(PopupMenuItem::new("Copy selected lines").disabled(state.selected_lines().is_none()).on_click(move |_, _, cx| {
-          let text = copy.read(cx).selected_text(cx);
-          cx.write_to_clipboard(ClipboardItem::new_string(text));
-        }))
-    }))
+    .child(
+      Button::new("diff-previous")
+        .ghost()
+        .xsmall()
+        .icon(IconName::ChevronUp)
+        .tooltip("Previous change")
+        .accessibility_label("Previous change")
+        .on_click(move |_, _, cx| {
+          previous.update(cx, DiffState::previous_change);
+        }),
+    )
+    .child(Button::new("diff-next").ghost().xsmall().icon(IconName::ChevronDown).tooltip("Next change").accessibility_label("Next change").on_click(
+      move |_, _, cx| {
+        next.update(cx, DiffState::next_change);
+      },
+    ))
+    .child(
+      Button::new("diff-options")
+        .ghost()
+        .xsmall()
+        .icon(Icon::empty().path("icons/settings-2.svg"))
+        .tooltip("Diff options")
+        .accessibility_label("Diff options")
+        .dropdown_menu(move |menu, _, cx| {
+          let state = options.read(cx);
+          let mode = state.mode();
+          let emphasis = state.inline_unit();
+          let mut menu = menu;
+          for (label, choice) in [("Unified", DiffMode::Unified), ("Side by side", DiffMode::Split)] {
+            let target = options.clone();
+            menu = menu.item(PopupMenuItem::new(label).checked(mode == choice).on_click(move |_, _, cx| {
+              target.update(cx, |state, cx| state.set_mode(choice, cx));
+            }));
+          }
+          menu = menu.separator();
+          for (label, choice) in [
+            ("Highlight changed words", Some(DiffInlineUnit::Word)),
+            ("Highlight changed characters", Some(DiffInlineUnit::Character)),
+            ("Highlight whole lines", None),
+          ] {
+            let target = options.clone();
+            menu = menu.item(PopupMenuItem::new(label).checked(emphasis == choice).on_click(move |_, _, cx| {
+              target.update(cx, |state, cx| state.set_inline_unit(choice, cx));
+            }));
+          }
+          let action = |label, command: fn(&mut DiffState, &mut Context<DiffState>)| {
+            let target = options.clone();
+            PopupMenuItem::new(label).on_click(move |_, _, cx| {
+              target.update(cx, command);
+            })
+          };
+          let copy = options.clone();
+          menu
+            .separator()
+            .item(action("Expand unchanged lines", DiffState::expand_unchanged))
+            .item(action("Collapse unchanged lines", DiffState::collapse_unchanged))
+            .separator()
+            .item(PopupMenuItem::new("Copy selected lines").disabled(state.selected_lines().is_none()).on_click(move |_, _, cx| {
+              let text = copy.read(cx).selected_text(cx);
+              cx.write_to_clipboard(ClipboardItem::new_string(text));
+            }))
+        }),
+    )
 }
 
 /// Visits source lines in patch order. Context is represented by its modified-side line number.

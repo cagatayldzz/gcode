@@ -361,7 +361,7 @@ impl Render for AllChanges {
       .size_full()
       .min_h_0()
       .child(self.toolbar(&state, cx))
-      .child(h_flex().px_2().py_1().border_b_1().border_color(cx.theme().border).child(crate::diff_view::diff_controls(&state)))
+      .child(h_flex().px_2().py_1().justify_end().border_b_1().border_color(cx.theme().border).child(crate::diff_view::diff_controls(&state)))
       // The diff owns its scrolling, so its scrollbar sits at the right edge of the area.
       .child(div().relative().flex_1().min_h_0().overflow_hidden().cursor_text().child(diff).child(sticky_header))
       .into_any_element()

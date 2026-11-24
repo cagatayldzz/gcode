@@ -220,18 +220,22 @@ impl Render for ChangeView {
         None => div().into_any_element(),
       })
       .child(Label::new(name).text_size(FONT_SIZE_SM).font_weight(FontWeight::SEMIBOLD))
+      .child(div().flex_1())
       .when(can_preview, |header| {
-        header.child(div().flex_1()).child(
-          Button::new("toggle-svg-change-preview").ghost().small().label(if self.show_preview { "Source" } else { "Preview" }).on_click(cx.listener(
-            |this, _, _, cx| {
-              this.show_preview = !this.show_preview;
-              if this.show_preview && this.svg_preview.is_none() {
-                this.load_svg_preview(cx);
-              }
-              cx.notify();
-            },
-          )),
-        )
+        header.child(Button::new("toggle-svg-change-preview").ghost().small().label(if self.show_preview { "Source" } else { "Preview" }).on_click(
+          cx.listener(|this, _, _, cx| {
+            this.show_preview = !this.show_preview;
+            if this.show_preview && this.svg_preview.is_none() {
+              this.load_svg_preview(cx);
+            }
+            cx.notify();
+          }),
+        ))
+      })
+      // The previous/next/options buttons of a text diff sit at the right end of the path.
+      .children(match &self.diff {
+        Load::Ready(ChangeDiff::Text(state)) if !self.show_preview => Some(crate::diff_view::diff_controls(state.state())),
+        _ => None,
       });
     let loading = || {
       h_flex()
@@ -258,10 +262,7 @@ impl Render for ChangeView {
         div()
           .size_full()
           .cursor_text()
-          .child(state.with_controls(
-            state.view(cx).header_visible(false).soft_wrap(true).border_0().text_size(code_font_size(&self.settings, cx)).size_full(),
-            cx,
-          ))
+          .child(state.view(cx).header_visible(false).soft_wrap(true).border_0().text_size(code_font_size(&self.settings, cx)).size_full())
           .into_any_element()
       }
     };

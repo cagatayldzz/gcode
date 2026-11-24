@@ -9206,6 +9206,7 @@ name = "ws-updater"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "ws-activity",
  "ws-product",
  "ws-version",
 ]

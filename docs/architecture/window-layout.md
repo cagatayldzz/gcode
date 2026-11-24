@@ -35,6 +35,10 @@ it runs down to the bottom of the window.
 Long text files show a minimap, which samples the buffer in the background and reuses the editor's scroll position. The Kit draws the dock
 chrome (the title, zoom button and `…` menu).
 
+**Activity log panel** (`activity_panel.rs`, debug builds). The bug button in the title band opens a 280 px panel under everything else in the
+window (activity bar included, takeover areas too) and closes it again; the panel's own close button does the same. It lists the lines of
+`ws_activity` newest first, with filters, Copy and Clear.
+
 ## Takeover areas
 
 The terminals and the AI view are **not** dock panels. They *replace* everything right of the activity bar:

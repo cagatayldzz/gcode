@@ -1,6 +1,7 @@
+use crate::traffic::{self, Answer};
 use crate::{Connection, Provider, RepoRef};
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::time::Instant;
 
 /// A repository the account can see.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,60 +100,122 @@ impl Connection {
     self.request_with(method, url, body, &[]).map(|(value, _)| value)
   }
 
+  /// What the cached answers of this account have in common at the start of their keys. The token is part of it, so a token that
+  /// was replaced never gets what another one was told.
+  fn cache_prefix(&self) -> String {
+    use std::hash::{Hash as _, Hasher as _};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    self.token.hash(&mut hasher);
+    let account = &self.account;
+    format!("{}|{}|{}|{:x}|", account.provider.label(), account.base_url(), account.organization.as_deref().unwrap_or_default(), hasher.finish())
+  }
+
+  /// Makes what was read for this account stale, so the next read asks the service again (with the `ETag` it has, which costs
+  /// nothing when nothing changed). For a refresh the user asked for.
+  pub fn expire(&self) {
+    traffic::expire(&self.cache_prefix());
+  }
+
   /// Like [`Connection::request`], and the values of the response headers named in `capture` (in that order).
+  ///
+  /// A read is answered from memory while it is recent, asked again with its `ETag` after that, and shared with an identical read that
+  /// is in flight; a change (anything but `GET`) makes what was read stale. See [`traffic`].
   fn request_with(&self, method: &str, url: &str, body: Option<Value>, capture: &[&str]) -> Result<(Value, Vec<Option<String>>), String> {
     ws_activity::timed(
       "http",
       || format!("{method} {url}"),
-      || self.request_untimed(method, url, body, capture),
+      || self.exchange(method, url, body, capture),
       |result| match result {
-        Ok(_) => "ok".into(),
+        Ok((_, _, how)) => (*how).to_string(),
         Err(error) => format!("failed: {error}"),
       },
     )
+    .map(|(value, headers, _)| (value, headers))
   }
 
-  fn request_untimed(&self, method: &str, url: &str, body: Option<Value>, capture: &[&str]) -> Result<(Value, Vec<Option<String>>), String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).http_status_as_error(false).build().into();
+  /// The answer, the captured headers and how it was got (for the log).
+  #[allow(clippy::type_complexity)]
+  fn exchange(&self, method: &str, url: &str, body: Option<Value>, capture: &[&str]) -> Result<(Value, Vec<Option<String>>, &'static str), String> {
+    let captured = |answer: &Answer| capture.iter().map(|name| answer.header(&name.to_ascii_lowercase())).collect::<Vec<_>>();
+    if method != "GET" || body.is_some() {
+      let answer = self.fetch(method, url, body.as_ref(), &[])?.1;
+      traffic::forget(&self.cache_prefix());
+      return Ok((answer.value.clone(), captured(&answer), "ok"));
+    }
+    let slot = traffic::slot(&format!("{}{url}", self.cache_prefix()));
+    // Held while asking: an identical read waits here and then finds the answer fresh.
+    let mut slot = traffic::lock(&slot);
+    if let Some(answer) = slot.fresh() {
+      return Ok((answer.value.clone(), captured(answer), "ok (kept, not asked again)"));
+    }
+    let conditional: Vec<(&str, String)> = match (&slot.etag, &slot.answer) {
+      (Some(etag), Some(_)) => vec![("If-None-Match", etag.clone())],
+      _ => Vec::new(),
+    };
+    match self.fetch("GET", url, None, &conditional) {
+      Ok((304, _)) if slot.answer.is_some() => {
+        slot.fetched = Some(Instant::now());
+        let answer = slot.answer.clone().unwrap_or_else(|| Answer { value: Value::Null, headers: Vec::new() });
+        Ok((answer.value.clone(), captured(&answer), "ok (not modified)"))
+      }
+      Ok((_, answer)) => {
+        slot.store(answer.clone());
+        Ok((answer.value.clone(), captured(&answer), "ok"))
+      }
+      // While the service must be left alone, the last answer is better than none.
+      Err(error) if error.contains(traffic::RATE_LIMITED) && slot.answer.is_some() => {
+        let answer = slot.answer.clone().unwrap_or_else(|| Answer { value: Value::Null, headers: Vec::new() });
+        Ok((answer.value.clone(), captured(&answer), "ok (an older answer: the service is limiting requests)"))
+      }
+      Err(error) => Err(error),
+    }
+  }
+
+  /// One request to the service: the status and, for a success, the answer. Fails before sending while the service has asked to be
+  /// left alone, and after it, with a message that says what to do, when the service refused.
+  fn fetch(&self, method: &str, url: &str, body: Option<&Value>, extra: &[(&str, String)]) -> Result<(u16, Answer), String> {
     let service = self.account.provider.label();
+    let host = traffic::host_of(url);
+    if let Some(wait) = traffic::blocked(host) {
+      return Err(traffic::rate_limited(service, wait));
+    }
+    let agent = traffic::agent();
+    let mut headers = self.headers();
+    headers.extend(extra.iter().map(|(name, value)| (*name, value.clone())));
+    macro_rules! with_headers {
+      ($request:expr) => {{
+        let mut request = $request;
+        for (name, value) in &headers {
+          request = request.header(*name, value.as_str());
+        }
+        request
+      }};
+    }
     let sent = match (method, body) {
-      ("POST", Some(body)) => {
-        let mut request = agent.post(url);
-        for (name, value) in self.headers() {
-          request = request.header(name, value);
-        }
-        request.send_json(&body)
-      }
-      ("PATCH", Some(body)) => {
-        let mut request = agent.patch(url);
-        for (name, value) in self.headers() {
-          request = request.header(name, value);
-        }
-        request.send_json(&body)
-      }
-      ("PUT", Some(body)) => {
-        let mut request = agent.put(url);
-        for (name, value) in self.headers() {
-          request = request.header(name, value);
-        }
-        request.send_json(&body)
-      }
-      _ => {
-        let mut request = agent.get(url);
-        for (name, value) in self.headers() {
-          request = request.header(name, value);
-        }
-        request.call()
-      }
+      ("POST", Some(body)) => with_headers!(agent.post(url)).send_json(body),
+      ("PATCH", Some(body)) => with_headers!(agent.patch(url)).send_json(body),
+      ("PUT", Some(body)) => with_headers!(agent.put(url)).send_json(body),
+      _ => with_headers!(agent.get(url)).call(),
     };
     let mut response = sent.map_err(|error| format!("Could not reach {service}: {error}"))?;
     let status = response.status().as_u16();
-    let captured: Vec<Option<String>> =
-      capture.iter().map(|name| response.headers().get(*name).and_then(|value| value.to_str().ok()).map(str::to_string)).collect();
+    let received: Vec<(String, String)> =
+      response.headers().iter().filter_map(|(name, value)| Some((name.as_str().to_ascii_lowercase(), value.to_str().ok()?.to_string()))).collect();
+    let wait = traffic::wait_asked(status, &received);
+    if let Some(wait) = wait.filter(|_| status == 429 || status == 403 || status == 200) {
+      traffic::block(host, wait);
+      ws_activity::record("http", || format!("{service} asked to be left alone {}", traffic::describe_wait(wait)));
+    }
+    if status == 304 {
+      return Ok((status, Answer { value: Value::Null, headers: received }));
+    }
     let text = response.body_mut().read_to_string().map_err(|error| format!("Could not read the answer of {service}: {error}"))?;
     let value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
     if (200..300).contains(&status) {
-      return Ok((value, captured));
+      return Ok((status, Answer { value, headers: received }));
+    }
+    if let Some(wait) = wait.filter(|_| status == 429 || status == 403) {
+      return Err(traffic::rate_limited(service, wait));
     }
     let detail = ["message", "error_description", "error"]
       .iter()
@@ -562,7 +625,10 @@ impl PermissionReport {
 impl Connection {
   /// The status of a request, whatever it is: used to find out what the service allows from how it answers.
   fn status_of(&self, method: &str, url: &str, body: Option<Value>, headers: Vec<(&'static str, String)>) -> Option<u16> {
-    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).http_status_as_error(false).build().into();
+    if traffic::blocked(traffic::host_of(url)).is_some() {
+      return None;
+    }
+    let agent = traffic::agent();
     let sent = match (method, body) {
       ("POST", Some(body)) => {
         let mut request = agent.post(url);

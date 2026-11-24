@@ -120,6 +120,8 @@ impl Workspace {
           .get(&account.key())
           .ok_or("The token is not in the Keychain any more. Disconnect the account and connect it again.".to_string())?;
         let connection = Connection { account: account.clone(), token };
+        // The user asked to check again: what was read before is asked again.
+        connection.expire();
         let own = remote.and_then(|url| RepoRef::for_account(&account, &url).map(|repository| (repository, url)));
         let (repository, url) = match own {
           Some(found) => found,

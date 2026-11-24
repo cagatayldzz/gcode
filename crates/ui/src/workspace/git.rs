@@ -498,13 +498,14 @@ impl Workspace {
     self.branch_tab = tab;
     self.branch_filter.update(cx, |input, cx| input.set_value("", window, cx));
     if tab == BranchTab::PullRequests {
-      self.load_pull_requests(cx);
+      self.load_pull_requests(false, cx);
     }
     cx.notify();
   }
 
-  /// Reads the open pull requests of the repository off the interface thread.
-  pub(super) fn load_pull_requests(&mut self, cx: &mut Context<Self>) {
+  /// Reads the open pull requests of the repository off the interface thread. What was read a minute ago is used again; `fresh` (the
+  /// Refresh button) asks the service, which costs nothing against its limit when nothing changed.
+  pub(super) fn load_pull_requests(&mut self, fresh: bool, cx: &mut Context<Self>) {
     let (Some((url, _)), Some(root)) = (self.hosted_remote(cx), self.projects.active.clone()) else { return };
     let accounts = self.settings.read(cx).accounts.clone();
     self.pull_requests = PullRequests::Loading;
@@ -514,6 +515,9 @@ impl Workspace {
       let (connection, repository) = accounts
         .for_remote(&url, &accounts.keychain())
         .ok_or("The token for this account is not in the Keychain. Connect the account again in Settings → Accounts.")?;
+      if fresh {
+        connection.expire();
+      }
       ws_hosting::pull_requests(&connection, &repository)
     });
     cx.spawn(async move |this, cx| {
@@ -551,7 +555,7 @@ impl Workspace {
         window.close_dialog(cx);
         window.push_notification(Notification::info(format!("Opened pull request #{}: {}", opened.number, opened.title)), cx);
         cx.open_url(&opened.url);
-        this.load_pull_requests(cx);
+        this.load_pull_requests(false, cx);
       }
       PullRequestEvent::Refused => {
         let url = form.read(cx).remote_url().to_string();

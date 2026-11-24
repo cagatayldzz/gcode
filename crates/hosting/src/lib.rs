@@ -5,6 +5,7 @@
 mod accounts;
 mod api;
 mod remote;
+mod traffic;
 
 pub use accounts::{Account, Accounts, Connection, KeychainStore, MemoryStore, Provider, TokenGuide, TokenStore};
 pub use api::{

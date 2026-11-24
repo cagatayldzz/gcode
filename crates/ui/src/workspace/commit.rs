@@ -45,21 +45,31 @@ impl Workspace {
     }
   }
 
-  /// The blue Update button at the right of the title bar, shown while a newer version is available. It downloads the update
-  /// (the button turns into a loader) and restarts into it.
-  /// The debug button of the title bar: switches the activity log on and off. Only debug builds have it.
+  /// Opens the activity log panel at the bottom of the window, or closes it.
+  fn toggle_activity_log(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if self.activity_log.take().is_none() {
+      let log = cx.new(crate::activity_panel::ActivityLog::new);
+      let subscription = cx.subscribe_in(&log, window, |this, _, _: &crate::activity_panel::ActivityClosed, _, cx| {
+        this.activity_log = None;
+        cx.notify();
+      });
+      self.activity_log = Some((log, subscription));
+    }
+    cx.notify();
+  }
+
+  /// The debug button of the title bar: opens the activity log panel. Only debug builds have it.
   pub(super) fn render_activity_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
     if !cfg!(debug_assertions) {
       return None;
     }
     let palette = colors(cx);
-    let active = ws_activity::is_active();
     Some(
       rail_button(
         "title-activity",
-        Icon::empty().path(if active { "icons/bug-play.svg" } else { "icons/bug.svg" }),
-        if active { "Stop logging activity" } else { "Log Git commands and requests" },
-        active,
+        Icon::empty().path("icons/bug.svg"),
+        "Log Git commands and requests",
+        self.activity_log.is_some(),
         false,
         &palette,
         cx.listener(|this, _, window, cx| this.toggle_activity_log(window, cx)),
@@ -68,25 +78,8 @@ impl Workspace {
     )
   }
 
-  /// Starts or stops the activity log, a file in the data folder that grows while it is on.
-  fn toggle_activity_log(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    if ws_activity::is_active() {
-      let path = ws_activity::current_path();
-      ws_activity::stop();
-      let saved = path.map_or(String::new(), |path| format!(" It was saved to {}.", path.display()));
-      window.push_notification(Notification::info(format!("Stopped logging activity.{saved}")), cx);
-    } else {
-      let path = ws_storage::data_dir().join("activity.log");
-      match ws_activity::start(&path) {
-        Ok(()) => {
-          window.push_notification(Notification::info(format!("Logging Git commands and requests to {} (times are UTC).", path.display())), cx)
-        }
-        Err(error) => window.push_notification(crate::failure(format!("Could not start the activity log: {error}")), cx),
-      }
-    }
-    cx.notify();
-  }
-
+  /// The blue Update button at the right of the title bar, shown while a newer version is available. It downloads the update
+  /// (the button turns into a loader) and restarts into it.
   pub(super) fn render_update_button(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     let (update, restarting) = {
       let state = &self.settings.read(cx).updates;

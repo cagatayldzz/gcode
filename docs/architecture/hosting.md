@@ -35,6 +35,22 @@ page for **View on …**, using an account to recognize a self-hosted host.
 Tokens reach the Keychain through the **standard input of `security -i`**, never through a command line. Everything that touches the network or
 the Keychain runs on a background thread.
 
+## Asking the services less (`traffic`)
+
+Every request goes through `crates/hosting/src/traffic.rs`, so the app does not ask twice and does not run into a service's rate limit:
+
+| What | How |
+| --- | --- |
+| One agent | connections are reused, not opened per request |
+| Reads are kept | an answer is used for 60 s; after that it is asked again with its `ETag` (GitHub does not count a `304` against its limit) |
+| Identical reads at once | the second waits for the first and takes its answer (opening a project asks for the repository's name from several places) |
+| Changes | a `POST`/`PATCH`/`PUT` makes what was read for that account stale |
+| Refresh by the user | `Connection::expire()` (the pull request **Refresh** button, **Check again** on an account) |
+| Rate limit | `429`, `Retry-After`, or `X-RateLimit-Remaining: 0` (GitLab: `RateLimit-…`) leave that host alone until its reset; the error says when, and the last answer is shown meanwhile. A `403` for a missing permission is not taken for a limit |
+
+Keys include the token (a fingerprint, in memory only), so a replaced token never gets another's answers. The update check of `ws-updater` keeps its
+answer for 10 minutes, and 15 minutes after GitHub refused it for its rate limit. Each request, with whether it was sent, kept or revalidated, is in the activity log.
+
 ## Credentials for Git
 
 For `clone`, `push`, `fetch` and `pull` of an HTTPS remote, `connections::credentials_for_repository` finds the account for the remote's host
