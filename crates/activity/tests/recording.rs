@@ -60,3 +60,16 @@ fn the_newest_lines_are_kept_in_memory_and_can_be_cleared() {
   ws_activity::clear();
   assert!(ws_activity::entries().is_empty());
 }
+
+#[test]
+fn repeating_work_is_logged_only_when_it_fails_or_is_slow() {
+  let _turn = TURN.lock().unwrap_or_else(|error| error.into_inner());
+  ws_activity::clear();
+  ws_activity::timed_quiet("ui", 50, || "routine".into(), || (), |_| "ok".into());
+  ws_activity::timed_quiet("ui", 50, || "broken".into(), || (), |_| "failed: no repository".into());
+  ws_activity::timed_quiet("ui", 0, || "always".into(), || (), |_| "ok".into());
+  let lines: Vec<String> = ws_activity::entries().into_iter().map(|entry| entry.message).collect();
+  assert!(!lines.iter().any(|line| line.starts_with("routine")));
+  assert!(lines.iter().any(|line| line.starts_with("broken")) && lines.iter().any(|line| line.starts_with("always")));
+  ws_activity::clear();
+}

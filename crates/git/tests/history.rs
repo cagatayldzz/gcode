@@ -1,5 +1,5 @@
 use std::{fs, path::PathBuf};
-use ws_git::{commit_detail, commit_file_diff, history, ChangeKind};
+use ws_git::{commit_detail, commit_file_diff, history, history_stamp, ChangeKind};
 
 fn repository(name: &str) -> PathBuf {
   let dir = std::env::temp_dir().join(format!("ws-git-history-{name}-{}", std::process::id()));
@@ -172,5 +172,19 @@ fn a_tag_is_created_on_a_commit_and_shows_in_the_history() {
   assert!(ws_git::create_tag(&dir, &first.to_string(), "has space").unwrap_err().contains("not a valid"));
   assert!(ws_git::create_tag(&dir, &first.to_string(), "  ").is_err());
   assert!(ws_git::create_tag(&dir, "not an id", "v2").is_err());
+  fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn the_history_stamp_changes_only_when_a_commit_is_made() {
+  let dir = repository("stamp");
+  fs::write(dir.join("a.txt"), "one\n").unwrap();
+  commit_all(&dir, "feat: first", 1_000);
+  let first = history_stamp(&dir).unwrap();
+  fs::write(dir.join("a.txt"), "edited but not committed\n").unwrap();
+  assert_eq!(history_stamp(&dir).unwrap(), first, "an edit is not a commit");
+  commit_all(&dir, "fix: second", 2_000);
+  assert_ne!(history_stamp(&dir).unwrap(), first);
+  assert_eq!(history_stamp(&dir.join("missing")), None);
   fs::remove_dir_all(dir).unwrap();
 }

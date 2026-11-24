@@ -159,8 +159,10 @@ impl Workspace {
     let work = cx.background_executor().spawn({
       let root = root.clone();
       async move {
-        ws_activity::timed(
+        // The periodic read (no loader) is logged only when it is slow or fails.
+        ws_activity::timed_quiet(
           "ui",
+          if show_loader { 0 } else { REFRESH_NOTABLE_MS },
           || format!("read history {} (limit {limit})", root.display()),
           || ws_git::history(&root, limit),
           |result| match result {

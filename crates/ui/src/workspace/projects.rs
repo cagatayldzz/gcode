@@ -615,11 +615,13 @@ impl Workspace {
     let work = cx.background_executor().spawn({
       let (root, expanded) = (root.clone(), expanded.clone());
       async move {
-        ws_activity::timed(
+        // Every two seconds: only a slow or failed round is worth a line in the log.
+        ws_activity::timed_quiet(
           "ui",
+          REFRESH_NOTABLE_MS,
           || format!("refresh {} (git status + folder tree)", root.display()),
-          || (ws_git::summary(&root), explorer::rows(&root, &expanded)),
-          |(git, rows)| match git {
+          || (ws_git::summary(&root), explorer::rows(&root, &expanded), ws_git::history_stamp(&root)),
+          |(git, rows, _)| match git {
             Some(_) => format!("ok, {} rows", rows.len()),
             None => format!("failed: not a Git repository, {} rows", rows.len()),
           },
@@ -627,7 +629,7 @@ impl Workspace {
       }
     });
     cx.spawn(async move |this, cx| {
-      let (git, rows) = work.await;
+      let (git, rows, stamp) = work.await;
       let _ = this.update(cx, |this, cx| {
         // The user may have switched projects or opened a folder while this was reading.
         if this.projects.active.as_ref() == Some(&root) && this.expanded == expanded && (this.git != git || this.rows != rows) {
@@ -644,8 +646,12 @@ impl Workspace {
             cx.notify();
           }
         }
-        if this.sidebar_tab == SidebarTab::Git && this.git_view == GitView::History {
-          this.refresh_history(cx);
+        // The commits are read again only when HEAD or its upstream moved, not every round.
+        if this.projects.active.as_ref() == Some(&root) && this.history_stamp != stamp {
+          this.history_stamp = stamp;
+          if this.sidebar_tab == SidebarTab::Git && this.git_view == GitView::History {
+            this.refresh_history(cx);
+          }
         }
         this.sync_menus(false, cx);
         // While the project menu is open, what each project holds is kept up to date; otherwise the favorites' tabs are, less often.

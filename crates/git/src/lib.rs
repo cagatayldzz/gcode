@@ -883,6 +883,23 @@ pub fn set_remote_url(path: &Path, url: &str) -> Result<(), String> {
   .map_err(|error| error.message().to_string())
 }
 
+/// A cheap stamp of what the History view lists: the commit HEAD is at and the one its upstream is at. It changes when a commit is
+/// made, a branch is switched, or a fetch or push moves the upstream, and not otherwise, so the list is read again only then.
+pub fn history_stamp(path: &Path) -> Option<String> {
+  let repository = Repository::discover(path).ok()?;
+  let head = repository.head().ok();
+  let target = head.as_ref().and_then(|head| head.target()).map(|id| id.to_string()).unwrap_or_default();
+  let upstream = head
+    .as_ref()
+    .and_then(|head| head.shorthand().ok().map(str::to_string))
+    .and_then(|name| repository.find_branch(&name, git2::BranchType::Local).ok())
+    .and_then(|branch| branch.upstream().ok())
+    .and_then(|upstream| upstream.get().target())
+    .map(|id| id.to_string())
+    .unwrap_or_default();
+  Some(format!("{target}:{upstream}"))
+}
+
 /// The first line of the last commit's message.
 pub fn head_summary(path: &Path) -> Option<String> {
   let repository = Repository::discover(path).ok()?;

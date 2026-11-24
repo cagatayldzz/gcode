@@ -96,5 +96,5 @@ Conventional Commits message. Nothing is committed by generating. Configure the 
 
 ## Keeping it fresh
 
-The change list refreshes when you return to the window and every 2 seconds while it is open, so edits made in another app show up
-by themselves.
+The change list refreshes when you return to the window and every 2 seconds while it is open (every 10 seconds while another window is in front), so edits made in another app show up
+by themselves. The History list is read again only when a commit is made or the branch or its upstream moves.

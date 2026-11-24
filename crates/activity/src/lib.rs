@@ -169,3 +169,30 @@ pub fn timed<T>(category: &str, label: impl FnOnce() -> String, work: impl FnOnc
   write_line(level, category, &format!("{label} → {outcome} ({elapsed} ms)"));
   result
 }
+
+/// Like [`timed`], for work that repeats on a timer: the line is written only when the work failed or took at least `notable_ms`,
+/// so that routine rounds do not fill the log.
+pub fn timed_quiet<T>(
+  category: &str,
+  notable_ms: u128,
+  label: impl FnOnce() -> String,
+  work: impl FnOnce() -> T,
+  outcome: impl FnOnce(&T) -> String,
+) -> T {
+  let started = Instant::now();
+  let result = work();
+  let elapsed = started.elapsed().as_millis();
+  let outcome = outcome(&result);
+  let failed = outcome.starts_with("failed") || outcome.starts_with("not run");
+  if failed || elapsed >= notable_ms {
+    let level = if failed {
+      Level::Error
+    } else if elapsed > SLOW_MS {
+      Level::Slow
+    } else {
+      Level::Info
+    };
+    write_line(level, category, &format!("{} → {outcome} ({elapsed} ms)", label()));
+  }
+  result
+}

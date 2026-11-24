@@ -147,6 +147,13 @@ const HOVER_PREPARE_DELAY: Duration = Duration::from_millis(120);
 /// How often the Git summary and the folder tree are read again while the window is open.
 const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
+/// While the window is not the one in front, only every this many rounds of [`REFRESH_INTERVAL`] read the repository (coming back
+/// to the window reads it at once).
+const BACKGROUND_REFRESH_EVERY: u32 = 5;
+
+/// A routine refresh that takes at least this long (milliseconds) is written to the activity log; faster ones are not.
+pub(crate) const REFRESH_NOTABLE_MS: u128 = 150;
+
 /// How often the changes of the favorite projects are read for their tabs in the title bar.
 const FAVORITE_STATUS_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -404,6 +411,8 @@ pub struct Workspace {
   pr_epoch: u64,
   /// Which read of the history the listed commits belong to.
   history_epoch: u64,
+  /// What `ws_git::history_stamp` said at the last refresh: the History list is read again when it changes.
+  history_stamp: Option<String>,
   /// Whether the commits are being read, so that the History list shows a loader.
   history_loading: bool,
   /// How many commits the History view asks for now, and its scroll position (to load more near the end).
@@ -580,6 +589,7 @@ impl Workspace {
       pull_requests: PullRequests::Idle,
       pr_epoch: 0,
       history_epoch: 0,
+      history_stamp: None,
       history_loading: false,
       history_limit: HISTORY_PAGE,
       history_scroll: ScrollHandle::new(),
@@ -726,14 +736,20 @@ impl Workspace {
           this.sync_projects(window, cx);
         }
       }),
-      _refresh_task: cx.spawn_in(window, async move |this, cx| loop {
-        cx.background_executor().timer(REFRESH_INTERVAL).await;
-        let refreshed = this.update_in(cx, |this, window, cx| {
-          this.refresh_in_background(cx);
-          this.sync_projects(window, cx);
-        });
-        if refreshed.is_err() {
-          break;
+      _refresh_task: cx.spawn_in(window, async move |this, cx| {
+        let mut round = 0u32;
+        loop {
+          cx.background_executor().timer(REFRESH_INTERVAL).await;
+          round = round.wrapping_add(1);
+          let refreshed = this.update_in(cx, |this, window, cx| {
+            if this.window_active || round.is_multiple_of(BACKGROUND_REFRESH_EVERY) {
+              this.refresh_in_background(cx);
+              this.sync_projects(window, cx);
+            }
+          });
+          if refreshed.is_err() {
+            break;
+          }
         }
       }),
       terminal_pulse: 0,
