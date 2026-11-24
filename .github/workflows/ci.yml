@@ -12,32 +12,53 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Use the same lightweight Rust profile for lint and tests.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CI_CARGO_FLAGS: --locked --config profile.dev.package."*".opt-level=0 --config profile.dev.package."*".debug=false
+
 jobs:
-  core:
-    runs-on: macos-26
-    timeout-minutes: 45
-    env:
-      # CI only needs the window to open and draw, not fast or debuggable code: no debug info for the crates of this
-      # workspace, and the dependencies stay unoptimized (the development profile optimizes them for the editor's sake).
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CI_CARGO_FLAGS: --locked --config profile.dev.package."*".opt-level=0 --config profile.dev.package."*".debug=false
+  checks:
+    name: Checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - run: rustup default stable
+      - run: rustup toolchain install stable --profile minimal --component rustfmt
       - name: Test release automation
         run: bash scripts/tests/run.sh
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: cargo +stable fmt --all -- --check
 
+  lint:
+    name: Lint
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup toolchain install stable --profile minimal --component clippy
+      - run: rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-lint-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Lint core packages
+        run: cargo clippy $CI_CARGO_FLAGS -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-language -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index --all-targets -- -D warnings
+
+  test:
+    name: Test
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - run: rustup default stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: core-macos
           cache-on-failure: true
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Lint
-        run: cargo clippy $CI_CARGO_FLAGS -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-language -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index --all-targets -- -D warnings
-      - name: Test
+      - name: Test core packages
         run: cargo test $CI_CARGO_FLAGS -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-language -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index
       # One build profile for both steps: `cargo check` would compile every dependency a second time.
       - name: Build the interface crates

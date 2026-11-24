@@ -9,6 +9,10 @@ release="$(cat .github/workflows/release.yml)"
 action="$(cat .github/actions/build-release/action.yml)"
 
 assert_contains "pull_request:" "$ci" "CI runs on pull requests"
+for job in Checks Lint Test; do
+  assert_contains "name: $job" "$ci" "CI exposes the $job check"
+done
+assert_contains "cargo test \$CI_CARGO_FLAGS -p ws-ui --test window_render" "$ci" "CI exercises the interface headlessly"
 assert_contains "bash scripts/tests/run.sh" "$ci" "CI runs the shell tests"
 assert_contains "cargo test \$CI_CARGO_FLAGS -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-language -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index" "$ci" "CI tests the core crates"
 assert_contains "-D warnings" "$ci" "CI treats warnings as errors"

@@ -44,7 +44,9 @@ repository's own download URLs (see [Updates](../architecture/updates.md)).
 
 | Job | Runner | Does |
 | --- | --- | --- |
-| `core` | macOS | shell tests, formatting, core lint and tests, interface compilation, and the headless `window_render` test |
+| Checks | Linux | Release automation tests and Rust formatting |
+| Lint | macOS | Clippy for the core packages, with warnings treated as errors |
+| Test | macOS | Core tests, interface compilation, and the headless `window_render` test |
 
 The release workflow also lints and tests the full workspace on macOS.
 
