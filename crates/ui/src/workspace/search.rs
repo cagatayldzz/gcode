@@ -159,7 +159,7 @@ impl Workspace {
             return;
           }
           Err(message) => {
-            window.push_notification(Notification::error(message), cx);
+            window.push_notification(crate::failure(message), cx);
             return;
           }
         };
@@ -184,7 +184,7 @@ impl Workspace {
       return;
     }
     if edits.iter().any(|edit| self.editor_panel.read(cx).is_dirty(&edit.path)) {
-      window.push_notification(Notification::error("Save the affected editor tabs and search again before replacing."), cx);
+      window.push_notification(crate::failure("Save the affected editor tabs and search again before replacing."), cx);
       return;
     }
     self.editor_panel.update(cx, |editor, cx| {
@@ -216,7 +216,7 @@ impl Workspace {
           }
         });
         if let Some(error) = first_error {
-          window.push_notification(Notification::error(format!("Updated {written} of {} files. {error}", edits.len())), cx);
+          window.push_notification(crate::failure(format!("Updated {written} of {} files. {error}", edits.len())), cx);
         } else {
           window.push_notification(Notification::info(format!("Updated {written} file{}.", if written == 1 { "" } else { "s" })), cx);
         }

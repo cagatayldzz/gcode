@@ -158,7 +158,17 @@ impl Workspace {
     let limit = self.history_limit;
     let work = cx.background_executor().spawn({
       let root = root.clone();
-      async move { ws_git::history(&root, limit) }
+      async move {
+        ws_activity::timed(
+          "ui",
+          || format!("read history {} (limit {limit})", root.display()),
+          || ws_git::history(&root, limit),
+          |result| match result {
+            Ok(commits) => format!("ok, {} commits", commits.len()),
+            Err(error) => format!("failed: {error}"),
+          },
+        )
+      }
     });
     cx.spawn(async move |this, cx| {
       let found = work.await.unwrap_or_default();
@@ -212,7 +222,7 @@ impl Workspace {
             let message = this.say_where(&root, "Undid the commit: its changes are back in Changes, with its message in the commit box.".to_string());
             window.push_notification(Notification::info(message), cx);
           }
-          Err(message) => window.push_notification(Notification::error(message), cx),
+          Err(message) => window.push_notification(crate::failure(message), cx),
         }
         cx.notify();
       });
@@ -345,7 +355,7 @@ impl Workspace {
           }
           Err(message) => {
             this.compare = None;
-            window.push_notification(Notification::error(message), cx);
+            window.push_notification(crate::failure(message), cx);
           }
         }
         cx.notify();
@@ -441,7 +451,7 @@ impl Workspace {
             this.merge_dialog = Some((root, dialog.clone(), subscription));
             Self::show_merge_dialog(dialog, window, cx);
           }
-          Err(message) => window.push_notification(Notification::error(message), cx),
+          Err(message) => window.push_notification(crate::failure(message), cx),
         }
         cx.notify();
       });

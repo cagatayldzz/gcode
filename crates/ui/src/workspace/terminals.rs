@@ -39,7 +39,7 @@ impl Workspace {
     let started = match Terminal::start(root, program, cx) {
       Ok(started) => started,
       Err(error) => {
-        window.push_notification(Notification::error(format!("Could not start {what}: {error}")), cx);
+        window.push_notification(crate::failure(format!("Could not start {what}: {error}")), cx);
         return None;
       }
     };
@@ -131,7 +131,7 @@ impl Workspace {
     let Some(terminal) = self.start_terminal(directory, window, cx) else { return };
     let replaced = self.terminal_tabs.get_mut(&root).is_some_and(|tabs| tabs.replace(&target, terminal.clone()));
     if !replaced {
-      window.push_notification(Notification::error("Could not restart this pane: it is not a shell of this project."), cx);
+      window.push_notification(crate::failure("Could not restart this pane: it is not a shell of this project."), cx);
       return;
     }
     self.focus_pane(&terminal, window, cx);
@@ -146,7 +146,7 @@ impl Workspace {
       let result = work.await;
       let _ = cx.update(|window, cx| match result {
         Ok(()) => window.push_notification(Notification::success("The Codex daemon was restarted. Start Codex again in the pane."), cx),
-        Err(message) => window.push_notification(Notification::error(message), cx),
+        Err(message) => window.push_notification(crate::failure(message), cx),
       });
     })
     .detach();

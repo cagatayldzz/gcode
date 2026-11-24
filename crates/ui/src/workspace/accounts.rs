@@ -28,7 +28,7 @@ impl Workspace {
   pub fn view_on_host(&mut self, _: &ViewOnHost, window: &mut Window, cx: &mut Context<Self>) {
     match self.web_repository(cx) {
       Some(found) => cx.open_url(&found.url),
-      None => window.push_notification(Notification::error("This project has no remote on a hosting service."), cx),
+      None => window.push_notification(crate::failure("This project has no remote on a hosting service."), cx),
     }
   }
 
@@ -66,7 +66,7 @@ impl Workspace {
   /// Shows a failed push, pull or fetch. When connecting the account again would fix it, the notification has a **Reconnect
   /// account** button that opens the connect dialog for the account that serves `url` (or an empty one when none does).
   pub(super) fn push_remote_failure(&mut self, message: String, url: &str, window: &mut Window, cx: &mut Context<Self>) {
-    let mut notification = Notification::error(message.clone());
+    let mut notification = crate::failure(message.clone());
     if needs_reconnect(&message) {
       let account = self.settings.read(cx).accounts.items.iter().find(|account| RepoRef::for_account(account, url).is_some()).cloned();
       let workspace = cx.entity().downgrade();
@@ -158,7 +158,7 @@ impl Workspace {
             Notification::warning(format!("{label}: the service did not say whether the permissions are enough. Try pushing again.")),
             cx,
           ),
-          Err(message) => window.push_notification(Notification::error(message), cx),
+          Err(message) => window.push_notification(crate::failure(message), cx),
         }
       });
     })

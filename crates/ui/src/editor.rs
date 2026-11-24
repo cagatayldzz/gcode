@@ -15,7 +15,6 @@ use gpui_kit::{
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle},
     input::{Editor, EditorState, InputEvent},
     menu::{ContextMenuExt as _, PopupMenuItem},
-    notification::Notification,
     scroll::{Scrollbar, ScrollbarMode},
     v_flex, ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _,
   },
@@ -591,7 +590,7 @@ impl EditorPanel {
 
   fn show_svg_source(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) -> bool {
     if let Err(message) = self.prepare(path, window, cx) {
-      window.push_notification(Notification::error(message), cx);
+      window.push_notification(crate::failure(message), cx);
       return false;
     }
     self.svg_source.insert(path.to_path_buf());

@@ -155,33 +155,34 @@ impl Workspace {
               .cursor_pointer()
               .when(selected, |row| row.bg(palette.selected))
               .hover(|row| row.bg(palette.hover))
-              // The star, at the left: filled for a starred branch, an outline otherwise.
-              .child(
-                div()
-                  .id(SharedString::from(format!("branch-star-{name}")))
-                  .size_6()
-                  .flex()
-                  .flex_none()
-                  .items_center()
-                  .justify_center()
-                  .rounded_md()
-                  .cursor_pointer()
-                  .hover(|star| star.bg(palette.hover))
-                  // The default branch is always on top, so it is never starred; the space stays so the names line up.
-                  .when(default, |star| star.invisible())
-                  .when(!favorite, |star| star.opacity(0.5))
-                  .tooltip(move |window, cx| Tooltip::new(if favorite { "Remove from favorites" } else { "Add to favorites" }).build(window, cx))
-                  .child(Icon::empty().path(if favorite { "icons/star-fill.svg" } else { "icons/star.svg" }).size_4().text_color(if favorite {
-                    palette.modified
-                  } else {
-                    theme.muted_foreground
-                  }))
-                  .on_click(move |_, _, cx| {
-                    // The click must not also switch the branch.
-                    cx.stop_propagation();
-                    star_workspace.update(cx, |this, cx| this.toggle_favorite_branch(&star_name, cx));
-                  }),
-              )
+              // The star, at the left: filled for a starred branch, an outline otherwise. The default branch is always on top, so
+              // it has none and its name starts at the row's edge.
+              .when(!default, |row| {
+                row.child(
+                  div()
+                    .id(SharedString::from(format!("branch-star-{name}")))
+                    .size_6()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .justify_center()
+                    .rounded_md()
+                    .cursor_pointer()
+                    .hover(|star| star.bg(palette.hover))
+                    .when(!favorite, |star| star.opacity(0.5))
+                    .tooltip(move |window, cx| Tooltip::new(if favorite { "Remove from favorites" } else { "Add to favorites" }).build(window, cx))
+                    .child(Icon::empty().path(if favorite { "icons/star-fill.svg" } else { "icons/star.svg" }).size_4().text_color(if favorite {
+                      palette.modified
+                    } else {
+                      theme.muted_foreground
+                    }))
+                    .on_click(move |_, _, cx| {
+                      // The click must not also switch the branch.
+                      cx.stop_propagation();
+                      star_workspace.update(cx, |this, cx| this.toggle_favorite_branch(&star_name, cx));
+                    }),
+                )
+              })
               .child(
                 Label::new(name.clone()).font_weight(FontWeight::MEDIUM).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis(),
               )
@@ -280,30 +281,7 @@ impl Workspace {
                 .cloned()
                 .collect();
               if found.is_empty() {
-                // The empty state: nothing to do here, and a way to get going.
-                let workspace = workspace.clone();
-                v_flex()
-                  .items_center()
-                  .gap_1()
-                  .py_4()
-                  .child(Icon::empty().path("icons/circle-check.svg").size_8().text_color(palette.accent))
-                  .child(Label::new("You're all set!").font_weight(FontWeight::SEMIBOLD))
-                  .child(Label::new(format!("No open pull requests in {}", hosted.clone().unwrap_or_default())).text_color(theme.muted_foreground))
-                  .child(
-                    Label::new("Would you like to create a new branch and get going on your next project?")
-                      .text_size(FONT_SIZE_SM)
-                      .text_color(theme.muted_foreground)
-                      .text_center()
-                      .px_3(),
-                  )
-                  .child(
-                    Button::new("pull-requests-new-branch")
-                      .ghost()
-                      .small()
-                      .label("Create a new branch")
-                      .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.new_branch(String::new(), window, cx))),
-                  )
-                  .into_any_element()
+                Label::new("No open pull requests").px_2().py_3().text_center().text_color(theme.muted_foreground).into_any_element()
               } else if shown.is_empty() {
                 Label::new("No matching pull requests").px_2().py_1().text_color(theme.muted_foreground).into_any_element()
               } else {

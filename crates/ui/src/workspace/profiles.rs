@@ -107,7 +107,7 @@ impl Workspace {
       return;
     }
     if self.profile.id == id || other_open_profiles(cx).contains(&id) {
-      window.push_notification(Notification::error(format!("Close the windows of {} before deleting it.", profile.name)), cx);
+      window.push_notification(crate::failure(format!("Close the windows of {} before deleting it.", profile.name)), cx);
       return;
     }
     let (title, workspace) = (SharedString::from(format!("Delete {}?", profile.name)), cx.entity());
@@ -143,7 +143,7 @@ impl Workspace {
     });
     cx.spawn_in(window, async move |this, cx| {
       if let Err(message) = work.await {
-        let _ = this.update_in(cx, |_, window, cx| window.push_notification(Notification::error(message), cx));
+        let _ = this.update_in(cx, |_, window, cx| window.push_notification(crate::failure(message), cx));
       }
     })
     .detach();

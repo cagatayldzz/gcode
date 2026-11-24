@@ -133,3 +133,10 @@ pub fn init(cx: &mut App) {
     eprintln!("Could not load fonts: {error}");
   }
 }
+
+/// An error notification, which the activity log records too: every failure the user sees is in the log with the time it happened.
+pub(crate) fn failure(message: impl Into<gpui::SharedString>) -> gpui_kit::component::notification::Notification {
+  let message = message.into();
+  ws_activity::error("ui", || message.to_string());
+  gpui_kit::component::notification::Notification::error(message)
+}

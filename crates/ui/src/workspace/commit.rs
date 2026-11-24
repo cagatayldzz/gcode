@@ -41,7 +41,7 @@ impl Workspace {
       self.settings.update(cx, |model, cx| model.restart_to_update(cx));
     }
     if let Some(message) = failed {
-      window.push_notification(Notification::error(format!("The update failed: {message}")), cx);
+      window.push_notification(crate::failure(format!("The update failed: {message}")), cx);
     }
   }
 
@@ -81,7 +81,7 @@ impl Workspace {
         Ok(()) => {
           window.push_notification(Notification::info(format!("Logging Git commands and requests to {} (times are UTC).", path.display())), cx)
         }
-        Err(error) => window.push_notification(Notification::error(format!("Could not start the activity log: {error}")), cx),
+        Err(error) => window.push_notification(crate::failure(format!("Could not start the activity log: {error}")), cx),
       }
     }
     cx.notify();
@@ -189,7 +189,7 @@ impl Workspace {
     let form = cx.new(|cx| CommitSettings::new(config, instructions, window, cx));
     self._dialog_subscription = Some(cx.subscribe_in(&form, window, |this, _, saved: &CommitSettingsSaved, window, cx| {
       if let Err(error) = saved.config.save(&ws_commitgen::config_path()) {
-        window.push_notification(Notification::error(format!("Could not save the commit message settings: {error}")), cx);
+        window.push_notification(crate::failure(format!("Could not save the commit message settings: {error}")), cx);
         return;
       }
       let (config, instructions) = (saved.config.clone(), saved.instructions.clone());
@@ -211,7 +211,7 @@ impl Workspace {
     }
     let files: Vec<PathBuf> = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).map(|change| change.path.clone()).collect();
     if files.is_empty() {
-      window.push_notification(Notification::error("Choose at least one changed file to describe."), cx);
+      window.push_notification(crate::failure("Choose at least one changed file to describe."), cx);
       return;
     }
     let (config, instructions) = {
@@ -219,7 +219,7 @@ impl Workspace {
       (model.commitgen.clone(), model.preferences.commit_instructions.clone().unwrap_or_else(|| DEFAULT_INSTRUCTIONS.to_string()))
     };
     if config.needs_api_key() {
-      window.push_notification(Notification::error("Add your API key to generate commit messages."), cx);
+      window.push_notification(crate::failure("Add your API key to generate commit messages."), cx);
       self.open_commit_settings(window, cx);
       return;
     }
@@ -227,7 +227,27 @@ impl Workspace {
     cx.notify();
     let work = cx.background_executor().spawn({
       let root = root.clone();
-      async move { ws_commitgen::generate(&config, &instructions, &ws_git::diff_files(&root, &files)?) }
+      async move {
+        let count = files.len();
+        let diff = ws_activity::timed(
+          "ui",
+          || format!("build the diff of {count} files for the commit message"),
+          || ws_git::diff_files(&root, &files),
+          |result| match result {
+            Ok(diff) => format!("ok, {} KB", diff.len() / 1024),
+            Err(error) => format!("failed: {error}"),
+          },
+        )?;
+        ws_activity::timed(
+          "ui",
+          || "write the commit message".into(),
+          || ws_commitgen::generate(&config, &instructions, &diff),
+          |result| match result {
+            Ok(message) => format!("ok: {}", message.summary),
+            Err(error) => format!("failed: {error}"),
+          },
+        )
+      }
     });
     cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
@@ -240,7 +260,7 @@ impl Workspace {
               this.commit_summary.update(cx, |input, cx| input.set_value(message.summary, window, cx));
               this.commit_description.update(cx, |input, cx| input.set_value(message.description, window, cx));
             }
-            Err(message) => window.push_notification(Notification::error(message), cx),
+            Err(message) => window.push_notification(crate::failure(message), cx),
           }
         }
         cx.notify();

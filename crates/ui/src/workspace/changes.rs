@@ -40,7 +40,7 @@ impl Workspace {
     let Some(root) = self.projects.active.clone() else { return };
     match ws_git::workdir_file(&root, file).filter(|path| path.is_file()) {
       Some(path) => self.reveal_file(root, path, window, cx),
-      None => window.push_notification(Notification::error(format!("{} is not on the disk.", file.display())), cx),
+      None => window.push_notification(crate::failure(format!("{} is not on the disk.", file.display())), cx),
     }
   }
 
@@ -64,7 +64,7 @@ impl Workspace {
     window
       .spawn(cx, async move |cx| {
         if let Err(error) = work.await {
-          let _ = cx.update(|window, cx| window.push_notification(Notification::error(format!("Could not show the file in Finder. {error}")), cx));
+          let _ = cx.update(|window, cx| window.push_notification(crate::failure(format!("Could not show the file in Finder. {error}")), cx));
         }
       })
       .detach();
@@ -148,7 +148,7 @@ impl Workspace {
         }
         let count = discarded.len();
         if let Some(error) = failures.first() {
-          window.push_notification(Notification::error(format!("Discarded {count} of {} files. {error}", count + failures.len())), cx);
+          window.push_notification(crate::failure(format!("Discarded {count} of {} files. {error}", count + failures.len())), cx);
         } else {
           let message = if count == 1 { "Discarded changes to 1 file.".to_owned() } else { format!("Discarded changes to {count} files.") };
           window.push_notification(Notification::info(message), cx);
@@ -211,7 +211,7 @@ impl Workspace {
               }
             }
           }
-          Err(message) => window.push_notification(Notification::error(message), cx),
+          Err(message) => window.push_notification(crate::failure(message), cx),
         }
         cx.notify();
       });

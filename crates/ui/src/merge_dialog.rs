@@ -8,7 +8,6 @@ use gpui_kit::{
     h_flex,
     label::Label,
     menu::{DropdownMenu as _, PopupMenuItem},
-    notification::Notification,
     progress::Progress,
     scroll::ScrollableElement as _,
     v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _,
@@ -100,7 +99,7 @@ impl MergeDialog {
             let aborted = matches!(operation, Operation::Finish(true));
             cx.emit(if aborted { MergeEvent::Aborted } else { MergeEvent::Completed });
           }
-          Err(message) => window.push_notification(Notification::error(message), cx),
+          Err(message) => window.push_notification(crate::failure(message), cx),
         }
         cx.notify();
       });
@@ -212,7 +211,7 @@ impl MergeDialog {
                   if let Some(path) = ws_git::workdir_file(&open_root, Path::new(open_file.as_str())).filter(|path| path.exists()) {
                     cx.open_with_system(&path);
                   } else {
-                    window.push_notification(Notification::error("This file is missing from the working tree."), cx);
+                    window.push_notification(crate::failure("This file is missing from the working tree."), cx);
                   }
                 }))
                 .item(PopupMenuItem::new("Reveal in Finder").on_click(move |_, _, cx| {

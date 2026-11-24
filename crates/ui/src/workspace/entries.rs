@@ -40,7 +40,7 @@ impl Workspace {
         let name = input.read(cx).value().to_string();
         match submit(this, &name, window, cx) {
           Ok(()) => window.close_dialog(cx),
-          Err(message) => window.push_notification(Notification::error(message), cx),
+          Err(message) => window.push_notification(crate::failure(message), cx),
         }
       }
     }));
@@ -137,7 +137,7 @@ impl Workspace {
         self.selected_entry = Some(path);
         self.selected_change = None;
       }
-      Err(message) => window.push_notification(Notification::error(message), cx),
+      Err(message) => window.push_notification(crate::failure(message), cx),
     }
     cx.notify();
   }
@@ -145,7 +145,7 @@ impl Workspace {
   pub(super) fn open_changed_file(&mut self, action: &OpenChangedFile, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
     let Some(path) = ws_git::workdir_file(&root, Path::new(action.0.as_str())) else {
-      window.push_notification(Notification::error("Could not locate the file in the working tree."), cx);
+      window.push_notification(crate::failure("Could not locate the file in the working tree."), cx);
       return;
     };
     // Git may resolve the project directory through a symlink. Keep Explorer's path spelling.

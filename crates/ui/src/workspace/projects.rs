@@ -313,7 +313,7 @@ impl Workspace {
   fn sync_renamed_remote(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
     let Some(renamed) = self.renamed_remotes.get(&path).cloned() else { return };
     if let Err(message) = ws_git::set_remote_url(&path, &renamed.new_url) {
-      window.push_notification(Notification::error(format!("Could not change the Git remote: {message}")), cx);
+      window.push_notification(crate::failure(format!("Could not change the Git remote: {message}")), cx);
       return;
     }
     if let Some(project) = self.projects.projects.iter().find(|project| project.path == path).cloned() {
@@ -387,7 +387,7 @@ impl Workspace {
       let result = work.await;
       let _ = this.update_in(cx, |this, window, cx| match result {
         Ok(url) => this.apply_project_settings(chosen, Some(url), window, cx),
-        Err(message) => window.push_notification(Notification::error(format!("Could not rename the repository: {message}")), cx),
+        Err(message) => window.push_notification(crate::failure(format!("Could not rename the repository: {message}")), cx),
       });
     })
     .detach();
@@ -399,7 +399,7 @@ impl Workspace {
     let remote = remote.or_else(|| chosen.remote.clone());
     if let Some(url) = &remote {
       if let Err(message) = ws_git::set_remote_url(&chosen.path, url) {
-        window.push_notification(Notification::error(format!("Could not change the Git remote: {message}")), cx);
+        window.push_notification(crate::failure(format!("Could not change the Git remote: {message}")), cx);
         return;
       }
     }
@@ -408,7 +408,7 @@ impl Workspace {
       match self.rename_project_folder(&chosen.path, chosen.name.trim(), cx) {
         Ok(moved) => path = moved,
         Err(message) => {
-          window.push_notification(Notification::error(format!("Could not rename the folder: {message}")), cx);
+          window.push_notification(crate::failure(format!("Could not rename the folder: {message}")), cx);
           return;
         }
       }
@@ -614,7 +614,17 @@ impl Workspace {
     let expanded = self.expanded.clone();
     let work = cx.background_executor().spawn({
       let (root, expanded) = (root.clone(), expanded.clone());
-      async move { (ws_git::summary(&root), explorer::rows(&root, &expanded)) }
+      async move {
+        ws_activity::timed(
+          "ui",
+          || format!("refresh {} (git status + folder tree)", root.display()),
+          || (ws_git::summary(&root), explorer::rows(&root, &expanded)),
+          |(git, rows)| match git {
+            Some(_) => format!("ok, {} rows", rows.len()),
+            None => format!("failed: not a Git repository, {} rows", rows.len()),
+          },
+        )
+      }
     });
     cx.spawn(async move |this, cx| {
       let (git, rows) = work.await;

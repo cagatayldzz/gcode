@@ -819,7 +819,7 @@ impl Workspace {
     }
     match self.editor_panel.update(cx, |editor, cx| editor.save(cx)) {
       Ok(_) => cx.notify(),
-      Err(error) => window.push_notification(Notification::error(format!("Could not save: {error}")), cx),
+      Err(error) => window.push_notification(crate::failure(format!("Could not save: {error}")), cx),
     }
     // The file's own change shows up in the Git list without waiting for the next read.
     self.refresh_in_background(cx);

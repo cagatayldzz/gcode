@@ -88,7 +88,7 @@ impl Workspace {
               this.ask_stashed_changes(name, window, cx);
             }
           }
-          Err(message) => window.push_notification(Notification::error(message), cx),
+          Err(message) => window.push_notification(crate::failure(message), cx),
         }
         cx.notify();
       });
@@ -146,7 +146,7 @@ impl Workspace {
             let message = if restore { "Stashed changes restored." } else { "Stashed changes discarded." };
             window.push_notification(Notification::info(this.say_where(&root, message.to_string())), cx)
           }
-          Err(message) => window.push_notification(Notification::error(message), cx),
+          Err(message) => window.push_notification(crate::failure(message), cx),
         }
         cx.notify();
       });
@@ -182,7 +182,7 @@ impl Workspace {
     cx.notify();
     let Some(root) = self.projects.active.clone() else { return };
     if self.git.as_ref().is_some_and(|git| git.branch == name) {
-      window.push_notification(Notification::error("The branch you are on cannot be deleted. Switch to another branch first."), cx);
+      window.push_notification(crate::failure("The branch you are on cannot be deleted. Switch to another branch first."), cx);
       return;
     }
     let upstream = if remote.is_none() { ws_git::upstream_remote(&root, &name) } else { None };
@@ -253,7 +253,7 @@ impl Workspace {
         this.settle_job(&root, cx);
         match result {
           Ok(()) => window.push_notification(Notification::info(this.say_where(&root, format!("Deleted {name}."))), cx),
-          Err(message) => window.push_notification(Notification::error(message), cx),
+          Err(message) => window.push_notification(crate::failure(message), cx),
         }
         cx.notify();
       });
@@ -317,7 +317,7 @@ impl Workspace {
             }
             window.push_notification(Notification::info(this.say_where(&root, format!("{done} {short}."))), cx);
           }
-          Err(message) => window.push_notification(Notification::error(message), cx),
+          Err(message) => window.push_notification(crate::failure(message), cx),
         }
         cx.notify();
       });
@@ -379,7 +379,7 @@ impl Workspace {
             }
             window.push_notification(Notification::info(this.say_where(&root, format!("Amended the last commit: {id}."))), cx);
           }
-          Err(message) => window.push_notification(Notification::error(message), cx),
+          Err(message) => window.push_notification(crate::failure(message), cx),
         }
         cx.notify();
       });
@@ -395,7 +395,7 @@ impl Workspace {
         self.refresh_project();
         window.push_notification(Notification::info(format!("Added {} to .gitignore.", patterns.join(", "))), cx);
       }
-      Err(message) => window.push_notification(Notification::error(message), cx),
+      Err(message) => window.push_notification(crate::failure(message), cx),
     }
     cx.notify();
   }

@@ -208,7 +208,7 @@ impl Workspace {
       return;
     }
     if paths.iter().any(|path| self.editor_panel.read(cx).is_dirty_under(path)) {
-      window.push_notification(Notification::error("Save the files before deleting them."), cx);
+      window.push_notification(crate::failure("Save the files before deleting them."), cx);
       return;
     }
     self.editor_panel.update(cx, |editor, cx| editor.lock_replacement_files(paths.clone(), cx));
@@ -246,7 +246,7 @@ impl Workspace {
           this.refresh_project();
         }
         if let Some(error) = error {
-          window.push_notification(Notification::error(format!("File operation failed: {error}")), cx);
+          window.push_notification(crate::failure(format!("File operation failed: {error}")), cx);
         }
         cx.notify();
       });
@@ -261,7 +261,7 @@ impl Workspace {
     let moves_source = !matches!(edit, FileEdit::Copy { .. });
     if moves_source {
       if self.editor_panel.read(cx).is_dirty_under(&path) {
-        window.push_notification(Notification::error("Save the file before moving or deleting it."), cx);
+        window.push_notification(crate::failure("Save the file before moving or deleting it."), cx);
         return;
       }
       self.editor_panel.update(cx, |editor, cx| editor.lock_replacement_files([path.clone()], cx));
@@ -307,7 +307,7 @@ impl Workspace {
             }
             cx.notify();
           }
-          Err(error) => window.push_notification(Notification::error(format!("File operation failed: {error}")), cx),
+          Err(error) => window.push_notification(crate::failure(format!("File operation failed: {error}")), cx),
         }
       });
     }));
@@ -326,7 +326,7 @@ impl Workspace {
         window.defer(cx, move |window, cx| focus.focus(window, cx));
         cx.notify();
       }
-      Err(error) => window.push_notification(Notification::error(error), cx),
+      Err(error) => window.push_notification(crate::failure(error), cx),
     }
   }
 
@@ -365,7 +365,7 @@ impl Workspace {
       let _ = this.update_in(cx, |this, window, cx| {
         this.file_actions.system_open = None;
         if let Err(error) = result {
-          window.push_notification(Notification::error(format!("Could not open the file: {error}")), cx);
+          window.push_notification(crate::failure(format!("Could not open the file: {error}")), cx);
         }
       });
     }));
@@ -396,7 +396,7 @@ impl Workspace {
                 })),
             )
           }),
-          Err(error) => window.push_notification(Notification::error(format!("Could not load the file timeline: {error}")), cx),
+          Err(error) => window.push_notification(crate::failure(format!("Could not load the file timeline: {error}")), cx),
         }
       });
     }));

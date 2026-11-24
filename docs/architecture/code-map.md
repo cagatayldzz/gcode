@@ -107,7 +107,7 @@ repository/
 | **`ws-index`** | `ProjectIndex` (every file the ignore rules let through), `fuzzy::{score, rank}`, `highlight::{Language, Role, Highlights}` |
 | **`ws-hosting`** | `Account`, `Accounts`, `TokenStore` (`KeychainStore`, `MemoryStore`), `verify`, `repositories`, `pull_requests`, `create_pull_request`, `RepoRef`, `web_repository` |
 | **`ws-commitgen`** | `Config` (`commit.json`), `generate`, `split_diff`, `parse_message`, `system_prompt` |
-| **`ws-activity`** | `start`, `stop`, `timed`, `record`: one line per Git command or request, in `activity.log` |
+| **`ws-activity`** | `start`, `stop`, `timed`, `record`, `error`: `activity.log` lines marked `INFO`, `SLOW` (over 500 ms) or `ERROR`: Git commands, requests, refresh and history reads, the commit message steps, and every error notification |
 | **`ws-updater`** | `check`, `prepare`, `install`, `SWAP_SCRIPT`, `Release` |
 | **`ws-version`** | `is_newer` |
 | **`ws-capture`** | `cargo run -p ws-capture -- window\|screen [--out FILE] [--delay SECONDS]`: saves a PNG (default `<data dir>/captures/`) with macOS `screencapture`; needs Accessibility and Screen Recording access for the terminal |
