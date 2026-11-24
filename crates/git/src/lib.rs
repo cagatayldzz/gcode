@@ -616,13 +616,22 @@ fn failure_reason(stderr: &str, failure: &str) -> String {
     }
     None => {
       // git's closing "failed to push some refs" says nothing; what comes before it (the remote's words, `fatal:` and `error:` lines) does.
-      let mut details: Vec<&str> = lines
+      let quiet: Vec<&str> = lines
         .iter()
+        .copied()
         .filter(|line| !line.starts_with("error: failed to push some refs") && !line.starts_with("hint:") && !is_progress(line))
+        .collect();
+      let mut details: Vec<&str> = quiet
+        .iter()
+        .copied()
         .filter(|line| line.starts_with("remote:") || line.starts_with("fatal:") || line.starts_with("error:"))
-        .map(|line| line.strip_prefix("remote:").map_or(*line, str::trim))
+        .map(|line| line.strip_prefix("remote:").map_or(line, str::trim))
         .filter(|line| !line.is_empty())
         .collect();
+      // Nothing from git or the remote: a hook (pre-push) turned the push down, and what it printed is the reason.
+      if details.is_empty() {
+        details = quiet.iter().rev().take(6).rev().copied().collect();
+      }
       details.dedup();
       match last_line(stderr) {
         line if line.is_empty() => failure.to_string(),
@@ -658,7 +667,9 @@ pub const TOKEN_REFUSED: &str = "refused the token of the connected account";
 
 /// Whether git's message says the server turned the login down (rather than, say, a network failure).
 fn login_refused(message: &str) -> bool {
-  ["403", "401", "Authentication failed", "denied", "could not read Username", "Permission to"].iter().any(|sign| message.contains(sign))
+  ["403", "401", "Authentication failed", "denied", "could not read Username", "could not read Password", "Permission to"]
+    .iter()
+    .any(|sign| message.contains(sign))
 }
 
 /// Runs a command that talks to the remote with the connected account's token; if the server refuses that login, it is run
