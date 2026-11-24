@@ -18,7 +18,7 @@ fn the_styles_cover_the_asked_range_in_both_themes() {
   let highlights = Highlights::compute(Language::Dotenv, ENV);
   for theme in [HighlightTheme::default_light(), HighlightTheme::default_dark()] {
     for range in [0..ENV.len(), 3..ENV.len() - 4, 0..1, ENV.find("URL").unwrap()..ENV.len()] {
-      let styles = outline::line_styles(&highlights, &range, &*theme);
+      let styles = outline::line_styles(Language::Dotenv, &highlights, &range, &*theme);
       let mut cursor = range.start;
       for (run, _) in &styles {
         assert_eq!(run.start, cursor);
@@ -33,7 +33,7 @@ fn the_styles_cover_the_asked_range_in_both_themes() {
 fn roles_become_the_themes_colors() {
   let highlights = Highlights::compute(Language::Dotenv, ENV);
   for theme in [HighlightTheme::default_light(), HighlightTheme::default_dark()] {
-    let styles = outline::line_styles(&highlights, &(0..ENV.len()), &*theme);
+    let styles = outline::line_styles(Language::Dotenv, &highlights, &(0..ENV.len()), &*theme);
     let comment = theme.style("comment").and_then(|style| style.color);
     let name = style_at(&styles, "TOKEN").color;
     assert!(name.is_some() && name != comment, "a name has a color of its own");
@@ -51,15 +51,15 @@ fn roles_become_the_themes_colors() {
 }
 
 #[test]
-fn a_gitignore_comment_takes_the_comment_color_and_a_name_the_function_color() {
+fn gitignore_comments_are_colored_and_patterns_keep_the_editor_foreground() {
   let text = "# build output\n/build\n";
   let highlights = Highlights::compute(Language::Gitignore, text);
   let theme = HighlightTheme::default_dark();
-  let styles = outline::line_styles(&highlights, &(0..text.len()), &*theme);
+  let styles = outline::line_styles(Language::Gitignore, &highlights, &(0..text.len()), &*theme);
   assert_eq!(styles[0].1.color, theme.style("comment").and_then(|style| style.color));
   let name = text.find("/build").unwrap() + 1;
   let style = styles.iter().find(|(range, _)| range.contains(&name)).map(|(_, style)| *style).unwrap();
-  assert_eq!(style.color, theme.style("function").and_then(|style| style.color), "a name is drawn like a function");
+  assert_eq!(style.color, None, "a pattern keeps the editor foreground");
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn dockerfile_instructions_use_the_name_color_and_variables_their_own() {
   let text = "FROM ${IMAGE} AS base\nRUN echo hi # not a comment\n";
   let highlights = Highlights::compute(Language::Dockerfile, text);
   for theme in [HighlightTheme::default_light(), HighlightTheme::default_dark()] {
-    let styles = outline::line_styles(&highlights, &(0..text.len()), &*theme);
+    let styles = outline::line_styles(Language::Dockerfile, &highlights, &(0..text.len()), &*theme);
     let at = |needle: &str| {
       let offset = text.find(needle).unwrap();
       styles.iter().find(|(range, _)| range.contains(&offset)).map(|(_, style)| *style).unwrap()

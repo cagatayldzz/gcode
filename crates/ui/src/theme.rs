@@ -1,5 +1,5 @@
 //! The app's light and dark colors and fonts, switched with the system appearance.
-//! The palettes use semantic colors from GitHub Primer (https://github.com/primer/primitives).
+//! The palettes follow the GitHub Default editor themes (https://github.com/primer/github-vscode-theme).
 
 use gpui_kit::{
   component::{
@@ -46,6 +46,7 @@ pub(crate) struct Colors {
   pub rail_text: Hsla,
   /// The accent for selection controls and badges.
   pub accent: Hsla,
+  pub tab_indicator: Hsla,
   pub accent_hover: Hsla,
   /// Text and icons drawn on the accent color.
   pub on_accent: Hsla,
@@ -97,37 +98,38 @@ impl Colors {
   fn dark() -> Self {
     Self {
       background: hex(0x0d1117),
-      text: hex(0xf0f6fc),
-      text_secondary: hex(0x9198a1),
-      surface: hex(0x0d1117),
+      text: hex(0xe6edf3),
+      text_secondary: hex(0x7d8590),
+      surface: hex(0x010409),
       surface_alt: hex(0x151b23),
-      border: hex(0x252c35),
-      control_border: hex(0x3d444d),
+      border: hex(0x30363d),
+      control_border: hex(0x30363d),
       selected: hex(0x172b45),
-      explorer_selected: hex(0x2f353d),
-      explorer_selected_text: hex(0xf0f6fc),
+      explorer_selected: hex(0x6e7681).opacity(0.4),
+      explorer_selected_text: hex(0xe6edf3),
       plist_icon: hex(0xf0883e),
-      hover: hex(0x151b23),
-      rail: hex(0x010409),
+      hover: hex(0x6e7681).opacity(0.1),
+      rail: hex(0x0d1117),
       rail_hover: hex(0x151b23),
       project_tab_selected: hex(0x2f353d),
       rail_item_hover: hex(0x212830),
-      rail_text: hex(0x9198a1),
+      rail_text: hex(0x7d8590),
       accent: hex(0x1f6feb),
+      tab_indicator: hex(0xf78166),
       accent_hover: hex(0x1c62d2),
       on_accent: hex(0xffffff),
       primary_button: hex(0x238636),
-      primary_button_hover: hex(0x29903b),
+      primary_button_hover: hex(0x2ea043),
       primary_button_active: hex(0x216e39),
-      link: hex(0x4493f8),
+      link: hex(0x2f81f7),
       link_hover: hex(0x79b8ff),
       new: hex(0x3fb950),
       deleted: hex(0xf85149),
       modified: hex(0xd29922),
       renamed: hex(0x4493f8),
       conflicted: hex(0xdb6d28),
-      diff_added: hex(0x103c1d),
-      diff_removed: hex(0x4a1214),
+      diff_added: hex(0x238636).opacity(0.15),
+      diff_removed: hex(0xda3633).opacity(0.15),
     }
   }
 
@@ -137,22 +139,23 @@ impl Colors {
     Self {
       background: hex(0xffffff),
       text,
-      text_secondary: hex(0x59636e),
-      surface: hex(0xffffff),
+      text_secondary: hex(0x656d76),
+      surface: hex(0xf6f8fa),
       surface_alt: hex(0xf6f8fa),
-      border: hex(0xe2e7ec),
-      control_border: hex(0x818b98),
+      border: hex(0xd0d7de),
+      control_border: hex(0xd0d7de),
       selected: hex(0xddf4ff),
-      explorer_selected: rail_hover,
+      explorer_selected: hex(0xafb8c1).opacity(0.2),
       explorer_selected_text: text,
       plist_icon: hex(0xbc4c00),
-      hover: hex(0xf6f8fa),
-      rail: hex(0xf6f8fa),
+      hover: hex(0xeaeef2).opacity(0.5),
+      rail: hex(0xffffff),
       rail_hover,
       project_tab_selected: hex(0xdce2e8),
       rail_item_hover: hex(0xd1d9e0),
-      rail_text: hex(0x59636e),
+      rail_text: hex(0x656d76),
       accent: hex(0x0969da),
+      tab_indicator: hex(0xfd8c73),
       accent_hover: hex(0x0759bd),
       on_accent: hex(0xffffff),
       primary_button: hex(0x1f883d),
@@ -165,8 +168,8 @@ impl Colors {
       modified: hex(0x9a6700),
       renamed: hex(0x0969da),
       conflicted: hex(0xbc4c00),
-      diff_added: hex(0xdafbe1),
-      diff_removed: hex(0xffebe9),
+      diff_added: hex(0xaceebb).opacity(0.3),
+      diff_removed: hex(0xffcecb).opacity(0.3),
     }
   }
 }
@@ -188,12 +191,11 @@ fn syntax_json(value: serde_json::Value) -> Option<ThemeStyle> {
   serde_json::from_value(value).ok()
 }
 
-/// The dark theme's code colors as GitHub draws them: properties, attributes, constants and operators blue; identifiers, types and
-/// punctuation in the text color; class names that are built orange; JSON and YAML keys green (the `label` role).
-fn github_dark(syntax: &mut SyntaxColors, c: &Colors) {
+/// Shared syntax roles used by the editor and minimap across languages.
+fn github_syntax(syntax: &mut SyntaxColors, c: &Colors, dark: bool) {
   let text = syntax_color(c.text);
-  let blue = syntax_color(hex(0x79c0ff));
-  let string = syntax_color(hex(0xa5d6ff));
+  let blue = syntax_color(hex(if dark { 0x79c0ff } else { 0x0550ae }));
+  let string = syntax_color(hex(if dark { 0xa5d6ff } else { 0x0a3069 }));
   syntax.property = blue;
   syntax.attribute = blue;
   syntax.operator = blue;
@@ -207,10 +209,10 @@ fn github_dark(syntax: &mut SyntaxColors, c: &Colors) {
   syntax.string_special_symbol = string;
   syntax.preproc = syntax.keyword;
   // Markdown: headings and rules bold in the heading blue, list markers orange, the cells' pipes gold, emphasis in the text color.
-  let heading = hex(0x1f6feb);
+  let heading = hex(if dark { 0x1f6feb } else { 0x0550ae });
   syntax.title = syntax_json(serde_json::json!({ "color": heading, "font_weight": 700 }));
   syntax.punctuation_list_marker = syntax.constructor;
-  syntax.variant = syntax_color(hex(0xf2cc60));
+  syntax.variant = syntax_color(hex(if dark { 0xf2cc60 } else { 0x9a6700 }));
   syntax.emphasis = syntax_json(serde_json::json!({ "color": c.text, "font_style": "italic" }));
   syntax.emphasis_strong = syntax_json(serde_json::json!({ "color": c.text, "font_weight": 700 }));
   for role in [
@@ -219,7 +221,6 @@ fn github_dark(syntax: &mut SyntaxColors, c: &Colors) {
     &mut syntax.variable_special,
     &mut syntax.embedded,
     &mut syntax.enum_,
-    &mut syntax.variant,
     &mut syntax.primary,
     &mut syntax.punctuation,
     &mut syntax.punctuation_bracket,
@@ -249,42 +250,32 @@ pub(crate) fn apply_theme(choice: ThemeChoice, font: FontChoice, code_font_size:
     theme.focus_ring = false;
     theme.notification.width = px(360.);
     let style = &mut std::sync::Arc::make_mut(&mut theme.highlight_theme).style;
-    // The design shows no highlight on the line of the cursor.
     style.editor_background = Some(c.background);
     style.editor_gutter_background = Some(c.background);
-    style.editor_active_line = Some(c.background);
+    style.editor_active_line = Some(c.hover);
+    style.editor_line_number = Some(hex(if dark { 0x6e7681 } else { 0x8c959f }));
     style.editor_active_line_number = Some(c.text);
-    let (property, string, literal, keyword, type_name, function, tag) = if dark {
+    let (label, string, literal, keyword, type_name, function, tag) = if dark {
       (hex(0x7ee787), hex(0xa5d6ff), hex(0x79c0ff), hex(0xff7b72), hex(0xffa657), hex(0xd2a8ff), hex(0x7ee787))
     } else {
-      (c.link, hex(0x0a3069), hex(0x0550ae), hex(0x953800), hex(0x953800), hex(0x6639ba), hex(0x116329))
+      (hex(0x0550ae), hex(0x0a3069), hex(0x0550ae), hex(0xcf222e), hex(0x953800), hex(0x8250df), hex(0x116329))
     };
     let syntax = &mut style.syntax;
-    syntax.property = syntax_color(property);
-    syntax.attribute = syntax.property;
-    // The names of a data file (JSON and YAML keys) keep the color the properties had.
-    syntax.label = syntax_color(property);
+    // JSON and YAML keys have their own syntax role.
+    syntax.label = syntax_color(label);
     // The name of a class that is built or listed, and the names of the line-based files (see `minimap::outline`).
     syntax.constructor = syntax_color(type_name);
-    syntax.comment = syntax_color(c.text_secondary);
+    syntax.comment = syntax_color(hex(if dark { 0x8b949e } else { 0x6e7781 }));
     syntax.comment_doc = syntax.comment;
     syntax.string = syntax_color(string);
-    syntax.string_escape = syntax_color(c.link);
     syntax.keyword = syntax_color(keyword);
-    syntax.operator = syntax.keyword;
-    syntax.type_ = syntax_color(type_name);
     syntax.function = syntax_color(function);
     syntax.tag = syntax_color(tag);
     let literal = syntax_color(literal);
     syntax.boolean = literal;
     syntax.constant = literal;
     syntax.number = literal;
-    syntax.punctuation = literal;
-    syntax.punctuation_bracket = literal;
-    syntax.punctuation_delimiter = syntax_color(c.text_secondary);
-    if dark {
-      github_dark(syntax, &c);
-    }
+    github_syntax(syntax, &c, dark);
 
     let colors = &mut theme.colors;
     colors.background = c.background;
@@ -300,7 +291,7 @@ pub(crate) fn apply_theme(choice: ThemeChoice, font: FontChoice, code_font_size:
     colors.input = c.control_border;
     colors.title_bar = c.rail;
     colors.title_bar_border = c.border;
-    colors.status_bar = c.surface_alt;
+    colors.status_bar = c.rail;
     colors.status_bar_border = c.border;
     colors.group_box = c.surface;
     colors.group_box_foreground = c.text;
@@ -311,7 +302,7 @@ pub(crate) fn apply_theme(choice: ThemeChoice, font: FontChoice, code_font_size:
     colors.tab_active_foreground = c.text;
     // A switch that is off is a gray track.
     colors.switch = c.rail_item_hover;
-    colors.tab_active = c.selected;
+    colors.tab_active = c.background;
     colors.popover = c.surface;
     colors.popover_foreground = c.text;
     colors.muted = c.surface_alt;

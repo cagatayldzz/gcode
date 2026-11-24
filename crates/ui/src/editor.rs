@@ -1094,7 +1094,7 @@ impl InputHighlighter for LineHighlighter {
   }
 
   fn styles(&self, range: &Range<usize>, resolver: &dyn HighlightStyleResolver) -> Vec<(Range<usize>, HighlightStyle)> {
-    line_styles(&self.highlights, range, resolver)
+    line_styles(self.language, &self.highlights, range, resolver)
   }
 
   fn fold_ranges(&self, _: &Rope) -> Vec<FoldRange> {

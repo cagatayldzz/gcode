@@ -74,7 +74,7 @@ pub(crate) fn avatar_look(project: &Project, selected: bool, cx: &App) -> Avatar
   }
 }
 
-/// One tab of a tab strip (editor files, terminals): a divider on its right; the shown tab is white with an accent line on top.
+/// One tab of a tab strip (editor files, terminals): a divider on its right; the shown tab uses the editor background with an accent line on top.
 /// The caller adds the click handler.
 pub(crate) fn strip_tab(id: SharedString, label: impl IntoElement, shown: bool, close: impl IntoElement, cx: &App) -> Stateful<Div> {
   let c = colors(cx);
@@ -89,7 +89,7 @@ pub(crate) fn strip_tab(id: SharedString, label: impl IntoElement, shown: bool, 
     .border_color(c.border)
     .text_size(FONT_SIZE)
     .cursor_pointer()
-    .when(shown, |tab| tab.bg(c.background).text_color(c.text).child(div().absolute().top_0().left_0().right_0().h_0p5().bg(c.accent)))
+    .when(shown, |tab| tab.bg(c.background).text_color(c.text).child(div().absolute().top_0().left_0().right_0().h_0p5().bg(c.tab_indicator)))
     .when(!shown, |tab| tab.text_color(c.text_secondary).hover(|tab| tab.bg(c.hover)))
     .child(label)
     .child(close)
@@ -98,5 +98,5 @@ pub(crate) fn strip_tab(id: SharedString, label: impl IntoElement, shown: bool, 
 /// The strip that holds the tabs: gray, with a line under it.
 pub(crate) fn strip(cx: &App) -> Div {
   let c = colors(cx);
-  h_flex().h_9().flex_none().bg(c.surface_alt).border_b_1().border_color(c.border)
+  h_flex().h_9().flex_none().bg(c.surface).border_b_1().border_color(c.border)
 }

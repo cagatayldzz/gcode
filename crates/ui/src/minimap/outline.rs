@@ -19,7 +19,7 @@ pub(super) struct Line {
 pub(super) fn sample(text: &Rope, language: &str, theme: &HighlightTheme) -> Arc<[Line]> {
   // The line-based languages are classified once for the whole text; the others go through the syntax highlighter.
   let line_language = Language::from_name(language);
-  let line_highlights = line_language.map(|language| Highlights::compute(language, &text.to_string()));
+  let line_highlights = line_language.map(|language| (language, Highlights::compute(language, &text.to_string())));
   let highlighter = line_language.is_none().then(|| {
     let mut highlighter = SyntaxHighlighter::new(language);
     highlighter.update(None, text, None);
@@ -46,7 +46,7 @@ pub(super) fn sample(text: &Rope, language: &str, theme: &HighlightTheme) -> Arc
         let range = start..start + line.len();
         let styles = match (&highlighter, &line_highlights) {
           (Some(highlighter), _) => highlighter.styles(&range, theme),
-          (None, Some(highlights)) => line_styles(highlights, &range, theme),
+          (None, Some((language, highlights))) => line_styles(*language, highlights, &range, theme),
           (None, None) => Vec::new(),
         };
         styles.into_iter().map(|(range, style)| (range.len(), style.color)).collect()
@@ -59,6 +59,7 @@ pub(super) fn sample(text: &Rope, language: &str, theme: &HighlightTheme) -> Arc
 /// The runs of `highlights` inside `range` with the theme's style for each role. They cover `range` completely, as the editor
 /// requires. Nothing is read from the text: the classification was done once, before the file was shown.
 pub(crate) fn line_styles(
+  language: Language,
   highlights: &Highlights,
   range: &Range<usize>,
   resolver: &dyn HighlightStyleResolver,
@@ -75,8 +76,9 @@ pub(crate) fn line_styles(
     .into_iter()
     .map(|(run, role)| {
       let style = match role {
-        None => HighlightStyle::default(),
         Some(Role::Comment) => comment,
+        _ if language == Language::Gitignore => HighlightStyle::default(),
+        None => HighlightStyle::default(),
         Some(Role::Name) => name,
         Some(Role::Keyword | Role::Instruction) => keyword,
         Some(Role::Value) => string,

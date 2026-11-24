@@ -161,7 +161,11 @@ fn benchmark(run: &mut Run, root: &Path, expanded: &HashSet<PathBuf>) {
   let env_highlights = Highlights::compute(Language::Dotenv, &env_text);
   let screenful = env_text.len() / 2..env_text.len() / 2 + 3_000;
   run.measure("highlight/dotenv_classify_16k_lines", || {}, || Highlights::compute(Language::Dotenv, black_box(&env_text)).runs().len());
-  run.measure("highlight/dotenv_draw_one_screenful", || {}, || outline::line_styles(black_box(&env_highlights), &screenful, &*syntax_theme));
+  run.measure(
+    "highlight/dotenv_draw_one_screenful",
+    || {},
+    || outline::line_styles(Language::Dotenv, black_box(&env_highlights), &screenful, &*syntax_theme),
+  );
   run.measure("minimap/24k_lines", || {}, || sample(black_box(&rope)));
   run.measure("git/working_tree_summary", || {}, || ws_git::summary(root).unwrap());
   run.measure("git/file_history", || {}, || ws_git::file_history(&root.join("timeline.rs"), 100).unwrap());
