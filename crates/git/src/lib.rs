@@ -15,6 +15,8 @@ pub use commit_actions::{add_to_gitignore, branch_from_commit, cherry_pick, reve
 mod compare;
 
 mod merge;
+
+pub mod shell_path;
 pub use merge::{read_merge, start_merge, MergeOutcome, MergeSide, MergeState};
 
 pub use compare::{compare, compare_choices, merge_branch, BranchChoices, BranchRef, Comparison, COMPARE_LIMIT};
@@ -220,6 +222,7 @@ pub fn clone(url: &str, parent: &Path, credentials: Option<&Credentials>) -> Res
     return Err(format!("{} already exists.", path.display()));
   }
   let mut command = std::process::Command::new("git");
+  shell_path::apply(&mut command);
   credential_options(&mut command, credentials);
   let output = command
     .arg("clone")
@@ -546,6 +549,7 @@ fn credential_options(command: &mut std::process::Command, credentials: Option<&
 fn run_git(path: &Path, arguments: &[&str], credentials: Option<&Credentials>, mut on_progress: impl FnMut(&str)) -> Result<(bool, String), String> {
   use std::io::Read as _;
   let mut command = std::process::Command::new("git");
+  shell_path::apply(&mut command);
   command.arg("-C").arg(path);
   credential_options(&mut command, credentials);
   let mut child = command
