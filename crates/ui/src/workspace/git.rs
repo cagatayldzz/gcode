@@ -135,9 +135,19 @@ impl Workspace {
   }
 
   /// Reads the commits of the open project off the interface thread; the first one is shown when none is chosen.
+  /// The list shows a loader until the commits arrive, so a switch of branch or project is noticed.
   pub(super) fn load_history(&mut self, cx: &mut Context<Self>) {
+    self.read_history(true, cx);
+  }
+
+  /// `show_loader` is off when a page is added to a list that stays on screen.
+  fn read_history(&mut self, show_loader: bool, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
     self.history_epoch += 1;
+    if show_loader && !self.history_loading {
+      self.history_loading = true;
+      cx.notify();
+    }
     let epoch = self.history_epoch;
     let limit = self.history_limit;
     let work = cx.background_executor().spawn({
@@ -149,6 +159,10 @@ impl Workspace {
       let _ = this.update(cx, |this, cx| {
         if this.history_epoch != epoch || this.projects.active.as_ref() != Some(&root) {
           return;
+        }
+        if this.history_loading {
+          this.history_loading = false;
+          cx.notify();
         }
         let known = this.selected_commit.as_ref().is_some_and(|id| found.iter().any(|commit| &commit.id == id));
         let first = found.first().map(|commit| commit.id.clone());
@@ -233,7 +247,7 @@ impl Workspace {
       return;
     }
     self.history_limit += HISTORY_PAGE;
-    self.load_history(cx);
+    self.read_history(false, cx);
   }
 
   /// Opens the list of branches under the compare field, reading them off the interface thread.

@@ -585,6 +585,16 @@ impl Workspace {
       self.render_compare_choices(cx)
     } else if let Some(view) = &self.compare {
       self.render_compare(view, cx)
+    } else if self.history_loading {
+      let muted = cx.theme().muted_foreground;
+      h_flex()
+        .gap_2()
+        .px_3()
+        .py_2()
+        .items_center()
+        .child(Spinner::new().small())
+        .child(Label::new("Loading commits…").text_color(muted))
+        .into_any_element()
     } else {
       self.commit_list(&self.history, true, cx)
     };

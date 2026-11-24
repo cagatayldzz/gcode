@@ -394,6 +394,8 @@ pub struct Workspace {
   pr_epoch: u64,
   /// Which read of the history the listed commits belong to.
   history_epoch: u64,
+  /// Whether the commits are being read, so that the History list shows a loader.
+  history_loading: bool,
   /// How many commits the History view asks for now, and its scroll position (to load more near the end).
   history_limit: usize,
   history_scroll: ScrollHandle,
@@ -560,6 +562,7 @@ impl Workspace {
       pull_requests: PullRequests::Idle,
       pr_epoch: 0,
       history_epoch: 0,
+      history_loading: false,
       history_limit: HISTORY_PAGE,
       history_scroll: ScrollHandle::new(),
       changes_scroll: VirtualListScrollHandle::new(),

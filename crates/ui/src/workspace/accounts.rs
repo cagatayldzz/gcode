@@ -70,13 +70,18 @@ impl Workspace {
     if needs_reconnect(&message) {
       let account = self.settings.read(cx).accounts.items.iter().find(|account| RepoRef::for_account(account, url).is_some()).cloned();
       let workspace = cx.entity().downgrade();
-      notification = notification.action(move |_, _, cx| {
+      // As content, the button sits under the message (an action would stand beside it and squeeze the text); it keeps the
+      // notification open, as an action does.
+      notification = notification.autohide(false).content(move |_, _, cx| {
         let (workspace, account) = (workspace.clone(), account.clone());
-        Button::new("reconnect-account").label("Reconnect account").small().primary().on_click(cx.listener(move |this, _, window, cx| {
-          this.dismiss(window, cx);
-          let account = account.clone();
-          let _ = workspace.update(cx, |workspace, cx| workspace.open_connect_account(account, window, cx));
-        }))
+        h_flex()
+          .pt_2()
+          .child(Button::new("reconnect-account").label("Reconnect account").small().primary().on_click(cx.listener(move |this, _, window, cx| {
+            this.dismiss(window, cx);
+            let account = account.clone();
+            let _ = workspace.update(cx, |workspace, cx| workspace.open_connect_account(account, window, cx));
+          })))
+          .into_any_element()
       });
     }
     window.push_notification(notification, cx);
