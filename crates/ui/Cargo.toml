@@ -22,7 +22,7 @@ ws-terminal.workspace = true
 ws-git.workspace = true
 ws-commitgen.workspace = true
 ws-language.workspace = true
-anyhow = "1.0.104"
+anyhow = "1.0.105"
 lsp-types = { version = "0.97.0", features = ["proposed"] }
 ws-hosting.workspace = true
 ws-updater.workspace = true
@@ -30,12 +30,11 @@ gpui-kit.workspace = true
 gpui-kit-assets.workspace = true
 futures.workspace = true
 serde_json.workspace = true
-tree-sitter = "0.26.13"
 tree-sitter-kotlin-ng = "1.1.0"
 tree-sitter-swift = "0.7.4"
 unicode-width = "0.2.3"
-ignore = "0.4.34"
-globset = "0.4.21"
+ignore = "0.4.35"
+globset = "0.4.22"
 regex = "1.13.2"
 tempfile = "3.27.0"
 rustix = { version = "1.1.6", features = ["fs"] }
