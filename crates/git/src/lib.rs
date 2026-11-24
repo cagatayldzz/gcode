@@ -3,6 +3,8 @@
 use git2::{build::CheckoutBuilder, DiffFormat, DiffOptions, Repository, Status, StatusOptions};
 use std::path::{Path, PathBuf};
 
+pub mod editor_diff;
+
 mod branch;
 pub use branch::{
   branch_entries, delete_branch, delete_remote_branch, discard_stash, has_changes, has_stash, rename_branch, restore_stash, stash_changes,

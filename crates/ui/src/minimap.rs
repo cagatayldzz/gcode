@@ -1,6 +1,7 @@
 //! An overview of the editor buffer that shares the editor's scroll position.
 
 use gpui_kit::{
+  base::input::RopeExt as _,
   component::input::{EditorState, InputEvent},
   component::{ActiveTheme as _, Theme},
   *,
@@ -20,6 +21,7 @@ use outline::{sample, Line};
 pub(crate) struct Minimap {
   editor: Entity<EditorState>,
   lines: Arc<[Line]>,
+  git_changes: Arc<[ws_git::editor_diff::EditorChange]>,
   language: &'static str,
   drag_anchor: Rc<Cell<Option<Pixels>>>,
   refresh: Option<Task<()>>,
@@ -28,6 +30,11 @@ pub(crate) struct Minimap {
 }
 
 impl Minimap {
+  pub fn set_git_changes(&mut self, changes: &[ws_git::editor_diff::EditorChange], cx: &mut Context<Self>) {
+    self.git_changes = Arc::from(changes);
+    cx.notify();
+  }
+
   pub fn new(editor: Entity<EditorState>, language: &'static str, cx: &mut Context<Self>) -> Self {
     let changes = cx.subscribe(&editor, |this: &mut Self, _, event: &InputEvent, cx| {
       if matches!(event, InputEvent::Change) {
@@ -35,7 +42,16 @@ impl Minimap {
       }
     });
     let theme = cx.observe_global::<Theme>(|this, cx| this.refresh(true, cx));
-    let mut minimap = Self { editor, language, lines: Arc::default(), drag_anchor: Rc::default(), refresh: None, _changes: changes, _theme: theme };
+    let mut minimap = Self {
+      editor,
+      language,
+      lines: Arc::default(),
+      git_changes: Arc::default(),
+      drag_anchor: Rc::default(),
+      refresh: None,
+      _changes: changes,
+      _theme: theme,
+    };
     minimap.refresh(false, cx);
     minimap
   }
@@ -106,6 +122,7 @@ impl Render for Minimap {
     let pointer_anchor = drag_anchor.clone();
     let lines = self.lines.clone();
     let line_count = lines.len();
+    let git_changes = self.git_changes.clone();
 
     div()
       .id("editor-minimap")
@@ -166,6 +183,16 @@ impl Render for Minimap {
             let height = indicator_height(area, window);
             let travel = indicator_travel(area, height, line_count, window);
             let state = editor.read(cx);
+            let source_lines = state.text().lines_len().max(1);
+            let map_height = (line_step * line_count).min(area.size.height);
+            let mark_width = inset / 2.;
+            for change in git_changes.iter() {
+              let top = map_height * (change.lines.start as f32 / source_lines as f32);
+              let bottom = map_height * (change.lines.end as f32 / source_lines as f32);
+              let thickness = (bottom - top).max(mark_width);
+              let origin = point(area.origin.x, area.origin.y + top.min((map_height - thickness).max(Pixels::ZERO)));
+              window.paint_quad(fill(Bounds::new(origin, size(mark_width, thickness)), crate::editor::git_changes::change_color(change, cx)));
+            }
             if let Some(range) = scroll_range(state).filter(|range| *range > Pixels::ZERO) {
               let top = travel * scroll_progress(state, range);
               let origin = point(area.origin.x + inset, area.origin.y + top);

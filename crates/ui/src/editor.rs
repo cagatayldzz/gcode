@@ -33,6 +33,7 @@ use std::{
 use ws_index::highlight::{Highlights, Language};
 
 mod definitions;
+pub(crate) mod git_changes;
 mod problems;
 
 pub(crate) use definitions::OpenLocation;
@@ -83,6 +84,8 @@ const WARMUP_SAMPLES: [(&str, &str); 14] = [
 struct ReadyFile {
   state: Entity<EditorState>,
   minimap: Entity<Minimap>,
+  git: git_changes::GitChanges,
+  git_preview: Option<git_changes::GitPreview>,
   dirty: bool,
   /// The editor has been drawn at least once, so its text is already highlighted.
   painted: bool,
@@ -288,6 +291,8 @@ pub(crate) struct EditorPanel {
   warmup: Option<Entity<EditorState>>,
   _warmup_task: Task<()>,
   _refresh_task: Task<()>,
+  _git_watch: Option<Task<()>>,
+  git_operation: Option<Task<()>>,
   /// The editor of a file the pointer rests on, drawn out of sight so its highlighting is done before the click.
   preview: Option<Entity<EditorState>>,
   preview_epoch: u64,
@@ -395,6 +400,8 @@ impl EditorPanel {
       warmup: None,
       _warmup_task: warmup_task,
       _refresh_task: refresh_task,
+      _git_watch: (!read_only).then(|| Self::watch_git_changes(cx)),
+      git_operation: None,
       preview: None,
       preview_epoch: 0,
       focus_handle: cx.focus_handle(),
@@ -729,7 +736,8 @@ impl EditorPanel {
     // The colors of a line-based language are worked out here, before the editor exists, and the editor only reads them.
     let highlights = Language::from_name(language).map(|language| (language, Arc::new(Highlights::compute(language, &text))));
     let state = cx.new(|cx| {
-      let mut state = EditorState::new(window, cx).language(language).line_number(true).default_value(text);
+      let mut state =
+        EditorState::new(window, cx).language(language).line_number(true).gutter_decorations_width(window.rem_size() / 4.).default_value(text);
       // Long lines are not wrapped: the file scrolls sideways, as on GitHub.
       state.set_soft_wrap(false, window, cx);
       // The editor's scrollbars (vertical, and horizontal for long lines) stay visible instead of fading out when the file is not scrolling.
@@ -742,6 +750,7 @@ impl EditorPanel {
       }
       state
     });
+    let git = state.update(cx, git_changes::GitChanges::new);
     let owner = path.to_path_buf();
     let changes = cx.subscribe_in(&state, window, move |this, _, event: &InputEvent, window, cx| {
       if matches!(event, InputEvent::Change) {
@@ -760,6 +769,8 @@ impl EditorPanel {
       ReadyFile {
         state,
         minimap,
+        git,
+        git_preview: None,
         dirty: false,
         painted: false,
         crlf,
@@ -1248,6 +1259,7 @@ impl Render for EditorPanel {
             None => self.files.get(path).map_or_else(
               || div().into_any_element(),
               |file| {
+                let git_path = path.clone();
                 div()
                   .flex()
                   .size_full()
@@ -1258,9 +1270,15 @@ impl Render for EditorPanel {
                       .h_full()
                       .relative()
                       .cursor_text()
+                      .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                          this.open_gutter_change(&git_path, event.position, window, cx);
+                        }),
+                      )
                       .child(
                         Editor::new(&file.state)
-                          .readonly(self.read_only || self.replacement_files.contains(path))
+                          .readonly(self.read_only || self.git_operation.is_some() || self.replacement_files.contains(path))
                           .appearance(false)
                           .bordered(false)
                           .size_full(),
@@ -1298,7 +1316,11 @@ impl Render for EditorPanel {
     };
     let active_editor = self.active_file().and_then(|path| self.files.get(path)).map(|file| &file.state);
     let hidden = self.preview.clone().filter(|state| Some(state) != active_editor).or_else(|| self.warmup.clone());
-    let breadcrumb = self.tabs.current().filter(|_| !self.report_active).map(|path| self.render_breadcrumb(path, cx));
+    let breadcrumb = self.tabs.current().filter(|_| !self.report_active).cloned().map(|path| {
+      let controls = self.git_controls(&path, cx);
+      gpui_kit::component::h_flex().child(div().flex_1().min_w_0().child(self.render_breadcrumb(&path, cx))).children(controls)
+    });
+    let git_preview = self.active_file().map(Path::to_owned).and_then(|path| self.render_git_preview(&path, cx));
     let tabs = (!self.tabs.items.is_empty() || self.search_report.is_some()).then(|| self.render_tabs(cx));
     v_flex()
       .track_focus(&self.focus_handle)
@@ -1307,6 +1329,7 @@ impl Render for EditorPanel {
       .size_full()
       .children(tabs)
       .children(breadcrumb)
+      .children(git_preview)
       .child(div().relative().flex_1().min_h_0().child(content))
       .when_some(hidden, |this, state| {
         this.child(
