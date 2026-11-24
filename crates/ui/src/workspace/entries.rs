@@ -93,6 +93,31 @@ impl Workspace {
     self.open_file_as(path, false, window, cx);
   }
 
+  /// Shift selects the rows between the anchor and `path`; Command adds or removes `path`.
+  pub(super) fn select_entries(&mut self, path: PathBuf, range: bool, cx: &mut Context<Self>) {
+    let position = |target: &Path| self.rows.iter().position(|row| row.path == target);
+    let anchor = self.selection_anchor.clone().or_else(|| self.selected_entry.clone());
+    if range {
+      if let (Some(from), Some(to)) = (anchor.as_deref().and_then(position), position(&path)) {
+        let (from, to) = (from.min(to), from.max(to));
+        self.explorer_selection = self.rows[from..=to].iter().map(|row| row.path.clone()).collect();
+        self.selection_anchor = anchor;
+        self.selected_entry = Some(path);
+        cx.notify();
+        return;
+      }
+    }
+    if self.explorer_selection.is_empty() {
+      self.explorer_selection.extend(self.selected_entry.clone());
+    }
+    if !self.explorer_selection.remove(&path) {
+      self.explorer_selection.insert(path.clone());
+    }
+    self.selection_anchor = Some(path.clone());
+    self.selected_entry = Some(path);
+    cx.notify();
+  }
+
   /// Opens a file; `preview` shows it in the preview tab, which the next preview replaces.
   pub(super) fn open_file_as(&mut self, path: PathBuf, preview: bool, window: &mut Window, cx: &mut Context<Self>) {
     let result =
@@ -108,6 +133,7 @@ impl Workspace {
       );
     match result {
       Ok(()) => {
+        self.explorer_selection.clear();
         self.selected_entry = Some(path);
         self.selected_change = None;
       }
@@ -147,6 +173,7 @@ impl Workspace {
     }
     let expanded = self.expanded.len();
     self.expanded.extend(path.ancestors().skip(1).take_while(|parent| *parent != root).map(Path::to_path_buf));
+    self.explorer_selection.clear();
     self.selected_entry = Some(path.clone());
     if self.expanded.len() != expanded {
       self.refresh_with_explorer_reveal(Some((path, strategy)), cx);

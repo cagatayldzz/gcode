@@ -8,7 +8,8 @@ impl Workspace {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     let path = row.path.clone();
-    let selected = self.selected_entry.as_ref() == Some(&row.path);
+    let selected =
+      if self.explorer_selection.is_empty() { self.selected_entry.as_ref() == Some(&row.path) } else { self.explorer_selection.contains(&row.path) };
     let dim = if row.ignored && !selected { 0.55 } else { 1. };
     let icon_color = if selected { palette.explorer_selected_text } else { theme.muted_foreground };
     let open = self.expanded.contains(&row.path);
@@ -87,6 +88,13 @@ impl Workspace {
         }))
       })
       .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+        let modifiers = event.modifiers();
+        if modifiers.shift || modifiers.platform {
+          this.select_entries(path.clone(), modifiers.shift, cx);
+          return;
+        }
+        this.explorer_selection.clear();
+        this.selection_anchor = Some(path.clone());
         if this.rows.iter().any(|row| row.path == path && row.is_dir) {
           this.selected_entry = Some(path.clone());
           this.toggle_folder(path.clone(), cx);

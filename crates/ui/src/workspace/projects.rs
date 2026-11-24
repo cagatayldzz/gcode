@@ -485,6 +485,8 @@ impl Workspace {
         selected_entry: self.selected_entry.take(),
         selected_change: self.selected_change.take(),
       };
+      self.explorer_selection.clear();
+      self.selection_anchor = None;
       self.views.insert(root.clone(), view);
       // What the tab of the project being left shows comes from here on from what is remembered, which can be ten seconds old: remember
       // what the window knows now, so a push that just ended is not shown as waiting.

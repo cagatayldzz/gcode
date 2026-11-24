@@ -162,29 +162,95 @@ impl Workspace {
         });
       }
       Delete => {
+        let mut targets: Vec<PathBuf> = if self.explorer_selection.contains(path) {
+          self.explorer_selection.iter().filter(|entry| entry.starts_with(root)).cloned().collect()
+        } else {
+          vec![path.clone()]
+        };
+        // A selected folder already takes the entries inside it along.
+        let all = targets.clone();
+        targets.retain(|entry| !all.iter().any(|other| other != entry && entry.starts_with(other)));
+        targets.sort();
         let workspace = cx.entity().downgrade();
-        let (root, path) = (root.clone(), path.clone());
-        let title = SharedString::from(format!("Delete {}?", display_path(&path)));
-        let directory = *directory;
+        let root = root.clone();
+        let (title, description) = match targets.as_slice() {
+          [only] => (
+            format!("Delete {}?", display_path(only)),
+            if only.is_dir() { "The folder will be moved to the Trash." } else { "The file will be moved to the Trash." },
+          ),
+          many => (format!("Delete {} items?", many.len()), "The items will be moved to the Trash."),
+        };
+        let title = SharedString::from(title);
         window.open_alert_dialog(cx, move |alert, _, _| {
-          let (workspace, root, path) = (workspace.clone(), root.clone(), path.clone());
-          alert
-            .title(title.clone())
-            .description(if directory { "The folder will be moved to the Trash." } else { "The file will be moved to the Trash." })
-            .confirm()
-            .ok_text("Delete")
-            .ok_variant(ButtonVariant::Danger)
-            .on_ok(move |_, window, cx| {
+          let (workspace, root, targets) = (workspace.clone(), root.clone(), targets.clone());
+          alert.title(title.clone()).description(description).confirm().ok_text("Delete").ok_variant(ButtonVariant::Danger).on_ok(
+            move |_, window, cx| {
               let _ = workspace.update(cx, |this, cx| {
                 if this.projects.active.as_ref() == Some(&root) {
-                  this.edit_file(path.clone(), FileEdit::Delete, window, cx);
+                  this.delete_entries(targets.clone(), window, cx);
                 }
               });
               true
-            })
+            },
+          )
         });
       }
     }
+  }
+
+  fn delete_entries(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+    if let [only] = paths.as_slice() {
+      self.edit_file(only.clone(), FileEdit::Delete, window, cx);
+      return;
+    }
+    if self.file_mutation_pending() || self.replacement_task.is_some() {
+      window.push_notification(Notification::info("Wait for the current file operation to finish."), cx);
+      return;
+    }
+    if paths.iter().any(|path| self.editor_panel.read(cx).is_dirty_under(path)) {
+      window.push_notification(Notification::error("Save the files before deleting them."), cx);
+      return;
+    }
+    self.editor_panel.update(cx, |editor, cx| editor.lock_replacement_files(paths.clone(), cx));
+    let root = self.projects.active.clone();
+    let work = cx.background_executor().spawn({
+      let paths = paths.clone();
+      async move {
+        let mut deleted = Vec::new();
+        for path in paths {
+          match FileEdit::Delete.apply(&path) {
+            Ok(_) => deleted.push(path),
+            Err(error) => return (deleted, Some(error)),
+          }
+        }
+        (deleted, None)
+      }
+    });
+    self.file_actions.mutation = Some(cx.spawn_in(window, async move |this, cx| {
+      let (deleted, error) = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.file_actions.mutation = None;
+        this.editor_panel.update(cx, |editor, cx| editor.lock_replacement_files([], cx));
+        for path in &deleted {
+          this.editor_panel.update(cx, |editor, cx| editor.forget_under(path, cx));
+          if let Some(side) = &this.file_actions.side {
+            side.update(cx, |editor, cx| editor.forget_under(path, cx));
+          }
+        }
+        if this.projects.active == root {
+          this.explorer_selection.clear();
+          this.selection_anchor = None;
+          if this.selected_entry.as_ref().is_some_and(|selected| deleted.iter().any(|path| selected.starts_with(path))) {
+            this.selected_entry = None;
+          }
+          this.refresh_project();
+        }
+        if let Some(error) = error {
+          window.push_notification(Notification::error(format!("File operation failed: {error}")), cx);
+        }
+        cx.notify();
+      });
+    }));
   }
 
   fn edit_file(&mut self, path: PathBuf, edit: FileEdit, window: &mut Window, cx: &mut Context<Self>) {

@@ -319,6 +319,10 @@ pub struct Workspace {
   expanded: HashSet<PathBuf>,
   rows: Vec<explorer::Row>,
   selected_entry: Option<PathBuf>,
+  /// Entries picked together with Shift or Command; empty while a single entry is selected.
+  explorer_selection: HashSet<PathBuf>,
+  /// Where a Shift range starts.
+  selection_anchor: Option<PathBuf>,
   /// The changed file whose diff is open, relative to the repository.
   selected_change: Option<PathBuf>,
   /// The activity and file selections of the projects that are not open.
@@ -497,6 +501,8 @@ impl Workspace {
       expanded: HashSet::new(),
       rows: Vec::new(),
       selected_entry: None,
+      explorer_selection: HashSet::new(),
+      selection_anchor: None,
       selected_change: None,
       sidebar_tab: SidebarTab::default(),
       hovered_file: None,
