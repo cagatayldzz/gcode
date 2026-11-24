@@ -250,7 +250,7 @@ impl Workspace {
     cx.notify();
   }
 
-  /// `⇧⌘M` in the AI view or in the terminals: opens the list of the other projects for the shown session or the focused pane.
+  /// `⇧⌘M` in the AI view or in the terminals: opens the project list for the shown session or the focused pane.
   pub fn mention_projects(&mut self, _: &MentionProjects, window: &mut Window, cx: &mut Context<Self>) {
     let target = if self.agent_open {
       self.agents().and_then(AgentTabs::current).map(|tab| tab.session.clone())
@@ -264,18 +264,16 @@ impl Workspace {
     }
   }
 
-  /// Opens the list of the other projects: the ones ticked are written into the prompt of the agent as paths.
+  /// Opens the project list: the ones ticked are written into the prompt of the agent as paths.
   pub(super) fn pick_projects_to_mention(&mut self, terminal: Entity<Terminal>, window: &mut Window, cx: &mut Context<Self>) {
-    let open = self.projects.active.clone();
     let choices: Vec<MentionChoice> = self
       .projects
       .projects
       .iter()
-      .filter(|project| Some(&project.path) != open.as_ref())
       .map(|project| MentionChoice { path: project.path.clone(), name: project.name().into(), folder: display_path(&project.path).into() })
       .collect();
     if choices.is_empty() {
-      window.push_notification(Notification::info("Add another project to mention it in an agent."), cx);
+      window.push_notification(Notification::info("Add a project to mention it in an agent."), cx);
       return;
     }
     let picker = cx.new(|cx| MentionPicker::new(choices, window, cx));
