@@ -21,6 +21,9 @@ ws-index.workspace = true
 ws-terminal.workspace = true
 ws-git.workspace = true
 ws-commitgen.workspace = true
+ws-language.workspace = true
+anyhow = "1.0.104"
+lsp-types = { version = "0.97.0", features = ["proposed"] }
 ws-hosting.workspace = true
 ws-updater.workspace = true
 gpui-kit.workspace = true

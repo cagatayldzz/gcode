@@ -9,7 +9,7 @@ use crate::{
   components::{avatar_look, display_path, selected_style, strip, strip_tab},
   connect_account::{AccountConnected, ConnectAccount},
   connections::{credentials_for_repository, describe, AccountsList},
-  editor::{ActiveTab, EditorPanel, FileLocation, FileLocationCommand},
+  editor::{ActiveTab, EditorPanel, FileLocation, FileLocationCommand, OpenLocation},
   explorer,
   mention_picker::{MentionChoice, MentionPicker, ProjectsChosen},
   merge_dialog::{MergeDialog, MergeEvent},
@@ -88,6 +88,7 @@ mod quick_open;
 mod render_git;
 mod render_menus;
 mod render_panels;
+mod render_problems;
 mod search;
 mod terminals;
 
@@ -414,6 +415,8 @@ pub struct Workspace {
   /// The profiles the Profiles menu lists now.
   menu_profiles: Vec<Profile>,
   /// The terminals fill the main area (the right part of the window) in place of the editor.
+  /// The Problems panel is open under the editor.
+  problems_open: bool,
   terminal_open: bool,
   /// The AI view (Codex, Claude) fills the main area, like the terminals do; the two never show together.
   agent_open: bool,
@@ -458,6 +461,8 @@ pub struct Workspace {
   _editor: Subscription,
   /// Selects in the sidebar what the editor area shows.
   _active_tab: Subscription,
+  /// Opens the file a ⌘-click on a name led to.
+  _open_location: Subscription,
   _refresh_task: Task<()>,
   /// Counts the fades of the terminal's activity dot; a new count restarts its animation.
   terminal_pulse: usize,
@@ -577,6 +582,7 @@ impl Workspace {
       window_active: true,
       menu_host: None,
       menu_profiles: Vec::new(),
+      problems_open: false,
       terminal_open: false,
       agent_open: false,
       dragged_tab: None,
@@ -694,6 +700,12 @@ impl Workspace {
           this.focus_handle.focus(window, cx);
         }
         cx.notify();
+      }),
+      _open_location: cx.subscribe_in(&editor_panel, window, |this, _, target: &OpenLocation, window, cx| {
+        let path = target.path.clone();
+        this.editor_panel.update(cx, |editor, _| editor.allow_large(&path));
+        this.open_file(path.clone(), window, cx);
+        this.editor_panel.update(cx, |editor, cx| editor.reveal_range(&path, target.start, target.end, window, cx));
       }),
       _activation: cx.observe_window_activation(window, |this, window, cx| {
         this.window_active = window.is_window_active();
@@ -966,6 +978,7 @@ impl Render for Workspace {
                     .overflow_hidden()
                     .when(self.sidebar_tab == SidebarTab::Git, |column| column.children(self.render_git_toolbar(cx)))
                     .child(div().flex_1().min_h_0().min_w_0().w_full().overflow_hidden().child(main_area))
+                    .when(self.problems_open && self.sidebar_tab != SidebarTab::Git, |column| column.children(self.render_problems_panel(cx)))
                     // The Git view has the branch in its own bar: no status bar there.
                     .when(self.sidebar_tab != SidebarTab::Git, |column| column.child(self.render_status_bar(cx))),
                 ),

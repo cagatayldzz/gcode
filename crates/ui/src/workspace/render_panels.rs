@@ -2,15 +2,48 @@
 
 use super::*;
 
+/// What the project's uncommitted changes mean for the Explorer: the changed files with their kind, and every folder that holds
+/// one. Worked out once per frame, not per row.
+#[derive(Default)]
+pub(super) struct ExplorerMarks {
+  files: HashMap<PathBuf, ws_git::ChangeKind>,
+  folders: HashSet<PathBuf>,
+}
+
 impl Workspace {
+  fn explorer_marks(&self) -> ExplorerMarks {
+    let mut marks = ExplorerMarks::default();
+    let (Some(root), Some(git)) = (self.projects.active.as_ref(), self.git.as_ref()) else { return marks };
+    for change in &git.changes {
+      let path = root.join(&change.path);
+      for folder in path.ancestors().skip(1).take_while(|folder| folder.starts_with(root) && *folder != root.as_path()) {
+        if !marks.folders.insert(folder.to_path_buf()) {
+          break;
+        }
+      }
+      marks.files.insert(path, change.kind);
+    }
+    marks
+  }
+
   /// One line of the folder tree.
-  pub(super) fn explorer_row(&self, row: &explorer::Row, font_size: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
+  pub(super) fn explorer_row(&self, row: &explorer::Row, marks: &ExplorerMarks, font_size: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
     let path = row.path.clone();
     let selected =
       if self.explorer_selection.is_empty() { self.selected_entry.as_ref() == Some(&row.path) } else { self.explorer_selection.contains(&row.path) };
     let dim = if row.ignored && !selected { 0.55 } else { 1. };
+    // A changed file takes the color of its kind, and a folder that holds changed files the color of a modified one.
+    let change_color = |kind: ws_git::ChangeKind| match kind {
+      ws_git::ChangeKind::New => palette.new,
+      ws_git::ChangeKind::Modified => palette.modified,
+      ws_git::ChangeKind::Deleted => palette.deleted,
+      ws_git::ChangeKind::Renamed => palette.renamed,
+      ws_git::ChangeKind::Conflicted => palette.conflicted,
+    };
+    let changed = marks.files.get(&row.path).copied();
+    let mark_color = if row.is_dir { marks.folders.contains(&row.path).then_some(palette.modified) } else { changed.map(change_color) };
     let icon_color = if selected { palette.explorer_selected_text } else { theme.muted_foreground };
     let open = self.expanded.contains(&row.path);
     let menu = self.explorer_menu(Some(row), cx);
@@ -41,6 +74,7 @@ impl Workspace {
           .opacity(dim)
           .text_size(font_size)
           .line_height(relative(1.25))
+          .when_some(mark_color, |label, color| label.text_color(color))
           .when(selected, |label| label.text_color(palette.explorer_selected_text))
           .flex_1()
           .min_w_0()
@@ -48,6 +82,10 @@ impl Workspace {
           .whitespace_nowrap()
           .text_ellipsis(),
       )
+      .when_some(mark_color.filter(|_| row.is_dir), |entry, color| entry.child(div().size_1p5().flex_none().rounded_full().bg(color)))
+      .when_some(changed.zip(mark_color).filter(|_| !row.is_dir), |entry, (kind, color)| {
+        entry.child(Label::new(kind.mark()).flex_none().text_size(FONT_SIZE_SM).text_color(color))
+      })
       .children((0..row.depth).map(|depth| {
         let opacity = if highlighted_guide == Some(depth) { 0.5 } else { 0.15 };
         div().absolute().top_0().bottom_0().left(INDENT * depth as f32 + rems(1.)).w_px().bg(palette.control_border.opacity(opacity))
@@ -108,13 +146,14 @@ impl Workspace {
 
   pub(super) fn render_explorer(&self, cx: &mut Context<Self>) -> impl IntoElement {
     // Only the lines in view are built, laid out and drawn: a project can have thousands of entries.
+    let marks = self.explorer_marks();
     let list = uniform_list(
       "explorer-rows",
       self.rows.len(),
-      cx.processor(|this, range: Range<usize>, _, cx| {
+      cx.processor(move |this, range: Range<usize>, _, cx| {
         let rows: Vec<explorer::Row> = this.rows.get(range).map(<[explorer::Row]>::to_vec).unwrap_or_default();
         let font_size = px(this.settings.read(cx).preferences.explorer_font_size as f32);
-        rows.iter().map(|row| div().w_full().child(this.explorer_row(row, font_size, cx)).into_any_element()).collect::<Vec<_>>()
+        rows.iter().map(|row| div().w_full().child(this.explorer_row(row, &marks, font_size, cx)).into_any_element()).collect::<Vec<_>>()
       }),
     )
     .track_scroll(&self.explorer_scroll)

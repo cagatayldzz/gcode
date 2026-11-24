@@ -68,6 +68,36 @@ Two systems cover all languages:
 `minimap.rs` and `minimap/` show a long file's shape beside the editor (80+ lines). It samples the buffer **in the background** and reuses
 the editor's scroll position, so dragging it never blocks typing.
 
+## Problems
+
+`EditorPanel` tells a language server about JavaScript and TypeScript files (`ws-language`). `find_server` looks above the file for the
+project's own TypeScript (`node_modules/@typescript/typescript-<platform>/lib/tsc --lsp --stdio`, then `node_modules/.bin/typescript-language-server`),
+then for a `typescript-language-server` on the path; a file with no server just shows no problems. One server runs per project folder
+(`languages`), as a child process with a reader thread, and the editor never waits for it:
+
+- a file is sent when its editor is built, and again 300 ms after typing pauses (`SYNC_DELAY`);
+- the server answers a `textDocument/diagnostic` request (or pushes `publishDiagnostics`) and the result arrives through a channel;
+- errors and warnings become the editor's own diagnostics (underlines and hover text) and fill the counts in the status bar and the
+  Problems panel, which the counts open. A row in the panel opens the file at the problem.
+
+## Go to definition
+
+⌘-click on a name underlines it and opens its definition, in the same file or another (imports, and the declaration files of libraries in
+`node_modules`). Each JavaScript and TypeScript editor gets a `DefinitionProvider` (`editor/definitions.rs`) that sends
+`textDocument/definition` to the project's language server. The same file is handled by the editor itself; another file is sent as an
+`OpenLocation` event, which the workspace opens (`allow_large` lifts the 2 MB limit to 16 MB for declaration files) and selects the name in.
+
+## Path above the text
+
+Under the tabs a line shows the open file's path from the project's folder, one step per folder, with the file's icon at the end
+(`EditorPanel::render_breadcrumb`).
+
+## Explorer marks
+
+The Explorer colors what the uncommitted changes touch: a changed file takes the color of its kind (new, modified, deleted, renamed,
+conflicted) and shows its one-letter mark; a folder that holds a changed file is colored and has a dot at its right. They are worked out
+once per frame from the repository summary (`ExplorerMarks`).
+
 ## Image previews
 
 SVG and ICNS previews are decoded **off the interface thread**. For an SVG in Changes, Preview renders the last-commit and working-tree

@@ -32,8 +32,19 @@ use std::{
 };
 use ws_index::highlight::{Highlights, Language};
 
+mod definitions;
+mod problems;
+
+pub(crate) use definitions::OpenLocation;
+
+use problems::ProjectLanguage;
+use ws_language::{Problem, Server};
+
 /// Files larger than this are not opened: the editor reads the whole text.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
+/// The limit for a file a definition leads to: declaration files of large libraries are several megabytes.
+const MAX_DEFINITION_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// How many files keep their editor ready (the open one, files opened before, files prepared by hovering).
 /// Files with unsaved changes are never dropped.
@@ -286,6 +297,18 @@ pub(crate) struct EditorPanel {
   replacement_files: std::collections::HashSet<PathBuf>,
   /// The run of "Add Next Occurrence" in progress: the file, the selection it started from and where the last occurrence ended.
   occurrences: Option<(PathBuf, Range<usize>, usize)>,
+  /// The language server of each project (by its root) that has one, or `None` when it would not start.
+  languages: HashMap<PathBuf, Option<ProjectLanguage>>,
+  /// The server each open file belongs to, or `None` when no server handles the file.
+  servers: HashMap<PathBuf, Option<Server>>,
+  /// The errors and warnings of each file, as the server last reported them.
+  problems: HashMap<PathBuf, Vec<Problem>>,
+  /// Waits for typing to pause before a file's text goes to its language server.
+  sync_tasks: HashMap<PathBuf, Task<()>>,
+  /// Files a definition led to, which may be larger than `MAX_FILE_BYTES`.
+  large_ok: HashSet<PathBuf>,
+  /// The open project's folder: the breadcrumb path starts below it.
+  root: Option<PathBuf>,
 }
 
 impl EditorPanel {
@@ -379,12 +402,19 @@ impl EditorPanel {
       report_active: false,
       replacement_files: Default::default(),
       occurrences: None,
+      languages: HashMap::new(),
+      servers: HashMap::new(),
+      problems: HashMap::new(),
+      sync_tasks: HashMap::new(),
+      large_ok: HashSet::new(),
+      root: None,
     }
   }
 
   /// Switches to another project's editor area: the tabs of the project being left are put away and come back with
   /// it; a project not seen before starts with none.
   pub fn switch_project(&mut self, from: Option<PathBuf>, to: Option<PathBuf>, cx: &mut Context<Self>) {
+    self.root = to.clone();
     self.search_report = None;
     self.report_active = false;
     let current = std::mem::take(&mut self.tabs);
@@ -430,6 +460,48 @@ impl EditorPanel {
     };
     cx.emit(shown);
     cx.notify();
+  }
+
+  /// Tells the panel which project is open, so the path above the text starts below the project's folder.
+  pub fn set_root(&mut self, root: Option<PathBuf>) {
+    self.root = root;
+  }
+
+  /// The path of the open file, a folder per step, under the tabs.
+  fn render_breadcrumb(&self, path: &Path, cx: &App) -> impl IntoElement {
+    let theme = cx.theme();
+    let relative = self.root.as_deref().and_then(|root| path.strip_prefix(root).ok()).unwrap_or(path);
+    let names: Vec<String> = relative.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect();
+    let last = names.len().saturating_sub(1);
+    let mut row = gpui_kit::component::h_flex()
+      .id("breadcrumb")
+      .flex_none()
+      .h_7()
+      .px_3()
+      .gap_1()
+      .items_center()
+      .overflow_hidden()
+      .whitespace_nowrap()
+      .text_size(crate::theme::FONT_SIZE_SM)
+      .text_color(theme.muted_foreground);
+    for (index, name) in names.into_iter().enumerate() {
+      if index > 0 {
+        row = row.child(Icon::new(IconName::ChevronRight).size_3());
+      }
+      row = if index == last {
+        row.child(
+          gpui_kit::component::h_flex()
+            .gap_1()
+            .items_center()
+            .text_color(theme.foreground)
+            .child(Icon::new(IconName::File).size_4().text_color(theme.muted_foreground))
+            .child(name),
+        )
+      } else {
+        row.child(name)
+      };
+    }
+    row
   }
 
   /// Shows another tab.
@@ -642,7 +714,8 @@ impl EditorPanel {
       return Ok(());
     }
     let metadata = fs::metadata(path).map_err(|error| format!("Could not open {}: {error}", path.display()))?;
-    if metadata.len() > MAX_FILE_BYTES {
+    let limit = if self.large_ok.contains(path) { MAX_DEFINITION_FILE_BYTES } else { MAX_FILE_BYTES };
+    if metadata.len() > limit {
       return Err(format!("{} is too large to open here.", display_name(path)));
     }
     let text = fs::read_to_string(path).map_err(|_| format!("{} is not a text file.", display_name(path)))?;
@@ -670,11 +743,12 @@ impl EditorPanel {
       state
     });
     let owner = path.to_path_buf();
-    let changes = cx.subscribe(&state, move |this, _, event: &InputEvent, cx| {
+    let changes = cx.subscribe_in(&state, window, move |this, _, event: &InputEvent, window, cx| {
       if matches!(event, InputEvent::Change) {
         if let Some(file) = this.files.get_mut(&owner) {
           file.dirty = true;
           this.tabs.keep_open(&owner);
+          this.schedule_problem_sync(&owner, window, cx);
           cx.notify();
         }
       }
@@ -698,6 +772,10 @@ impl EditorPanel {
     );
     self.touch(path);
     self.evict();
+    self.sync_problems(path, window, cx);
+    if let Some(state) = self.files.get(path).map(|file| file.state.clone()) {
+      self.enable_definitions(path, &state, cx);
+    }
   }
 
   pub fn lock_replacement_files(&mut self, paths: impl IntoIterator<Item = PathBuf>, cx: &mut Context<Self>) {
@@ -748,6 +826,7 @@ impl EditorPanel {
         index += 1;
       } else {
         self.files.remove(&path);
+        self.release_problems(&path);
         self.recent.remove(index);
       }
     }
@@ -757,6 +836,7 @@ impl EditorPanel {
   /// its tab.
   pub fn forget(&mut self, path: &Path, cx: &mut Context<Self>) {
     self.files.remove(path);
+    self.release_problems(path);
     self.images.remove(path);
     self.svg_source.remove(path);
     for tabs in self.saved.values_mut() {
@@ -1218,6 +1298,7 @@ impl Render for EditorPanel {
     };
     let active_editor = self.active_file().and_then(|path| self.files.get(path)).map(|file| &file.state);
     let hidden = self.preview.clone().filter(|state| Some(state) != active_editor).or_else(|| self.warmup.clone());
+    let breadcrumb = self.tabs.current().filter(|_| !self.report_active).map(|path| self.render_breadcrumb(path, cx));
     let tabs = (!self.tabs.items.is_empty() || self.search_report.is_some()).then(|| self.render_tabs(cx));
     v_flex()
       .track_focus(&self.focus_handle)
@@ -1225,6 +1306,7 @@ impl Render for EditorPanel {
       .relative()
       .size_full()
       .children(tabs)
+      .children(breadcrumb)
       .child(div().relative().flex_1().min_h_0().child(content))
       .when_some(hidden, |this, state| {
         this.child(

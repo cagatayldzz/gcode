@@ -30,9 +30,9 @@ jobs:
           shared-key: core
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Lint
-        run: cargo clippy --locked -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index --all-targets -- -D warnings
+        run: cargo clippy --locked -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-language -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index --all-targets -- -D warnings
       - name: Test
-        run: cargo test --locked -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index
+        run: cargo test --locked -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-language -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index
 
   interface:
     runs-on: macos-26

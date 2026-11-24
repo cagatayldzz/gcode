@@ -22,6 +22,7 @@ repository/
 │   ├── hosting/           hosting-service accounts and APIs
 │   ├── activity/         switchable activity log (debug button)
 │   ├── commitgen/        commit message generation
+│   ├── language/          language server client: errors and warnings of open files
 │   ├── updater/           self-update
 │   ├── version/           version comparison
 │   ├── capture/           screenshot CLI for the running app (window or screen)
@@ -107,6 +108,7 @@ repository/
 | **`ws-index`** | `ProjectIndex` (every file the ignore rules let through), `fuzzy::{score, rank}`, `highlight::{Language, Role, Highlights}` |
 | **`ws-hosting`** | `Account`, `Accounts`, `TokenStore` (`KeychainStore`, `MemoryStore`), `verify`, `repositories`, `pull_requests`, `create_pull_request`, `RepoRef`, `web_repository` |
 | **`ws-commitgen`** | `Config` (`commit.json`), `generate`, `split_diff`, `parse_message`, `system_prompt` |
+| **`ws-language`** | `find_server` (the project's own TypeScript server, else `typescript-language-server`), `Session` (`start`, `sync`, `close`), `Update`, `Problem`, `Severity` |
 | **`ws-activity`** | `start`, `stop`, `timed`, `record`, `error`: `activity.log` lines marked `INFO`, `SLOW` (over 500 ms) or `ERROR`: Git commands, requests, refresh and history reads, the commit message steps, and every error notification |
 | **`ws-updater`** | `check`, `prepare`, `install`, `SWAP_SCRIPT`, `Release` |
 | **`ws-version`** | `is_newer` |

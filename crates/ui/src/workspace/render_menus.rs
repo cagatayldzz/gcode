@@ -1,30 +1,49 @@
 //! Status bar, branch picker and repository switcher.
 
 use super::*;
-use gpui_kit::component::text::TextView;
 
 impl Workspace {
-  /// Shows repository status, the selectable project path, and the open file status.
+  /// Shows the branch, the sync button and the problem counts on the left, and the open file status on the right.
   pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let file = self.editor_panel.read(cx).status(cx);
     let mut bar = StatusBar::new().bg(palette.surface_alt).border_color(palette.border).text_color(palette.text_secondary);
     if let Some(git) = &self.git {
+      // A `*` marks uncommitted changes and a `+` commits waiting to be pushed.
+      let (changed, push) = git.status();
+      let label = format!("{}{}{}", git.branch, if changed > 0 { "*" } else { "" }, if push { "+" } else { "" });
       bar = bar
+        .left(Button::new("status-branch").ghost().xsmall().icon(Icon::empty().path("icons/git-branch.svg")).label(label).tooltip("Current branch"))
         .left(
-          Button::new("status-branch")
+          Button::new("status-sync")
             .ghost()
             .xsmall()
-            .icon(Icon::empty().path("icons/git-branch.svg"))
-            .label(git.branch.clone())
-            .tooltip("Current branch"),
-        )
-        .left(if git.changed() == 0 { "No changes".to_string() } else { format!("{} changed", git.changed()) });
+            .icon(Icon::empty().path("icons/refresh-cw.svg"))
+            .tooltip("Sync with the remote")
+            .on_click(cx.listener(|this, _, window, cx| this.sync_remote(window, cx))),
+        );
     }
-    if let Some(path) = &self.projects.active {
-      let path_text = display_path(path).replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-      bar = bar.child(
-        TextView::html(SharedString::from(format!("status-project-{}", path.display())), format!("<p>{path_text}</p>")).selectable(true).max_lines(1),
+    if let Some(root) = self.projects.active.as_ref().filter(|_| self.editor_panel.read(cx).has_language_server()) {
+      let (errors, warnings) = self.editor_panel.read(cx).problem_counts(root);
+      bar = bar.left(
+        Button::new("status-problems")
+          .ghost()
+          .xsmall()
+          .selected(self.problems_open)
+          .child(
+            h_flex()
+              .gap_1()
+              .items_center()
+              .child(Icon::empty().path("icons/circle-x.svg").size_4())
+              .child(errors.to_string())
+              .child(Icon::empty().path("icons/triangle-alert.svg").size_4())
+              .child(warnings.to_string()),
+          )
+          .tooltip("Problems")
+          .on_click(cx.listener(|this, _, _, cx| {
+            this.problems_open = !this.problems_open;
+            cx.notify();
+          })),
       );
     }
     for item in file {

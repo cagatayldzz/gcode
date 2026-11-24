@@ -14,7 +14,7 @@ agents; this page explains the *why*.
 ## Layout rules
 
 ```text
- apps/desktop ─► app ─► ui ─► terminal, git, storage, index, hosting, commitgen, updater
+ apps/desktop ─► app ─► ui ─► terminal, git, storage, index, hosting, commitgen, language, updater
 ```
 
 - Keep `apps/desktop` a thin entry point; put application logic in `crates/*`.

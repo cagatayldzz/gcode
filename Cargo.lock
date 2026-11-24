@@ -9100,6 +9100,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ws-language"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "ws-product"
 version = "0.1.0"
 
@@ -9125,12 +9134,14 @@ dependencies = [
 name = "ws-ui"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "futures",
  "git2",
  "globset",
  "gpui-kit",
  "gpui-kit-assets",
  "ignore",
+ "lsp-types",
  "objc2-foundation 0.3.2",
  "regex",
  "rustix",
@@ -9145,6 +9156,7 @@ dependencies = [
  "ws-git",
  "ws-hosting",
  "ws-index",
+ "ws-language",
  "ws-product",
  "ws-storage",
  "ws-terminal",

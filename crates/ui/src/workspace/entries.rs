@@ -120,6 +120,8 @@ impl Workspace {
 
   /// Opens a file; `preview` shows it in the preview tab, which the next preview replaces.
   pub(super) fn open_file_as(&mut self, path: PathBuf, preview: bool, window: &mut Window, cx: &mut Context<Self>) {
+    let root = self.projects.active.clone();
+    self.editor_panel.update(cx, |editor, _| editor.set_root(root));
     let result =
       self.editor_panel.update(
         cx,

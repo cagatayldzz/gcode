@@ -14,13 +14,15 @@ pub fn login_shell_path() -> Option<&'static str> {
 
 fn read_login_shell_path() -> Option<String> {
   let shell = std::env::var("SHELL").ok().filter(|shell| !shell.is_empty()).unwrap_or_else(|| "/bin/zsh".to_string());
-  let output = Command::new(shell)
-    .args(["-ilc", &format!("printf '%s' \"{START}$PATH{END}\"")])
-    .stdin(std::process::Stdio::null())
-    .stderr(std::process::Stdio::null())
-    .output()
-    .ok()?;
+  let output =
+    Command::new(shell).args(["-ilc", &path_script()]).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok()?;
   extract_path(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// The shell script that prints the `PATH` between the markers. The braces matter: without them the shell reads `$PATH` followed
+/// by the end marker as one longer variable name, which is empty.
+pub fn path_script() -> String {
+  format!("printf '%s' \"{START}${{PATH}}{END}\"")
 }
 
 /// The `PATH` between the markers; a shell may print a banner or other noise around it.

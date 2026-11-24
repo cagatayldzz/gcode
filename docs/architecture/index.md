@@ -19,6 +19,7 @@ gCode is a Cargo workspace of small libraries and one thin executable. The rule 
      ├──► index      project file index, fuzzy ranking, line-based highlighting
      ├──► hosting    GitHub / GitLab / Azure DevOps accounts, repositories, PRs
      ├──► commitgen   commit message generation, commit.json
+     ├──► language    language server client: problems of JavaScript and TypeScript files
      ├──► activity    the debug activity log (Git commands, requests)
      ├──► updater ──► version    release lookup, verified self-update
      └──► product    the product's name (generated from product.toml); the lower crates use it too
@@ -26,7 +27,7 @@ gCode is a Cargo workspace of small libraries and one thin executable. The rule 
  crates/visual-check   a standalone development tool; the app does not depend on it
 ```
 
-`terminal`, `git`, `storage`, `index`, `hosting`, `commitgen`, `activity`, `updater` and `version` **never depend on the interface**. They contain
+`terminal`, `git`, `storage`, `index`, `hosting`, `commitgen`, `language`, `activity`, `updater` and `version` **never depend on the interface**. They contain
 no GPUI types, so they are tested without a window and (for the plain-Rust ones) on Linux in CI.
 
 ## Design principles

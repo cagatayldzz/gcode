@@ -43,6 +43,7 @@ serde_json = "1.0.154"
 git2 = { version = "0.21.0", default-features = false }
 ws-git = { path = "crates/git" }
 ws-commitgen = { path = "crates/commitgen" }
+ws-language = { path = "crates/language" }
 ws-hosting = { path = "crates/hosting" }
 ws-version = { path = "crates/version" }
 ws-updater = { path = "crates/updater" }
