@@ -50,6 +50,9 @@ impl ShownDiff {
   pub fn new(files: Vec<DiffFile>, patch: &str, cx: &mut App) -> Self {
     let changed = changed_ranges(patch, &files);
     let state = cx.new(|cx| DiffState::new(files, cx).with_mode(DiffMode::Unified));
+    // The Kit colors the syntax on a background thread and starts only when the diff is first painted, so the first frames are
+    // plain. Returning to its own highlighter (a no-op change) starts the work now, while the view is being laid out.
+    state.update(cx, |state, cx| state.clear_syntax_highlighter(cx));
     Self { state, changed }
   }
 
