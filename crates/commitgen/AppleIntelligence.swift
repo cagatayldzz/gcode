@@ -23,7 +23,7 @@ struct AppleIntelligence {
     case .unavailable(.modelNotReady):
       fail("The Apple Intelligence model is preparing. Try again when it is ready in System Settings.")
     case .unavailable(.deviceNotEligible):
-      fail("Apple Intelligence is unavailable on this Mac. Choose another provider in OpenCommit settings.")
+      fail("Apple Intelligence is unavailable on this Mac. Choose another provider in the commit message settings.")
     case .unavailable:
       fail("Apple Intelligence is unavailable. Check System Settings or choose another provider.")
     }
@@ -37,7 +37,7 @@ struct AppleIntelligence {
     } catch LanguageModelSession.GenerationError.exceededContextWindowSize {
       fail("The change exceeds the Apple Intelligence context limit. Select fewer changed files or shorten your commit instructions.")
     } catch LanguageModelSession.GenerationError.unsupportedLanguageOrLocale {
-      fail("Apple Intelligence could not process this language. Try another language in OpenCommit settings.")
+      fail("Apple Intelligence could not process this language. Try another language in the commit message settings.")
     } catch {
       fail("Apple Intelligence could not generate a commit message. Try again or choose another provider.")
     }

@@ -7,7 +7,7 @@ pub struct Message {
   pub description: String,
 }
 
-/// The rules the model follows: the Conventional Commits convention of OpenCommit, shaped by the settings, then the
+/// The rules the model follows: the Conventional Commits convention, shaped by the settings, then the
 /// user's own instructions.
 pub fn system_prompt(config: &Config, instructions: &str) -> String {
   let mut prompt = String::from(

@@ -173,7 +173,7 @@ impl Workspace {
     cx.notify();
     let (push, accounts) = {
       let model = self.settings.read(cx);
-      (model.opencommit.git_push, model.accounts.clone())
+      (model.commitgen.git_push, model.accounts.clone())
     };
     let remote_url = self.git.as_ref().and_then(|git| git.sync.as_ref()).map(|sync| sync.url.clone()).unwrap_or_default();
     let work = cx.background_executor().spawn({

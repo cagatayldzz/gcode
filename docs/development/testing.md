@@ -20,7 +20,7 @@
 | `git` | **Real repositories** in temporary directories, including a bare `origin` with two clones | pulls (fast-forward, diverged, conflicting), publish, stash Leave/Bring, revert, cherry-pick, amend |
 | `storage` | Temporary data directories | atomic writes, `.bak`/`.corrupt` recovery, profile files |
 | `index` | Generated trees | fuzzy ranking, `.env`/`.gitignore`/Dockerfile runs, saved index validity |
-| `hosting`, `opencommit`, `updater`, `version` | Pure parsing and fakes (`MemoryStore`) | token scopes, diff splitting, release parsing, checksum matching |
+| `hosting`, `commitgen`, `updater`, `version` | Pure parsing and fakes (`MemoryStore`) | token scopes, diff splitting, release parsing, checksum matching |
 | `ui` | **Headless**: plain-data modules and the Kit's `test-support` | window render, syntax roles, terminal layouts, explorer rows, project search |
 
 ### A Git test, as a pattern

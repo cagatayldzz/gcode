@@ -12,13 +12,13 @@ saved as soon as you make them and apply at once.
 | **Project list** | Every project and category, with actions ([details](./projects.md#the-project-list-page)). |
 | **Profiles** | Create, rename and delete [profiles](./projects.md#profiles). |
 | **Accounts** | [GitHub, GitLab and Azure DevOps](./accounts.md). |
-| **OpenCommit** | How commit messages are generated: provider, model, diff size, language, message style, instructions, push after commit. |
+| **Commit messages** | How commit messages are generated: provider, model, diff size, language, message style, instructions, push after commit. |
 | **Updates** | See below. |
 | **About** | The version and the data folder. |
 
-## OpenCommit
+## Commit messages
 
-The sparkle button in the commit box uses these settings. They live in your `~/.opencommit` file, shared with the `oco` command, and
+The sparkle button in the commit box uses these settings. They live in `commit.json` in the data folder (an earlier `~/.opencommit` file is imported once), and
 the commit instructions are kept in `preferences.json`.
 
 - **Provider and model** — any OpenAI-compatible chat API, or the optional **Apple Intelligence** provider (on-device, macOS 26+, Apple

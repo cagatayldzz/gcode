@@ -13,8 +13,8 @@ use gpui_kit::{
   *,
 };
 use std::collections::HashMap;
+use ws_commitgen::Config;
 use ws_hosting::Accounts;
-use ws_opencommit::{config_path, Config};
 use ws_storage::{Preferences, Profile};
 
 /// The settings of one profile, shared by every window that shows it. Changing `preferences` and notifying makes each of those
@@ -23,8 +23,8 @@ pub(crate) struct SettingsModel {
   /// The profile whose files these settings are read from and saved to.
   pub profile: Profile,
   pub preferences: Preferences,
-  /// The OpenCommit settings (`~/.opencommit`) that commit message generation uses.
-  pub opencommit: Config,
+  /// The commit message settings (`commit.json`) that commit message generation uses.
+  pub commitgen: Config,
   /// The connected hosting accounts (`accounts.json`); their tokens are in the Keychain.
   pub accounts: Accounts,
   /// The app's own updates.
@@ -58,7 +58,7 @@ pub(crate) struct AccountRemoveRequested(pub String);
 
 impl EventEmitter<AccountRemoveRequested> for SettingsModel {}
 
-/// Sent when the user asks to open the OpenCommit settings dialog.
+/// Sent when the user asks to open the commit message settings dialog.
 pub(crate) struct CommitSettingsRequested;
 
 impl EventEmitter<CommitSettingsRequested> for SettingsModel {}
@@ -134,7 +134,7 @@ pub(crate) fn settings_for(profile: &Profile, cx: &mut App) -> Entity<SettingsMo
   let model = cx.new(|_| SettingsModel {
     profile: profile.clone(),
     preferences: Preferences::load(&profile.preferences_path()),
-    opencommit: Config::load(&config_path()),
+    commitgen: Config::load_or_import(),
     accounts: Accounts::load_in(&profile.accounts_path(), profile.keychain_namespace()),
     updates: UpdateState::new(),
     rechecking: Vec::new(),

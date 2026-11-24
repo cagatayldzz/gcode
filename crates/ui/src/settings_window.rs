@@ -37,7 +37,7 @@ pub(crate) enum Page {
   ProjectList,
   Profiles,
   Accounts,
-  OpenCommit,
+  CommitMessages,
   Updates,
   About,
 }
@@ -46,7 +46,7 @@ pub(crate) enum Page {
 const SECTIONS: [(&str, &[Page]); 4] = [
   ("Application", &[Page::General, Page::Editor, Page::ActivityBar]),
   ("Workspace", &[Page::Projects, Page::ProjectList, Page::Profiles]),
-  ("Connections", &[Page::Accounts, Page::OpenCommit]),
+  ("Connections", &[Page::Accounts, Page::CommitMessages]),
   ("Product", &[Page::Updates, Page::About]),
 ];
 
@@ -65,7 +65,7 @@ impl Page {
       Self::ProjectList => "Project list",
       Self::Profiles => "Profiles",
       Self::Accounts => "Accounts",
-      Self::OpenCommit => "OpenCommit",
+      Self::CommitMessages => "Commit messages",
       Self::Updates => "Updates",
       Self::About => "About",
     }
@@ -80,7 +80,7 @@ impl Page {
       Self::ProjectList => "icons/folders.svg",
       Self::Profiles => "icons/users.svg",
       Self::Accounts => "icons/key-round.svg",
-      Self::OpenCommit => "icons/sparkles.svg",
+      Self::CommitMessages => "icons/sparkles.svg",
       Self::Updates => "icons/download.svg",
       Self::About => "icons/info.svg",
     }
@@ -100,7 +100,7 @@ impl Page {
         "A connected account lets {} list your repositories to clone, list and open pull requests, and gives Git the token for that host over HTTPS. Tokens are kept in the macOS Keychain.",
         ws_product::NAME
       ),
-      Self::OpenCommit => "Commit messages written for you.".into(),
+      Self::CommitMessages => "Commit messages written for you.".into(),
       Self::Updates => format!("New versions of {}.", ws_product::NAME),
       Self::About => format!("The version of {} and where it keeps its files.", ws_product::NAME),
     }
@@ -116,7 +116,7 @@ impl Page {
       Self::ProjectList => "rename color icon category group reorder remove menu title bar",
       Self::Profiles => "profile window accounts separate",
       Self::Accounts => "github gitlab azure devops token keychain connect pull request permission",
-      Self::OpenCommit => "commit message generate ai model language style",
+      Self::CommitMessages => "commit message generate ai model language style",
       Self::Updates => "update version release download restart launch check",
       Self::About => "version repository data folder location",
     }
@@ -440,15 +440,15 @@ impl SettingsWindow {
     )
   }
 
-  fn open_commit(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  fn commit_messages(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let store = self.store.clone();
     card(
       &palette,
       vec![row(
         "Generate commit messages",
-        "The sparkle button beside a commit's description writes the summary and description with OpenCommit. Choose the model, language and message style here.",
-        Button::new("open-commit-settings").label("Configure…").small().outline().on_click(move |_, _, cx| store.emit(CommitSettingsRequested, cx)),
+        "The sparkle button beside a commit's description writes the summary and description with AI. Choose the model, language and message style here.",
+        Button::new("commit-message-settings").label("Configure…").small().outline().on_click(move |_, _, cx| store.emit(CommitSettingsRequested, cx)),
         &palette,
       )],
     )
@@ -533,7 +533,7 @@ impl Render for SettingsWindow {
       Page::ProjectList => self.projects.clone().into_any_element(),
       Page::Profiles => self.profiles.clone().into_any_element(),
       Page::Accounts => self.accounts.clone().into_any_element(),
-      Page::OpenCommit => self.open_commit(cx).into_any_element(),
+      Page::CommitMessages => self.commit_messages(cx).into_any_element(),
       Page::Updates => self.updates_page(cx).into_any_element(),
       Page::About => self.about(cx).into_any_element(),
     };

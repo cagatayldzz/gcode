@@ -12,7 +12,7 @@ The Git view has two tabs, **Changes** and **History**. This page covers **Chang
  │ ☐ notes.md                      A    │  ← unticked: not in the next commit
  ├────────────────────────────────┤
  │ Summary (required)                   │
- │ Description                      ✦ ⚙ │  ← ✦ writes both with OpenCommit
+ │ Description                      ✦ ⚙ │  ← ✦ writes both with AI
  │ [ Commit 20 files to main ]          │
  └────────────────────────────────┘
 ```
@@ -88,10 +88,10 @@ nothing is ticked, during a merge in progress, and while another Git operation r
 | **Amend Last Commit** | Replaces the last commit with one that also contains the ticked files and the message in the box. **Leave the summary empty to keep the old message.** A commit a remote branch already has is refused: that would rewrite published history. |
 | **Add Co-author ▸** | Lists people from recent history (not you). Choosing one adds a `Co-authored-by: Name <email>` line to the description, once. |
 
-### Writing the message with OpenCommit
+### Writing the message with AI
 
 The sparkle button beside the description writes the summary and description from the diff of the **ticked** files, as a
-Conventional Commits message. Nothing is committed by generating. Configure the provider, model and style in **Settings → OpenCommit**
+Conventional Commits message. Nothing is committed by generating. Configure the provider, model and style in **Settings → Commit messages**
 (see [Commit messages](../architecture/commit-messages.md)). With **Push after commit** on, the commit button pushes right after committing.
 
 ## Keeping it fresh

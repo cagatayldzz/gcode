@@ -20,7 +20,7 @@ repository/
 │   ├── storage/           files gCode owns
 │   ├── index/             project file index, fuzzy matching, line highlighters
 │   ├── hosting/           hosting-service accounts and APIs
-│   ├── opencommit/        commit message generation
+│   ├── commitgen/        commit message generation
 │   ├── updater/           self-update
 │   ├── version/           version comparison
 │   ├── capture/           screenshot CLI for the running app (window or screen)
@@ -77,7 +77,7 @@ repository/
 | `settings.rs` | `SettingsModel`, shared by windows of a profile, and the helpers its pages use |
 | `settings_window.rs` | the Settings dialog: pages grouped in a searchable list, each page cards of rows (name, description, control) |
 | `profiles.rs` | the profile list, `open_window`, profile menus |
-| `commit_settings.rs` | the OpenCommit dialog |
+| `commit_settings.rs` | the commit message dialog |
 | `connections.rs`, `connect_account.rs`, `repository_picker.rs`, `pull_request.rs` | accounts list, the Connect dialog, the repository list of Clone, the Create pull request dialog |
 | `updates.rs` | `UpdateState`, `AppUpdate` and the Updates page |
 | `menus.rs` | the menu bar and Dock menu |
@@ -105,7 +105,7 @@ repository/
 | **`ws-storage`** | `data_dir`, `write_atomic`/`write_json`/`read_json`, `Preferences`, `ProjectList`, `ProfileList`, `WindowPlacement` |
 | **`ws-index`** | `ProjectIndex` (every file the ignore rules let through), `fuzzy::{score, rank}`, `highlight::{Language, Role, Highlights}` |
 | **`ws-hosting`** | `Account`, `Accounts`, `TokenStore` (`KeychainStore`, `MemoryStore`), `verify`, `repositories`, `pull_requests`, `create_pull_request`, `RepoRef`, `web_repository` |
-| **`ws-opencommit`** | `Config` (`~/.opencommit`), `generate`, `split_diff`, `parse_message`, `system_prompt` |
+| **`ws-commitgen`** | `Config` (`commit.json`), `generate`, `split_diff`, `parse_message`, `system_prompt` |
 | **`ws-updater`** | `check`, `prepare`, `install`, `SWAP_SCRIPT`, `Release` |
 | **`ws-version`** | `is_newer` |
 | **`ws-capture`** | `cargo run -p ws-capture -- window\|screen [--out FILE] [--delay SECONDS]`: saves a PNG (default `<data dir>/captures/`) with macOS `screencapture`; needs Accessibility and Screen Recording access for the terminal |

@@ -11,7 +11,7 @@ The sparkle button beside the commit description writes a message from the diff 
    ├─ diff ≤ token limit?  ── yes ─► one request
    │                       └─ no  ─► split per file  → summarize each → merge in a last request
    ▼
- ws_opencommit::generate(&config, &instructions, &diff)  →  Message { summary, description }
+ ws_commitgen::generate(&config, &instructions, &diff)  →  Message { summary, description }
    ▼
  fills the Summary and Description fields (only if the project is still the same one)
 ```
@@ -20,17 +20,17 @@ The sparkle button beside the commit description writes a message from the diff 
 
 | File | Role |
 | --- | --- |
-| `config.rs` | `Config`, the `~/.opencommit` file; `DEFAULT_MODEL`, `MODELS`, `TOKEN_LIMITS`, `LANGUAGES` |
+| `config.rs` | `Config`, the `commit.json` file; `DEFAULT_MODEL`, `MODELS`, `TOKEN_LIMITS`, `LANGUAGES` |
 | `prompt.rs` | `system_prompt`, `estimate_tokens`, `split_diff`, `parse_message` |
 | `client.rs` | `generate`: the chat API request |
 | `apple.rs` | the on-device Apple Intelligence helper client |
 
 ## Configuration
 
-- Settings live in the user's **`~/.opencommit`**, shared with the `oco` command. Unknown lines are kept and the file is mode `0600`. The
-  `GCODE_OPENCOMMIT_CONFIG` variable names another file (for scratch runs).
+- Settings live in **`commit.json`** in the data directory (mode `0600`; it holds the API key). The first start without that file imports
+  the values of an earlier `~/.opencommit` file once and never reads it again. `GCODE_DATA_DIR` moves the file for scratch runs.
 - The **commit instructions** are in `preferences.json` (`commit_instructions`: `None` is the built-in text, `Some("")` none at all).
-- gCode's `APP_COMMIT_PROVIDER` key selects the optional **Apple Intelligence** provider and leaves the `oco` provider settings available to the CLI.
+- The `provider` key selects OpenAI-compatible (default) or **Apple Intelligence**.
 - **Push after commit**: the commit button runs `git push` right after committing.
 
 ## Apple Intelligence

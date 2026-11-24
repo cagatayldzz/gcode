@@ -5,6 +5,7 @@ Everything gCode owns lives in one data directory:
 ```text
 ~/Library/Application Support/gCode/          (override with GCODE_DATA_DIR)
 ├── profiles.json            list of profiles, the one used last
+├── commit.json              commit message generation settings (mode 0600, holds the API key)
 ├── window.json              window placement, shared by all profiles
 ├── index/<hash>.idx         per-project file index (binary; a cache)
 ├── projects.json            ┐
@@ -39,6 +40,7 @@ profiles do not.
 | File | Type | Written |
 | --- | --- | --- |
 | `profiles.json` | `ProfileList` (id and name of each profile, the one used last) | when a profile is added, renamed or deleted, and when a window of another profile comes to the front |
+| `commit.json` | `ws_commitgen::Config` (provider, API key, model, language, style, push after commit) | when the commit message settings are saved |
 | `window.json` | `WindowPlacement` (position, size, maximized or full screen) | half a second after the window stops moving or resizing, and at once when the window closes or the app quits |
 | `index/<hash>.idx` | `ProjectIndex` of one project | in the background when a project is opened and its saved index is no longer right |
 
@@ -110,18 +112,16 @@ When the product's name changes, the first start moves what the old name saved, 
 | --- | --- |
 | The data folder | `ws_storage::migrate_legacy_data_dir` renames `Application Support/<old>` to `Application Support/<new>` once: only when the new folder does not exist yet and the old one does, and never when `<prefix>_DATA_DIR` names the folder. Called by `ws_ui::init` before anything reads. |
 | Keychain tokens | `KeychainStore::get` looks under the new service name first, then the old one; a token found there is saved under the new name and removed from the old one. |
-| The OpenCommit provider key | The config file's provider key is read under both names; the current key wins once it is saved. |
 
-Delete `legacy_name` and the three fallbacks once nobody has the old version any more. A new name also changes the bundle identifier, so an installed old build cannot update itself into the new one: it is installed again by hand, once.
+Delete `legacy_name` and the two fallbacks once nobody has the old version any more. A new name also changes the bundle identifier, so an installed old build cannot update itself into the new one: it is installed again by hand, once.
 
 ## Environment variables and config keys
 
 | Variable | Effect |
 | --- | --- |
 | `GCODE_DATA_DIR` | Use another data directory — handy for scratch runs and for screenshots |
-| `GCODE_OPENCOMMIT_CONFIG` | Use another OpenCommit config file |
 | `WS_GIT_USERNAME` / `WS_GIT_PASSWORD` | Internal: how a token reaches the credential helper |
 | `DOCS_BASE` | Base path of the built documentation site |
 | `GCODE_BENCH_SAMPLES` | Sample count of the benchmark suite |
 
-The prefix of the `GCODE_*` variables is `env_prefix` in `product.toml`. One more setting lives in `~/.opencommit` rather than the environment: the key `APP_COMMIT_PROVIDER` selects the Apple Intelligence provider (the OpenCommit command ignores it).
+The prefix of the `GCODE_*` variables is `env_prefix` in `product.toml`.

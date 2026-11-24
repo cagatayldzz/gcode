@@ -18,14 +18,14 @@ gCode is a Cargo workspace of small libraries and one thin executable. The rule 
      ├──► storage    data directory, projects, preferences, profiles, window
      ├──► index      project file index, fuzzy ranking, line-based highlighting
      ├──► hosting    GitHub / GitLab / Azure DevOps accounts, repositories, PRs
-     ├──► opencommit commit message generation, ~/.opencommit
+     ├──► commitgen   commit message generation, commit.json
      ├──► updater ──► version    release lookup, verified self-update
      └──► product    the product's name (generated from product.toml); the lower crates use it too
 
  crates/visual-check   a standalone development tool; the app does not depend on it
 ```
 
-`terminal`, `git`, `storage`, `index`, `hosting`, `opencommit`, `updater` and `version` **never depend on the interface**. They contain
+`terminal`, `git`, `storage`, `index`, `hosting`, `commitgen`, `updater` and `version` **never depend on the interface**. They contain
 no GPUI types, so they are tested without a window and (for the plain-Rust ones) on Linux in CI.
 
 ## Design principles

@@ -4,7 +4,7 @@ use std::{
   sync::mpsc,
   thread,
 };
-use ws_opencommit::{generate, Config};
+use ws_commitgen::{generate, Config};
 
 /// Answers each connection with the next `(status, body)` and reports the request text it received.
 fn serve(answers: Vec<(u16, String)>) -> (String, mpsc::Receiver<String>) {

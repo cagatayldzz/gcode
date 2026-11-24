@@ -140,30 +140,30 @@ impl Workspace {
     }
   }
 
-  /// Opens the dialog for the commit message generator: the OpenCommit settings and the commit instructions.
+  /// Opens the dialog for the commit message generator: the commit message settings and the commit instructions.
   pub(crate) fn open_commit_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let (config, instructions) = {
       let model = self.settings.read(cx);
-      (model.opencommit.clone(), model.preferences.commit_instructions.clone())
+      (model.commitgen.clone(), model.preferences.commit_instructions.clone())
     };
     let form = cx.new(|cx| CommitSettings::new(config, instructions, window, cx));
     self._dialog_subscription = Some(cx.subscribe_in(&form, window, |this, _, saved: &CommitSettingsSaved, window, cx| {
-      if let Err(error) = saved.config.save(&ws_opencommit::config_path()) {
-        window.push_notification(Notification::error(format!("Could not save the OpenCommit settings: {error}")), cx);
+      if let Err(error) = saved.config.save(&ws_commitgen::config_path()) {
+        window.push_notification(Notification::error(format!("Could not save the commit message settings: {error}")), cx);
         return;
       }
       let (config, instructions) = (saved.config.clone(), saved.instructions.clone());
       this.settings.update(cx, |model, cx| {
-        model.opencommit = config;
+        model.commitgen = config;
         model.preferences.commit_instructions = instructions;
         cx.notify();
       });
       window.close_dialog(cx);
     }));
-    window.open_dialog(cx, move |dialog, _, _| dialog.title("OpenCommit settings").width(px(600.)).p_5().child(form.clone()));
+    window.open_dialog(cx, move |dialog, _, _| dialog.title("commit message settings").width(px(600.)).p_5().child(form.clone()));
   }
 
-  /// Writes the summary and description of the commit from the ticked files' changes, with OpenCommit.
+  /// Writes the summary and description of the commit from the ticked files' changes, with AI.
   pub(super) fn generate_commit_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
     if self.generating {
@@ -176,7 +176,7 @@ impl Workspace {
     }
     let (config, instructions) = {
       let model = self.settings.read(cx);
-      (model.opencommit.clone(), model.preferences.commit_instructions.clone().unwrap_or_else(|| DEFAULT_INSTRUCTIONS.to_string()))
+      (model.commitgen.clone(), model.preferences.commit_instructions.clone().unwrap_or_else(|| DEFAULT_INSTRUCTIONS.to_string()))
     };
     if config.needs_api_key() {
       window.push_notification(Notification::error("Add your API key to generate commit messages."), cx);
@@ -187,7 +187,7 @@ impl Workspace {
     cx.notify();
     let work = cx.background_executor().spawn({
       let root = root.clone();
-      async move { ws_opencommit::generate(&config, &instructions, &ws_git::diff_files(&root, &files)?) }
+      async move { ws_commitgen::generate(&config, &instructions, &ws_git::diff_files(&root, &files)?) }
     });
     cx.spawn_in(window, async move |this, cx| {
       let result = work.await;

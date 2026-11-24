@@ -105,7 +105,7 @@ bundle() {
   cp "$project_dir/target/$configuration/ws-desktop" "$app_dir/Contents/MacOS/$product_name"
   if [[ "$(uname -m)" == arm64 ]]; then
     xcrun --sdk macosx swiftc -parse-as-library -O -target arm64-apple-macosx15.0 \
-      "$project_dir/crates/opencommit/AppleIntelligence.swift" -o "$app_dir/Contents/MacOS/$product_slug-apple-intelligence"
+      "$project_dir/crates/commitgen/AppleIntelligence.swift" -o "$app_dir/Contents/MacOS/$product_slug-apple-intelligence"
   fi
   sed -e "s#@NAME@#$product_name#g" -e "s#@BUNDLE_ID@#$product_bundle_id#g" "$resources/Info.plist" >"$app_dir/Contents/Info.plist"
   if [[ "$configuration" == debug ]]; then

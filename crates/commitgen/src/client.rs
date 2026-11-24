@@ -32,7 +32,7 @@ fn complete(config: &Config, system: &str, user: &str) -> Result<String, String>
   if status != 200 {
     let detail = value["error"]["message"].as_str().unwrap_or("");
     return Err(match status {
-      401 => "The API key was rejected. Check it in the OpenCommit settings.".into(),
+      401 => "The API key was rejected. Check it in the commit message settings.".into(),
       429 => format!("The service is rate limiting requests or the quota is used up. {detail}").trim().into(),
       _ => format!("The service answered with HTTP {status}. {detail}").trim().into(),
     });
@@ -51,7 +51,7 @@ pub fn generate(config: &Config, instructions: &str, diff: &str) -> Result<Messa
     return Err("There are no changes to describe.".into());
   }
   if config.needs_api_key() {
-    return Err("Add your API key in the OpenCommit settings first.".into());
+    return Err("Add your API key in the commit message settings first.".into());
   }
   let system = system_prompt(config, instructions);
   let answer = match config.provider {

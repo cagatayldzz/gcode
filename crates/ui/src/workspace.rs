@@ -68,9 +68,9 @@ use std::{
   },
   time::{Duration, Instant},
 };
+use ws_commitgen::DEFAULT_INSTRUCTIONS;
 use ws_git::{BranchChoices, BranchRef, CommitInfo, Comparison, Summary};
 use ws_hosting::{Connection, PullRequest, RepoRef, TokenStore as _};
-use ws_opencommit::DEFAULT_INSTRUCTIONS;
 use ws_storage::{Category, Profile, Project, ProjectList, WindowMode, WindowPlacement};
 
 mod accounts;

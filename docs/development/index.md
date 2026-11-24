@@ -35,7 +35,6 @@ bun run dev          # debug build, launches dist/gCode.app
 | `bun run release` | request a release: dispatches the Release workflow for the pushed default branch (needs `gh`) |
 | `bun run icon` | redraw `AppIcon.icns` and `DevIcon.icns` from `apps/desktop/macos/icon.svg` (needs Google Chrome) |
 | `bun run docs:dev` / `docs:build` / `docs:preview` | the documentation site |
-| `bun run commit` | `git add -A && oco --yes` (needs [OpenCommit](https://github.com/di-sukharev/opencommit)) |
 
 ### A routine change
 
@@ -65,7 +64,7 @@ changes. The VitePress dependency is managed separately through Bun.
 | `ws-terminal` | lib | PTY, emulation, key and mouse encoding |
 | `ws-git` | lib | repository summary, diffs, history, branches, merge, sync, creating and cloning projects |
 | `ws-storage` | lib | data directory, projects, preferences, profiles |
-| `ws-opencommit` | lib | commit message generation, `~/.opencommit` settings |
+| `ws-commitgen` | lib | commit message generation, `commit.json` settings |
 | `ws-hosting` | lib | GitHub, GitLab and Azure DevOps accounts, repositories and pull requests |
 | `ws-version` | lib | version comparison for update detection |
 | `ws-updater` | lib | self-update from GitHub releases |

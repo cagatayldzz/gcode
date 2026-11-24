@@ -427,7 +427,7 @@ impl Workspace {
                   .cursor_pointer()
                   .small()
                   .icon(Icon::empty().path("icons/settings-2.svg"))
-                  .tooltip("OpenCommit settings")
+                  .tooltip("commit message settings")
                   .on_click(cx.listener(|this, _, window, cx| this.open_commit_settings(window, cx))),
               )
               .child(
@@ -440,7 +440,7 @@ impl Workspace {
                   .icon(Icon::empty().path("icons/sparkles.svg"))
                   .loading(self.generating)
                   .disabled(chosen == 0 || self.generating)
-                  .tooltip("Generate the summary and description with OpenCommit")
+                  .tooltip("Generate the summary and description with AI")
                   .on_click(cx.listener(|this, _, window, cx| this.generate_commit_message(window, cx))),
               ),
           ),

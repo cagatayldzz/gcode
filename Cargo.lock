@@ -9051,6 +9051,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ws-commitgen"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "ureq",
+ "ws-product",
+ "ws-storage",
+]
+
+[[package]]
 name = "ws-desktop"
 version = "0.1.0"
 dependencies = [
@@ -9080,15 +9090,6 @@ version = "0.1.0"
 dependencies = [
  "ignore",
  "tempfile",
-]
-
-[[package]]
-name = "ws-opencommit"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "ureq",
- "ws-product",
 ]
 
 [[package]]
@@ -9132,10 +9133,10 @@ dependencies = [
  "tree-sitter-kotlin-ng",
  "tree-sitter-swift",
  "unicode-width",
+ "ws-commitgen",
  "ws-git",
  "ws-hosting",
  "ws-index",
- "ws-opencommit",
  "ws-product",
  "ws-storage",
  "ws-terminal",

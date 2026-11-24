@@ -1,4 +1,4 @@
-//! The OpenCommit settings dialog: how commit messages are generated. The draft is applied when Save is pressed.
+//! The commit message settings dialog: how commit messages are generated. The draft is applied when Save is pressed.
 
 use crate::{
   components::display_path,
@@ -18,12 +18,12 @@ use gpui_kit::{
   },
   *,
 };
-use ws_opencommit::{config_path, Config, Provider, DEFAULT_INSTRUCTIONS, DEFAULT_MAX_INPUT_TOKENS, LANGUAGES, MODELS, TOKEN_LIMITS};
+use ws_commitgen::{config_path, Config, Provider, DEFAULT_INSTRUCTIONS, DEFAULT_MAX_INPUT_TOKENS, LANGUAGES, MODELS, TOKEN_LIMITS};
 
 /// The tallest the form gets before it scrolls, so the buttons stay in view.
 const BODY_MAX_HEIGHT: Pixels = px(520.);
 
-/// The settings the user saved: the OpenCommit file's values and the text of the commit instructions (`None` is the built-in one).
+/// The settings the user saved: the saved values and the text of the commit instructions (`None` is the built-in one).
 pub(crate) struct CommitSettingsSaved {
   pub config: Config,
   pub instructions: Option<String>,
@@ -218,13 +218,7 @@ impl Render for CommitSettings {
     let git = Self::section(
       "Git",
       vec![self.toggle("git-push", "Push after commit", self.config.git_push, |config, value| config.git_push = value, cx)],
-      Some(
-        format!(
-          "Saved to {}, shared with the oco command. Other settings in that file are kept. Without a push target, the branch is published to origin.",
-          display_path(&config_path())
-        )
-        .into(),
-      ),
+      Some(format!("Saved to {}. Without a push target, the branch is published to origin.", display_path(&config_path())).into()),
       cx,
     );
     v_flex()

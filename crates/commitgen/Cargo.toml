@@ -1,11 +1,11 @@
 [package]
-name = "ws-opencommit"
+name = "ws-commitgen"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
-description = "Commit message generation, compatible with the OpenCommit configuration"
+description = "Commit message generation from a diff"
 
 [lints]
 workspace = true
@@ -15,5 +15,6 @@ doctest = false
 
 [dependencies]
 ws-product.workspace = true
+ws-storage.workspace = true
 serde_json.workspace = true
 ureq.workspace = true
