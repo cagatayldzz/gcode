@@ -48,7 +48,7 @@ impl Workspace {
   /// Opens the activity log panel at the bottom of the window, or closes it.
   fn toggle_activity_log(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     if self.activity_log.take().is_none() {
-      let log = cx.new(crate::activity_panel::ActivityLog::new);
+      let log = cx.new(|cx| crate::activity_panel::ActivityLog::new(window, cx));
       let subscription = cx.subscribe_in(&log, window, |this, _, _: &crate::activity_panel::ActivityClosed, _, cx| {
         this.activity_log = None;
         cx.notify();

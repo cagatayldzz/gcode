@@ -36,8 +36,9 @@ Long text files show a minimap, which samples the buffer in the background and r
 chrome (the title, zoom button and `…` menu).
 
 **Activity log panel** (`activity_panel.rs`, debug builds). The bug button in the title band opens a 280 px panel under everything else in the
-window (activity bar included, takeover areas too) and closes it again; the panel's own close button does the same. It lists the lines of
-`ws_activity` newest first, with filters, Copy and Clear.
+window (activity bar included, takeover areas too) and closes it again; the panel's own close button does the same, and its top edge can be
+dragged. It lists the lines of `ws_activity` oldest first in the Kit's read-only `Editor` (so text can be selected and scrolled), following
+the newest line while it is at the bottom; new lines wait while text is selected. Filters, Copy (the selection, else everything) and Clear.
 
 ## Takeover areas
 
