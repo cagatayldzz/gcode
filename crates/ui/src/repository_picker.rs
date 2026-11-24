@@ -57,6 +57,13 @@ impl RepositoryPicker {
     this
   }
 
+  /// Forgets the repository last chosen; the loaded list stays.
+  pub fn clear_choice(&mut self, cx: &mut Context<Self>) {
+    if self.current.take().is_some() {
+      cx.notify();
+    }
+  }
+
   fn load(&mut self, cx: &mut Context<Self>) {
     let Some(account) = self.accounts.get(self.selected).cloned() else { return };
     self.listing = Listing::Loading;

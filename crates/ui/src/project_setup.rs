@@ -94,9 +94,12 @@ impl ProjectSetup {
     }
     self.mode = mode;
     self.error = None;
-    self.picker = None;
-    if mode == Mode::Clone && !self.accounts.items.is_empty() {
+    // The list is fetched once and kept while the dialog is open, so going back to Clone does not ask the host again.
+    if mode == Mode::Clone && self.picker.is_none() && !self.accounts.items.is_empty() {
       self.open_picker(window, cx);
+    }
+    if let Some((picker, _)) = &self.picker {
+      picker.update(cx, |picker, cx| picker.clear_choice(cx));
     }
     let placeholder = if mode == Mode::Clone { "https://github.com/user/repository.git" } else { "Project name" };
     self.input.update(cx, |input, cx| {

@@ -124,11 +124,12 @@ impl Workspace {
       let list_height = (menu_height - px(64.)).min(BRANCH_LIST_MAX_HEIGHT);
       let body = match tab {
         BranchTab::Branches => {
-          // Sections, as in GitHub Desktop: the starred branches, the default one, the five most recently changed, then the rest.
+          // Sections: the default branch, the starred branches, the five most recently changed, then the rest.
           let visible: Vec<ws_git::BranchEntry> =
             branches.into_iter().filter(|entry| lowered.is_empty() || entry.name.to_lowercase().contains(&lowered)).collect();
-          let (favorites, rest): (Vec<_>, Vec<_>) = visible.into_iter().partition(|entry| starred.contains(&entry.name));
-          let (defaults, rest): (Vec<_>, Vec<_>) = rest.into_iter().partition(|entry| entry.default);
+          // The default branch is always the first section, even when it is starred.
+          let (defaults, rest): (Vec<_>, Vec<_>) = visible.into_iter().partition(|entry| entry.default);
+          let (favorites, rest): (Vec<_>, Vec<_>) = rest.into_iter().partition(|entry| starred.contains(&entry.name));
           let mut newest: Vec<&ws_git::BranchEntry> = rest.iter().collect();
           newest.sort_by_key(|entry| std::cmp::Reverse(entry.time));
           let recent_names: Vec<String> = newest.into_iter().take(RECENT_BRANCHES).map(|entry| entry.name.clone()).collect();
@@ -205,7 +206,7 @@ impl Workspace {
               .into_any_element()
           };
           let mut rows: Vec<AnyElement> = Vec::new();
-          let sections = [("Favorites", favorites), ("Default Branch", defaults), ("Recent Branches", recent), ("Other Branches", others)];
+          let sections = [("Default Branch", defaults), ("Favorites", favorites), ("Recent Branches", recent), ("Other Branches", others)];
           for (label, entries) in sections {
             if entries.is_empty() {
               continue;
