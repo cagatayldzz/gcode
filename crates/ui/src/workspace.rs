@@ -413,6 +413,8 @@ pub struct Workspace {
   history_epoch: u64,
   /// What `ws_git::history_stamp` said at the last refresh: the History list is read again when it changes.
   history_stamp: Option<String>,
+  /// The project, page size and stamp the commits in `history` were read at: switching to History again reads nothing while they match.
+  history_loaded: Option<(PathBuf, usize, String)>,
   /// Whether the commits are being read, so that the History list shows a loader.
   history_loading: bool,
   /// How many commits the History view asks for now, and its scroll position (to load more near the end).
@@ -590,6 +592,7 @@ impl Workspace {
       pr_epoch: 0,
       history_epoch: 0,
       history_stamp: None,
+      history_loaded: None,
       history_loading: false,
       history_limit: HISTORY_PAGE,
       history_scroll: ScrollHandle::new(),

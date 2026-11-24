@@ -128,10 +128,20 @@ impl Workspace {
       return;
     }
     self.git_view = view;
-    if view == GitView::History {
+    // Going back and forth between Changes and History reads the commits only when they changed since the list was read.
+    if view == GitView::History && !self.history_is_current() {
       self.load_history(cx);
     }
     cx.notify();
+  }
+
+  /// Whether the list shown is what the repository has now: it was read for this project and page size, and HEAD and its upstream have
+  /// not moved since (`history_stamp` is renewed by every refresh).
+  fn history_is_current(&self) -> bool {
+    match (&self.history_loaded, &self.projects.active, &self.history_stamp) {
+      (Some((root, limit, stamp)), Some(active), Some(now)) => root == active && *limit == self.history_limit && stamp == now,
+      _ => false,
+    }
   }
 
   /// Reads the commits of the open project off the interface thread; the first one is shown when none is chosen.
@@ -164,8 +174,8 @@ impl Workspace {
           "ui",
           if show_loader { 0 } else { REFRESH_NOTABLE_MS },
           || format!("read history {} (limit {limit})", root.display()),
-          || ws_git::history(&root, limit),
-          |result| match result {
+          || (ws_git::history_stamp(&root), ws_git::history(&root, limit)),
+          |(_, result)| match result {
             Ok(commits) => format!("ok, {} commits", commits.len()),
             Err(error) => format!("failed: {error}"),
           },
@@ -173,11 +183,14 @@ impl Workspace {
       }
     });
     cx.spawn(async move |this, cx| {
-      let found = work.await.unwrap_or_default();
+      let (stamp, found) = work.await;
+      let read = found.is_ok();
+      let found = found.unwrap_or_default();
       let _ = this.update(cx, |this, cx| {
         if this.history_epoch != epoch || this.projects.active.as_ref() != Some(&root) {
           return;
         }
+        this.history_loaded = if read { stamp.map(|stamp| (root.clone(), limit, stamp)) } else { None };
         if this.history_loading {
           this.history_loading = false;
           cx.notify();
