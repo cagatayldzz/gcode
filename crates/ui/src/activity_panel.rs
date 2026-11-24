@@ -9,8 +9,9 @@ use gpui_kit::{
     empty::{Empty, EmptyDescription, EmptyHeader, EmptyTitle},
     h_flex,
     label::Label,
+    notification::Notification,
     scroll::ScrollableElement as _,
-    v_flex, ActiveTheme as _, Icon, IconName, Sizable as _,
+    v_flex, ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _,
   },
   *,
 };
@@ -101,9 +102,11 @@ impl ActivityLog {
   }
 
   /// The lines the filter lets through, as text, oldest first.
-  fn copy(&self, cx: &mut Context<Self>) {
+  fn copy(&self, window: &mut Window, cx: &mut Context<Self>) {
     let text: Vec<String> = self.entries.iter().filter(|entry| self.filter.matches(entry)).map(Entry::text).collect();
+    let count = text.len();
     cx.write_to_clipboard(ClipboardItem::new_string(text.join("\n")));
+    window.push_notification(Notification::info(format!("Copied {count} log {}.", if count == 1 { "line" } else { "lines" })), cx);
   }
 }
 
@@ -215,7 +218,7 @@ impl Render for ActivityLog {
           .child(
             h_flex()
               .gap_1()
-              .child(Button::new("activity-copy").small().label("Copy").on_click(cx.listener(|this, _, _, cx| this.copy(cx))))
+              .child(Button::new("activity-copy").small().label("Copy").on_click(cx.listener(|this, _, window, cx| this.copy(window, cx))))
               .child(Button::new("activity-clear").small().label("Clear").on_click(cx.listener(|this, _, _, cx| this.clear(cx))))
               .child(
                 Button::new("activity-close")
