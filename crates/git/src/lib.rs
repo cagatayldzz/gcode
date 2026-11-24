@@ -614,10 +614,22 @@ fn failure_reason(stderr: &str, failure: &str) -> String {
         format!("{rejected}: {}", said.join(" "))
       }
     }
-    None => match last_line(stderr) {
-      line if line.is_empty() => failure.to_string(),
-      line => line,
-    },
+    None => {
+      // git's closing "failed to push some refs" says nothing; what comes before it (the remote's words, `fatal:` and `error:` lines) does.
+      let mut details: Vec<&str> = lines
+        .iter()
+        .filter(|line| !line.starts_with("error: failed to push some refs") && !line.starts_with("hint:") && !is_progress(line))
+        .filter(|line| line.starts_with("remote:") || line.starts_with("fatal:") || line.starts_with("error:"))
+        .map(|line| line.strip_prefix("remote:").map_or(*line, str::trim))
+        .filter(|line| !line.is_empty())
+        .collect();
+      details.dedup();
+      match last_line(stderr) {
+        line if line.is_empty() => failure.to_string(),
+        line if details.is_empty() => line,
+        _ => details.join(" "),
+      }
+    }
   };
   let lowered = stderr.to_lowercase();
   if lowered.contains("workflow") && (lowered.contains("scope") || lowered.contains("permission")) {
