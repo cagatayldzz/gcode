@@ -11,9 +11,10 @@ use gpui_kit::{
     clipboard::Clipboard,
     h_flex,
     input::{Input, InputState, Textarea, TextareaState},
+    scroll::{Scrollbar, ScrollbarHandle, ScrollbarMode},
     skeleton::Skeleton,
     text::{TextView, TextViewStyle},
-    v_flex, ActiveTheme as _,
+    v_flex, ActiveTheme as _, Icon,
   },
   *,
 };
@@ -144,11 +145,11 @@ pub(crate) fn skeleton_lines(count: usize) -> AnyElement {
     .into_any_element()
 }
 
-/// The text size of a path in the Changes list: one step below the app's text size.
-pub(crate) const CHANGE_PATH_FONT_SIZE: Pixels = px(13.);
+/// The text size of a path in the Changes list.
+pub(crate) const CHANGE_PATH_FONT_SIZE: Pixels = px(14.);
 
 /// An estimate of the width of one character of a path in [`CHANGE_PATH_FONT_SIZE`].
-const PATH_CHAR_WIDTH: f32 = 0.54 * 13.;
+const PATH_CHAR_WIDTH: f32 = 0.54 * 14.;
 
 /// `path` cut to fit `room` pixels: the file name is always kept whole and the end of the folder gives way to `…`
 /// (`app/(page)/finan…/page.client.tsx`), the way a path is shortened in a long file list. A zero `room` (before the first layout)
@@ -215,4 +216,46 @@ pub(crate) fn file_path_bar(id: &str, path: &str, from: Option<&str>, cx: &App) 
         .text_size(crate::theme::FONT_SIZE_SM)
         .text_color(cx.theme().foreground),
     )
+}
+
+/// The thickness of the thumb of a slim scrollbar, and how far it stands from the edge.
+const SLIM_THUMB_WIDTH: Pixels = px(6.);
+const SLIM_THUMB_INSET: Pixels = px(2.);
+
+/// A vertical scrollbar in the style of the system's overlay ones: a thin, round, translucent thumb with no track, which shows while
+/// the list scrolls and fades after. Put it over the list in a `relative` parent, in a `div().absolute().inset_0()`.
+pub(crate) fn slim_scrollbar<H: ScrollbarHandle + Clone>(handle: &H, id: impl Into<ElementId>, cx: &App) -> Scrollbar {
+  let thumb = colors(cx).text_secondary;
+  Scrollbar::vertical(handle).id(id).mode(ScrollbarMode::Scrolling).viewport_from_layout().styles(move |styles| {
+    styles
+      .thumb(|style| style.bg(thumb.opacity(0.45)).width(SLIM_THUMB_WIDTH).inset(SLIM_THUMB_INSET).radius(SLIM_THUMB_WIDTH))
+      .thumb_hover(|style| style.bg(thumb.opacity(0.65)).width(SLIM_THUMB_WIDTH).inset(SLIM_THUMB_INSET).radius(SLIM_THUMB_WIDTH))
+      .thumb_active(|style| style.bg(thumb.opacity(0.8)).width(SLIM_THUMB_WIDTH).inset(SLIM_THUMB_INSET).radius(SLIM_THUMB_WIDTH))
+  })
+}
+
+/// The color of a changed file's mark: green for new, red for deleted, amber for modified and so on.
+pub(crate) fn change_kind_icon(kind: ws_git::ChangeKind) -> &'static str {
+  match kind {
+    ws_git::ChangeKind::New => "icons/square-plus.svg",
+    ws_git::ChangeKind::Modified => "icons/square-dot.svg",
+    ws_git::ChangeKind::Deleted => "icons/square-minus.svg",
+    ws_git::ChangeKind::Renamed => "icons/square-arrow-right.svg",
+    ws_git::ChangeKind::Conflicted => "icons/triangle-alert.svg",
+  }
+}
+
+pub(crate) fn kind_color(kind: ws_git::ChangeKind, palette: &crate::theme::Colors) -> Hsla {
+  match kind {
+    ws_git::ChangeKind::New => palette.new,
+    ws_git::ChangeKind::Modified => palette.modified,
+    ws_git::ChangeKind::Deleted => palette.deleted,
+    ws_git::ChangeKind::Renamed => palette.renamed,
+    ws_git::ChangeKind::Conflicted => palette.conflicted,
+  }
+}
+
+/// The mark of a kind of change, as in the Changes list: a square with a plus for a new file, a dot for a modified one and so on.
+pub(crate) fn change_kind_mark(kind: ws_git::ChangeKind, cx: &App) -> Icon {
+  Icon::empty().path(change_kind_icon(kind)).size_4().text_color(kind_color(kind, &colors(cx)))
 }

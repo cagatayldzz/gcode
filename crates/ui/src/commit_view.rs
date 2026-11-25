@@ -14,7 +14,6 @@ use gpui_kit::{
     h_flex,
     label::Label,
     resizable::{h_resizable, resizable_panel},
-    scroll::{Scrollbar, ScrollbarAxis, ScrollbarMode},
     spinner::Spinner,
     v_flex, v_virtual_list, ActiveTheme as _, Icon, Sizable as _, VirtualListScrollHandle,
   },
@@ -26,8 +25,8 @@ use ws_git::{ChangeKind, CommitDetail};
 /// The fixed height of a changed file's line: the virtualized list needs every row's height before it draws.
 const FILE_ROW_HEIGHT: Pixels = px(28.);
 
-/// The text size of the list of changed files: one step below the app's text size, like the Changes list.
-const FILE_FONT_SIZE: Pixels = crate::components::CHANGE_PATH_FONT_SIZE;
+/// The text size of the list of changed files: one step below the app's text size.
+const FILE_FONT_SIZE: Pixels = px(13.);
 
 /// The width of the list of changed files when a commit is opened, and how narrow and how wide it can be dragged.
 const FILES_WIDTH: Pixels = px(280.);
@@ -298,12 +297,7 @@ impl Render for CommitView {
               .child(detail.body.clone()),
           ),
         )
-        .child(
-          div()
-            .absolute()
-            .inset_0()
-            .child(Scrollbar::new(&self.message_scroll).id("commit-message-scrollbar").axis(ScrollbarAxis::Vertical).viewport_from_layout()),
-        )
+        .child(div().absolute().inset_0().child(crate::components::slim_scrollbar(&self.message_scroll, "commit-message-scrollbar", cx)))
     });
     let author = |text: String| {
       h_flex()
@@ -398,16 +392,10 @@ impl Render for CommitView {
             })
             .track_scroll(&self.files_scroll),
           )
-          .child(
-            div().absolute().inset_0().child(
-              Scrollbar::new(&self.files_scroll)
-                .id("commit-files-scrollbar")
-                .axis(ScrollbarAxis::Vertical)
-                .mode(ScrollbarMode::Scrolling)
-                .viewport_from_layout(),
-            ),
-          ),
+          .child(div().absolute().inset_0().child(crate::components::slim_scrollbar(&self.files_scroll, "commit-files-scrollbar", cx))),
       );
+    // The kind of change of the chosen file, for the mark at the end of the path.
+    let selected_kind = self.selected.as_ref().and_then(|file| detail.files.iter().find(|change| &change.path == file)).map(|change| change.kind);
     let diff = match &self.diff {
       Load::Loading => spinner(),
       Load::Failed(error) => message(error.clone(), false),
@@ -431,7 +419,8 @@ impl Render for CommitView {
                 .min_w_0()
                 .children(self.selected.as_ref().map(|file| crate::components::file_path_bar("commit", &file.to_string_lossy(), None, cx))),
             )
-            .child(div().flex_none().child(table_controls(table))),
+            .child(div().flex_none().child(table_controls(table)))
+            .children(selected_kind.map(|kind| div().flex_none().child(crate::components::change_kind_mark(kind, cx)))),
         )
         .child(div().flex_1().min_h_0().min_w_0().child(table.clone()))
         .into_any_element(),

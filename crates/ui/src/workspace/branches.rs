@@ -2,6 +2,7 @@
 //! them along), stashed changes waiting on a branch, renaming and deleting.
 
 use super::*;
+use gpui_kit::component::radio::Radio;
 use ws_git::Changes;
 
 /// A button of a dialog that closes it and then does something.
@@ -33,32 +34,86 @@ impl Workspace {
 
   fn ask_switch_changes(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
     let Some(git) = self.git.as_ref() else { return };
-    let (current, count) = (git.branch.clone(), git.changes.len());
+    let current = git.branch.clone();
     let workspace = cx.entity();
-    let muted = cx.theme().muted_foreground;
-    let text = SharedString::from(format!(
-      "You have changes on {current} ({count} changed {}). What would you like to do with them?\n\nLeave my changes on {current}: they are stashed and wait there until you come back.\nBring my changes to {name}: they are applied on {name}.",
-      if count == 1 { "file" } else { "files" },
-    ));
-    window.open_dialog(cx, move |dialog, _, _| {
-      let (leave, bring) = (workspace.clone(), workspace.clone());
-      let (leave_name, bring_name) = (name.clone(), name.clone());
-      dialog.title(format!("Switch to {name}")).width(px(480.)).p_5().child(
-        v_flex().gap_4().child(Label::new(text.clone()).text_color(muted)).child(
+    // What the radio choice is now: it lives outside the dialog, which is built again every time it is drawn.
+    let choice = Rc::new(Cell::new(Changes::Leave));
+    window.open_dialog(cx, move |dialog, _, cx| {
+      let palette = colors(cx);
+      let option = |id: &'static str, value: Changes, title: String, detail: &'static str| {
+        let chosen = choice.get() == value;
+        let (choice, radio_choice) = (choice.clone(), choice.clone());
+        h_flex()
+          .id(id)
+          .gap_3()
+          .px_3()
+          .py_2p5()
+          .items_start()
+          .cursor_pointer()
+          .when(chosen, |row| row.bg(palette.surface))
+          .child(div().pt_0p5().child(Radio::new(SharedString::from(format!("{id}-radio"))).checked(chosen).on_click(move |_, window, _| {
+            radio_choice.set(value);
+            window.refresh();
+          })))
+          .child(
+            v_flex()
+              .gap_0p5()
+              .child(Label::new(title).font_weight(FontWeight::MEDIUM))
+              .child(Label::new(detail).text_color(palette.text_secondary).text_size(FONT_SIZE_SM)),
+          )
+          .on_click(move |_, window, _| {
+            choice.set(value);
+            window.refresh();
+          })
+      };
+      let (switch_workspace, switch_name, switch_choice) = (workspace.clone(), name.clone(), choice.clone());
+      dialog
+        .title("Switch Branch")
+        .width(px(480.))
+        .p_0()
+        .child(
+          v_flex()
+            .gap_4()
+            .px_5()
+            .pt_2()
+            .pb_5()
+            .child(Label::new("You have changes on this branch. What would you like to do with them?").text_color(palette.text_secondary))
+            .child(
+              v_flex()
+                .rounded_md()
+                .border_1()
+                .border_color(palette.border)
+                .overflow_hidden()
+                .child(option(
+                  "switch-leave-option",
+                  Changes::Leave,
+                  format!("Leave my changes on {current}"),
+                  "Your in-progress work will be stashed on this branch for you to return to later",
+                ))
+                .child(div().h_px().bg(palette.border))
+                .child(option(
+                  "switch-bring-option",
+                  Changes::Bring,
+                  format!("Bring my changes to {name}"),
+                  "Your in-progress work will follow you to the new branch",
+                )),
+            ),
+        )
+        .child(
           h_flex()
             .gap_2()
+            .px_5()
+            .py_3()
             .justify_end()
+            .border_t_1()
+            .border_color(palette.border)
             .child(dialog_button("switch-cancel", "Cancel", false, |_, _| {}))
-            .child(dialog_button("switch-bring", "Bring My Changes", false, move |window, cx| {
-              let name = bring_name.clone();
-              bring.update(cx, |this, cx| this.run_switch(name, Some(Changes::Bring), window, cx));
-            }))
-            .child(dialog_button("switch-leave", "Leave My Changes", true, move |window, cx| {
-              let name = leave_name.clone();
-              leave.update(cx, |this, cx| this.run_switch(name, Some(Changes::Leave), window, cx));
+            .child(dialog_button("switch-confirm", "Switch Branch", true, move |window, cx| {
+              let name = switch_name.clone();
+              let changes = switch_choice.get();
+              switch_workspace.update(cx, |this, cx| this.run_switch(name, Some(changes), window, cx));
             })),
-        ),
-      )
+        )
     });
   }
 

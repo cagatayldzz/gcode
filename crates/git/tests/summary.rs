@@ -276,3 +276,39 @@ fn a_staged_rename_is_one_change_at_the_new_path_and_its_diff_shows_only_the_edi
   assert!(!patch.contains("-line 4"), "{patch}");
   fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn a_conflicted_file_shows_its_conflict_markers_in_the_diff() {
+  use std::path::Path;
+  use ws_git::{file_diff, ChangeKind};
+
+  let dir = temp_dir("conflict");
+  let repository = git2::Repository::init_opts(&dir, git2::RepositoryInitOptions::new().initial_head("main")).unwrap();
+  let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+  let commit = |message: &str, parents: &[&git2::Commit]| {
+    let mut index = repository.index().unwrap();
+    index.add_path(Path::new("f.txt")).unwrap();
+    let tree = repository.find_tree(index.write_tree().unwrap()).unwrap();
+    repository.commit(Some("HEAD"), &signature, &signature, message, &tree, parents).unwrap()
+  };
+  fs::write(dir.join("f.txt"), "one\ntwo\nthree\n").unwrap();
+  let base = repository.find_commit(commit("base", &[])).unwrap();
+  repository.branch("other", &base, false).unwrap();
+  fs::write(dir.join("f.txt"), "one\nmain change\nthree\n").unwrap();
+  commit("on main", &[&base]);
+  repository.set_head("refs/heads/other").unwrap();
+  repository.checkout_head(Some(git2::build::CheckoutBuilder::new().force())).unwrap();
+  fs::write(dir.join("f.txt"), "one\nother change\nthree\n").unwrap();
+  let other = repository.find_commit(commit("on other", &[&base])).unwrap();
+  repository.set_head("refs/heads/main").unwrap();
+  repository.checkout_head(Some(git2::build::CheckoutBuilder::new().force())).unwrap();
+  let annotated = repository.find_annotated_commit(other.id()).unwrap();
+  repository.merge(&[&annotated], None, None).unwrap();
+
+  let found = summary(&dir).unwrap();
+  assert_eq!(found.changes.len(), 1);
+  assert_eq!(found.changes[0].kind, ChangeKind::Conflicted);
+  let patch = file_diff(&dir, Path::new("f.txt")).unwrap();
+  assert!(patch.contains("+<<<<<<<") && patch.contains("+>>>>>>>"), "{patch}");
+  fs::remove_dir_all(dir).unwrap();
+}

@@ -568,13 +568,17 @@ impl Workspace {
           div().relative().flex_1().min_h_0().when(self.switching_branch.is_some(), |area| area.child(crate::components::skeleton_list(8))).when(
             git.changed() > 0 && self.switching_branch.is_none(),
             |list| {
-              list.child(changes_list).child(
-                div().absolute().inset_0().child(
-                  Scrollbar::new(&self.changes_scroll)
-                    .id("changes-scrollbar")
-                    .axis(ScrollbarAxis::Vertical)
-                    .mode(ScrollbarMode::Always)
-                    .viewport_from_layout(),
+              // The scrollbar has a column of its own beside the list, so that it never covers the status icons of the rows.
+              list.child(
+                h_flex().size_full().bg(palette.background).child(div().relative().flex_1().min_w_0().h_full().child(changes_list)).child(
+                  // A strip of its own, a shade darker than the list, as the scrollbars of the system have.
+                  div().relative().flex_none().w(Scrollbar::width()).h_full().bg(palette.surface).border_l_1().border_color(palette.border).child(
+                    Scrollbar::new(&self.changes_scroll)
+                      .id("changes-scrollbar")
+                      .axis(ScrollbarAxis::Vertical)
+                      .mode(ScrollbarMode::Always)
+                      .viewport_from_layout(),
+                  ),
                 ),
               )
             },
@@ -758,9 +762,7 @@ impl Workspace {
           .children(rows)
           .children(more),
       )
-      .child(div().absolute().inset_0().child(
-        Scrollbar::new(&self.history_scroll).id("history-scrollbar").axis(ScrollbarAxis::Vertical).mode(ScrollbarMode::Always).viewport_from_layout(),
-      ))
+      .child(div().absolute().inset_0().child(crate::components::slim_scrollbar(&self.history_scroll, "history-scrollbar", cx)))
       .into_any_element()
   }
 

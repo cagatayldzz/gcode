@@ -85,6 +85,8 @@ pub(crate) struct ChangeView {
   file: PathBuf,
   /// Where the file was before, when it was renamed.
   from: Option<PathBuf>,
+  /// What kind of change the file has, for the mark at the end of the path.
+  kind: Option<ws_git::ChangeKind>,
   diff: Load<ChangeDiff>,
   task: Option<Task<()>>,
   show_preview: bool,
@@ -103,6 +105,7 @@ impl ChangeView {
       root: PathBuf::new(),
       file: PathBuf::new(),
       from: None,
+      kind: None,
       diff: Load::Loading,
       task: None,
       show_preview: false,
@@ -116,10 +119,11 @@ impl ChangeView {
   /// Shows the changes of another file of the repository at `root`.
   /// Always starts from a read: the view keeps the last file it showed after the file was committed or deselected, and showing
   /// the same file again must not bring back what it looked like then.
-  pub fn show(&mut self, root: PathBuf, file: PathBuf, from: Option<PathBuf>, cx: &mut Context<Self>) {
+  pub fn show(&mut self, root: PathBuf, file: PathBuf, change: Option<&ws_git::Change>, cx: &mut Context<Self>) {
     self.root = root;
     self.file = file;
-    self.from = from;
+    self.from = change.and_then(|change| change.from.clone());
+    self.kind = change.map(|change| change.kind);
     self.diff = Load::Loading;
     self.show_preview = false;
     self.svg_preview = None;
@@ -247,7 +251,9 @@ impl Render for ChangeView {
       .children(match &self.diff {
         Load::Ready(ChangeDiff::Text(table)) if !self.show_preview => Some(table_controls(table)),
         _ => None,
-      });
+      })
+      // The mark of the change, as in the Changes list.
+      .children(self.kind.map(|kind| div().ml_2().child(crate::components::change_kind_mark(kind, cx))));
     let loading = || {
       h_flex()
         .gap_2()

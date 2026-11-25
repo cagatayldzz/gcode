@@ -29,7 +29,7 @@ use std::{ops::Range, path::Path, sync::Arc};
 const MONO_ADVANCE: f32 = 0.62;
 
 /// What a line-number column has beside its digits.
-const NUMBER_PADDING: Pixels = px(16.);
+const NUMBER_PADDING: Pixels = px(28.);
 
 /// The column with the `+` or `−` sign, and the room around the code, for the width of a line that is not wrapped.
 const SIGN_WIDTH: Pixels = px(20.);
@@ -574,7 +574,7 @@ impl Render for DiffTable {
           .child(if scrolls_sideways { rows.w(self.content_width(size)).min_w_full().h_full() } else { rows.size_full() }),
       )
       .when(scrolls_sideways, |table| table.child(ScrollableMask::new(Axis::Horizontal, &self.scroll_x).id("diff-horizontal-wheel")))
-      .child(div().absolute().inset_0().child(Scrollbar::vertical(&self.list).viewport_from_layout()))
+      .child(div().absolute().inset_0().child(crate::components::slim_scrollbar(&self.list, "diff-scrollbar", cx)))
       .when(scrolls_sideways, |table| table.child(div().absolute().inset_0().child(Scrollbar::horizontal(&self.scroll_x))))
       // A drag over the numbers or the text may end anywhere.
       .on_mouse_up(

@@ -268,26 +268,7 @@ pub(super) fn rail_button(
     .on_click(on_click)
 }
 
-/// The color of a changed file's mark: green for new, red for deleted, amber for modified and so on.
-pub(super) fn change_kind_icon(kind: ws_git::ChangeKind) -> &'static str {
-  match kind {
-    ws_git::ChangeKind::New => "icons/square-plus.svg",
-    ws_git::ChangeKind::Modified => "icons/square-dot.svg",
-    ws_git::ChangeKind::Deleted => "icons/square-minus.svg",
-    ws_git::ChangeKind::Renamed => "icons/square-arrow-right.svg",
-    ws_git::ChangeKind::Conflicted => "icons/file-exclamation-point.svg",
-  }
-}
-
-pub(super) fn kind_color(kind: ws_git::ChangeKind, palette: &crate::theme::Colors) -> Hsla {
-  match kind {
-    ws_git::ChangeKind::New => palette.new,
-    ws_git::ChangeKind::Modified => palette.modified,
-    ws_git::ChangeKind::Deleted => palette.deleted,
-    ws_git::ChangeKind::Renamed => palette.renamed,
-    ws_git::ChangeKind::Conflicted => palette.conflicted,
-  }
-}
+pub(super) use crate::components::{change_kind_icon, kind_color};
 
 /// One entry of a shortcut bar: what a command does, with the keys that run it as the keymap has them now. An unbound command
 /// shows no keys.

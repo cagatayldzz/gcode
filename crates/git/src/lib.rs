@@ -281,7 +281,15 @@ fn working_tree_patch(path: &Path, file: Option<&Path>, from: Option<&Path>) -> 
   if let Some(from) = from {
     options.pathspec(from);
   }
-  let mut diff = repository.diff_tree_to_workdir_with_index(head.as_ref(), Some(&mut options)).map_err(|error| error.message().to_string())?;
+  // With conflicts in the index, the index-aware diff has no content for a conflicted file; against the files on disk it shows the
+  // conflict markers as added lines, which is what the user has to resolve.
+  let conflicted = repository.index().is_ok_and(|index| index.has_conflicts());
+  let mut diff = if conflicted {
+    repository.diff_tree_to_workdir(head.as_ref(), Some(&mut options))
+  } else {
+    repository.diff_tree_to_workdir_with_index(head.as_ref(), Some(&mut options))
+  }
+  .map_err(|error| error.message().to_string())?;
   if from.is_some() {
     diff.find_similar(Some(git2::DiffFindOptions::new().renames(true).for_untracked(true))).map_err(|error| error.message().to_string())?;
   }
