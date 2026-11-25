@@ -596,21 +596,64 @@ impl Workspace {
   /// Asks for a name, creates a branch at the current commit and switches to it. Uncommitted changes come along.
   pub(super) fn new_branch(&mut self, initial: String, window: &mut Window, cx: &mut Context<Self>) {
     self.branch_menu_open = false;
-    self.ask_name(
-      "New branch",
-      "Branch name",
-      "Press Enter to create the branch and switch to it.",
-      &initial,
-      window,
-      cx,
-      move |this, name, window, cx| {
-        let root = this.projects.active.clone().ok_or("Open a project first.")?;
-        ws_git::create_branch(&root, name)?;
-        this.refresh_project();
+    let Some(current) = self.git.as_ref().map(|git| git.branch.clone()) else { return };
+    let default = self.branches.iter().find(|entry| entry.default && entry.remote.is_none()).map(|entry| entry.name.clone());
+    let about_default = match default {
+      Some(default) if default == current => format!(" {default} is the default branch for your repository."),
+      Some(default) => format!(" The default branch of your repository is {default}."),
+      None => String::new(),
+    };
+    let text = SharedString::from(format!("Your new branch will be based on your currently checked out branch ({current}).{about_default}"));
+    let input = cx.new(|cx| InputState::new(window, cx).default_value(initial));
+    self._dialog_subscription = Some(cx.subscribe_in(&input, window, |this, input, event: &InputEvent, window, cx| {
+      if let InputEvent::PressEnter { .. } = event {
+        let name = input.read(cx).value().to_string();
+        this.create_branch_named(&name, window, cx);
+      }
+    }));
+    let workspace = cx.entity();
+    let field = input.clone();
+    let muted = cx.theme().muted_foreground;
+    window.open_dialog(cx, move |dialog, _, cx| {
+      let (create, name) = (workspace.clone(), field.clone());
+      dialog
+        .title("Create a Branch")
+        .width(px(480.))
+        .p_5()
+        .child(
+          v_flex()
+            .gap_2()
+            .child(Label::new("Name").font_weight(FontWeight::SEMIBOLD))
+            .child(crate::components::soft_input(&field, cx))
+            .child(Label::new(text.clone()).text_size(FONT_SIZE_SM).text_color(muted)),
+        )
+        .footer(
+          h_flex()
+            .gap_2()
+            .justify_end()
+            .child(Button::new("new-branch-cancel").outline().label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
+            .child(Button::new("new-branch-create").primary().label("Create Branch").on_click(move |_, window, cx| {
+              let name = name.read(cx).value().to_string();
+              create.update(cx, |this, cx| this.create_branch_named(&name, window, cx));
+            })),
+        )
+    });
+    let focus = input.read(cx).focus_handle(cx);
+    window.defer(cx, move |window, cx| focus.focus(window, cx));
+  }
+
+  /// Creates a branch at the current commit and switches to it; the dialog closes when it worked, and otherwise says why.
+  fn create_branch_named(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+    let result = self.projects.active.clone().ok_or_else(|| "Open a project first.".to_string()).and_then(|root| ws_git::create_branch(&root, name));
+    match result {
+      Ok(()) => {
+        self.refresh_project();
+        window.close_dialog(cx);
         window.push_notification(Notification::info(format!("Created and switched to {}.", name.trim())), cx);
-        Ok(())
-      },
-    );
+        cx.notify();
+      }
+      Err(message) => window.push_notification(crate::failure(message), cx),
+    }
   }
 
   /// Opens or closes the repository menu of the title bar; opening clears the filter and focuses it.

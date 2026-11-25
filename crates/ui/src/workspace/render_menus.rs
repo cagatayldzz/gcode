@@ -57,13 +57,15 @@ impl Workspace {
     let workspace = cx.entity();
     let theme = cx.theme().clone();
     let palette = colors(cx);
-    // While a switch runs the branch icon is a loader, as the icon of the Fetch button is while it fetches.
-    let switching = self.switching_branch.is_some();
+    // While a switch runs the button is what the Fetch button is while it fetches: a loader for the icon, the work as the title and
+    // its step under it, and no clicks.
+    let switching = self.switching_branch.clone();
     let current = SharedString::from(current.to_string());
     let open = self.branch_menu_open;
     Button::new("branch-trigger")
       .custom(ButtonCustomVariant::new(cx).color(palette.surface).foreground(palette.text).hover(palette.hover).active(palette.hover))
       .selected(open)
+      .disabled(switching.is_some())
       .cursor_pointer()
       .border_0()
       .h_full()
@@ -74,7 +76,7 @@ impl Workspace {
           .w_full()
           .gap_2()
           .items_center()
-          .child(if switching {
+          .child(if switching.is_some() {
             Spinner::new().small().into_any_element()
           } else {
             Icon::empty().path("icons/git-branch.svg").size_5().text_color(theme.muted_foreground).into_any_element()
@@ -84,10 +86,21 @@ impl Workspace {
               .flex_1()
               .min_w_0()
               .items_start()
-              .child(Label::new("Current branch").text_size(FONT_SIZE_SM).text_color(theme.muted_foreground))
-              .child(
-                Label::new(current.clone()).font_weight(FontWeight::SEMIBOLD).max_w_full().overflow_hidden().whitespace_nowrap().text_ellipsis(),
-              ),
+              .child(match &switching {
+                Some(target) => Label::new(format!("Switching to {target}"))
+                  .font_weight(FontWeight::SEMIBOLD)
+                  .max_w_full()
+                  .overflow_hidden()
+                  .whitespace_nowrap()
+                  .text_ellipsis(),
+                None => Label::new("Current branch").text_size(FONT_SIZE_SM).text_color(theme.muted_foreground),
+              })
+              .child(match &switching {
+                Some(_) => Label::new("Checking out…").text_size(FONT_SIZE_SM).text_color(theme.muted_foreground),
+                None => {
+                  Label::new(current.clone()).font_weight(FontWeight::SEMIBOLD).max_w_full().overflow_hidden().whitespace_nowrap().text_ellipsis()
+                }
+              }),
           )
           .child(Icon::new(IconName::ChevronDown).size_4().text_color(theme.muted_foreground)),
       )
