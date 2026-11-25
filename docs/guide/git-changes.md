@@ -91,7 +91,7 @@ nothing is ticked, during a merge in progress, and while another Git operation r
 ### Writing the message with AI
 
 The sparkle button beside the description writes the summary and description from the diff of the **ticked** files, as a
-Conventional Commits message. Nothing is committed by generating. Configure the provider, model and style in **Settings → Commit messages**
+Conventional Commits message. Nothing is committed by generating. Configure the provider, model and style with the settings button beside it
 (see [Commit messages](../architecture/commit-messages.md)). With **Push after commit** on, the commit button pushes right after committing.
 
 ## Keeping it fresh

@@ -197,9 +197,50 @@ impl Workspace {
   }
 
   /// Writes the summary and description of the commit from the ticked files' changes, with AI.
+  /// Asks before removing the AI Agent extension from the commit box's menu.
+  pub(super) fn confirm_remove_ai_agent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let panel = self.extensions_panel.clone();
+    window.open_alert_dialog(cx, move |alert, _, _| {
+      let panel = panel.clone();
+      alert
+        .title("Remove AI Agent?")
+        .description("The AI view with Codex and Claude, and the AI commit messages, stop working until you install it again from Extensions.")
+        .width(px(430.))
+        .confirm()
+        .ok_text("Remove")
+        .ok_variant(ButtonVariant::Danger)
+        .on_ok(move |_, window, cx| {
+          panel.update(cx, |panel, cx| panel.uninstall(ws_extensions::AI_AGENT.to_string(), window, cx));
+          true
+        })
+    });
+  }
+
+  /// Asks before disabling the AI Agent extension from the commit box's menu.
+  pub(super) fn confirm_disable_ai_agent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let panel = self.extensions_panel.clone();
+    window.open_alert_dialog(cx, move |alert, _, _| {
+      let panel = panel.clone();
+      alert
+        .title("Disable AI Agent?")
+        .description("The AI view with Codex and Claude, and the AI commit messages, are switched off. You can enable it again in Extensions.")
+        .width(px(430.))
+        .confirm()
+        .ok_text("Disable")
+        .on_ok(move |_, window, cx| {
+          panel.update(cx, |panel, cx| panel.set_enabled(ws_extensions::AI_AGENT, false, window, cx));
+          true
+        })
+    });
+  }
+
   pub(super) fn generate_commit_message(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
     if self.generating {
+      return;
+    }
+    if !crate::extensions::is_enabled(ws_extensions::AI_AGENT, cx) {
+      window.push_notification(crate::failure("Install or enable the AI Agent extension to generate commit messages."), cx);
       return;
     }
     let files: Vec<PathBuf> = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).map(|change| change.path.clone()).collect();

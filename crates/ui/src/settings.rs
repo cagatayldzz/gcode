@@ -58,11 +58,6 @@ pub(crate) struct AccountRemoveRequested(pub String);
 
 impl EventEmitter<AccountRemoveRequested> for SettingsModel {}
 
-/// Sent when the user asks to open the commit message settings dialog.
-pub(crate) struct CommitSettingsRequested;
-
-impl EventEmitter<CommitSettingsRequested> for SettingsModel {}
-
 /// The buttons of the activity bar, by id and name, in their default order.
 pub(crate) const ACTIVITY_ITEMS: [(&str, &str); 6] =
   [("explorer", "Explorer"), ("search", "Search"), ("git", "Git"), ("extensions", "Extensions"), ("terminal", "Terminal"), ("agents", "AI agents")];

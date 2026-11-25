@@ -1,5 +1,5 @@
 use sha2::{Digest, Sha256};
-use ws_extensions::{install_from, installed_in, parse_index, parse_manifest, uninstall_in, Available};
+use ws_extensions::{install_from, installed_in, parse_index, parse_manifest, set_enabled_in, uninstall_in, Available};
 
 const MANIFEST: &str = r#"{"id":"ai-agent","name":"AI Agent","version":"1.0.0","description":"Codex and Claude sessions","publisher":"gcode","contributes":{"agents":["codex","claude"]}}"#;
 
@@ -126,4 +126,26 @@ fn a_draft_is_listed_without_a_package_and_cannot_be_installed() {
   let dir = tempfile::tempdir().unwrap();
   assert!(install_from(dir.path(), &listed[0], MANIFEST).unwrap_err().to_string().contains("not available yet"));
   assert!(installed_in(dir.path()).is_empty());
+}
+
+#[test]
+fn a_disabled_extension_stays_installed_and_is_enabled_again_by_the_switch_or_an_update() {
+  let dir = tempfile::tempdir().unwrap();
+  assert!(set_enabled_in(dir.path(), "ai-agent", false).is_err());
+  install_from(dir.path(), &available(MANIFEST), MANIFEST).unwrap();
+  assert!(installed_in(dir.path())[0].enabled);
+
+  set_enabled_in(dir.path(), "ai-agent", false).unwrap();
+  let found = installed_in(dir.path());
+  assert_eq!(found.len(), 1);
+  assert!(!found[0].enabled);
+
+  set_enabled_in(dir.path(), "ai-agent", true).unwrap();
+  set_enabled_in(dir.path(), "ai-agent", true).unwrap();
+  assert!(installed_in(dir.path())[0].enabled);
+
+  set_enabled_in(dir.path(), "ai-agent", false).unwrap();
+  install_from(dir.path(), &available(MANIFEST), MANIFEST).unwrap();
+  assert!(installed_in(dir.path())[0].enabled);
+  assert!(set_enabled_in(dir.path(), "../x", false).is_err());
 }

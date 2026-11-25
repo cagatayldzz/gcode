@@ -2,9 +2,12 @@
   "id": "ai-agent",
   "name": "AI Agent",
   "version": "1.0.0",
-  "description": "Codex and Claude sessions in their own view, one terminal tab each.",
+  "description": "Codex and Claude sessions in their own view, and AI commit messages in the commit box.",
   "publisher": "gcode",
   "contributes": {
-    "agents": ["codex", "claude"]
+    "agents": [
+      "codex",
+      "claude"
+    ]
   }
 }

@@ -10,7 +10,7 @@ mod store;
 
 pub use index::{fetch_index, index_url, parse_index, repository_slug, Available};
 pub use manifest::{parse_manifest, Manifest};
-pub use store::{install, install_from, installed, installed_in, uninstall, uninstall_in, Installed};
+pub use store::{install, install_from, installed, installed_in, set_enabled, set_enabled_in, uninstall, uninstall_in, Installed};
 
 use std::fmt;
 

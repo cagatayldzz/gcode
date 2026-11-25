@@ -3,12 +3,12 @@
     {
       "id": "ai-agent",
       "name": "AI Agent",
-      "description": "Codex and Claude sessions in their own view, one terminal tab each.",
+      "description": "Codex and Claude sessions in their own view, and AI commit messages in the commit box.",
       "publisher": "gcode",
       "version": "1.0.0",
       "icon": "icons/bot-message-square.svg",
       "package": "ai-agent/manifest.json",
-      "sha256": "62517a9156f4688173525b9cba4db117c6b084b87fff77f69cd79a8f251ba1fa"
+      "sha256": "25ae15edab96d4b7d37f4a6ec9fd12bfba6fd832f04924970b3f6f0e56961d02"
     },
     {
       "id": "spotify",

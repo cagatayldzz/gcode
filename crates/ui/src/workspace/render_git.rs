@@ -572,35 +572,51 @@ impl Workspace {
         div()
           .relative()
           .child(crate::components::soft_textarea(&self.commit_description, cx).h(rems(4.5)).bg(palette.background).border_color(palette.border))
-          .child(
-            h_flex()
-              .absolute()
-              .right_1()
-              .bottom_1()
-              .gap_0p5()
-              .child(
-                Button::new("commit-settings")
-                  .custom(ButtonCustomVariant::new(cx).color(palette.surface).foreground(palette.text).hover(palette.hover).active(palette.hover))
-                  .cursor_pointer()
-                  .small()
-                  .icon(Icon::empty().path("icons/settings-2.svg"))
-                  .tooltip("commit message settings")
-                  .on_click(cx.listener(|this, _, window, cx| this.open_commit_settings(window, cx))),
-              )
-              .child(
-                Button::new("generate-message")
-                  .custom(
-                    ButtonCustomVariant::new(cx).color(palette.surface).foreground(cx.theme().primary).hover(palette.hover).active(palette.hover),
-                  )
-                  .cursor_pointer()
-                  .small()
-                  .icon(Icon::empty().path("icons/sparkles.svg"))
-                  .loading(self.generating)
-                  .disabled(chosen == 0 || self.generating)
-                  .tooltip("Generate the summary and description with AI")
-                  .on_click(cx.listener(|this, _, window, cx| this.generate_commit_message(window, cx))),
-              ),
-          ),
+          // The AI buttons belong to the AI Agent extension: without it the box is just the text.
+          .when(crate::extensions::is_enabled(ws_extensions::AI_AGENT, cx), |area| {
+            let workspace = workspace.clone();
+            area.child(
+              div()
+                .id("generate-message-area")
+                .absolute()
+                .right_1()
+                .bottom_1()
+                .child(
+                  Button::new("generate-message")
+                    .custom(
+                      ButtonCustomVariant::new(cx).color(palette.surface).foreground(cx.theme().primary).hover(palette.hover).active(palette.hover),
+                    )
+                    .cursor_pointer()
+                    .small()
+                    .icon(Icon::empty().path("icons/sparkles.svg"))
+                    .loading(self.generating)
+                    .disabled(chosen == 0 || self.generating)
+                    .tooltip("Generate the summary and description with AI")
+                    .on_click(cx.listener(|this, _, window, cx| this.generate_commit_message(window, cx))),
+                )
+                // Right click: the settings of the generator, and switching the extension off or removing it.
+                .context_menu(move |menu, _, _| {
+                  let (settings, disable, remove) = (workspace.clone(), workspace.clone(), workspace.clone());
+                  menu
+                    .item(
+                      PopupMenuItem::new("Settings")
+                        .icon(Icon::empty().path("icons/settings-2.svg"))
+                        .on_click(move |_, window, cx| settings.update(cx, |this, cx| this.open_commit_settings(window, cx))),
+                    )
+                    .separator()
+                    .item(
+                      PopupMenuItem::new("Disable")
+                        .icon(Icon::empty().path("icons/circle-slash.svg"))
+                        .on_click(move |_, window, cx| disable.update(cx, |this, cx| this.confirm_disable_ai_agent(window, cx))),
+                    )
+                    .item(
+                      PopupMenuItem::new("Remove")
+                        .icon(Icon::empty().path("icons/trash.svg"))
+                        .on_click(move |_, window, cx| remove.update(cx, |this, cx| this.confirm_remove_ai_agent(window, cx))),
+                    )
+                }),
+            )
+          }),
       )
       .child(
         div()

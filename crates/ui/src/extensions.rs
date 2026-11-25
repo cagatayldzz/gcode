@@ -39,8 +39,16 @@ fn installed(cx: &App) -> Vec<Installed> {
 /// The agents that the AI Agent extension switches on; none while it is not installed.
 pub(crate) fn enabled_agents(cx: &App) -> Vec<AgentKind> {
   let Some(extensions) = cx.try_global::<InstalledExtensions>() else { return Vec::new() };
-  let Some(extension) = extensions.0.iter().find(|extension| extension.manifest.id == ws_extensions::AI_AGENT) else { return Vec::new() };
+  let Some(extension) = extensions.0.iter().find(|extension| extension.enabled && extension.manifest.id == ws_extensions::AI_AGENT) else {
+    return Vec::new();
+  };
   AgentKind::ALL.into_iter().filter(|kind| extension.manifest.agents.iter().any(|id| id == kind.id())).collect()
+}
+
+/// Whether the extension `id` is installed and switched on.
+pub(crate) fn is_enabled(id: &str, cx: &App) -> bool {
+  cx.try_global::<InstalledExtensions>()
+    .is_some_and(|extensions| extensions.0.iter().any(|extension| extension.enabled && extension.manifest.id == id))
 }
 
 /// Sent when an extension was installed or removed.
@@ -111,7 +119,13 @@ impl ExtensionsPanel {
     .detach();
   }
 
-  fn uninstall(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+  /// Switches an installed extension on or off, for every window.
+  pub(crate) fn set_enabled(&mut self, id: &str, enabled: bool, window: &mut Window, cx: &mut Context<Self>) {
+    let result = ws_extensions::set_enabled(id, enabled).map_err(|error| error.to_string());
+    self.finished(result, window, cx);
+  }
+
+  pub(crate) fn uninstall(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
     if !self.busy.insert(id.clone()) {
       return;
     }
@@ -230,9 +244,15 @@ impl Render for ExtensionsPanel {
         let action = if busy {
           busy_mark().into_any_element()
         } else {
-          let remove_id = id.clone();
+          let (remove_id, enable_id) = (id.clone(), id.clone());
           h_flex()
             .gap_2()
+            .when(!extension.enabled, |row| {
+              row.child(
+                button(id.clone(), "Enable", true, false)
+                  .on_click(cx.listener(move |this, _, window, cx| this.set_enabled(&enable_id, true, window, cx))),
+              )
+            })
             .children(newer.map(|available| {
               button(id.clone(), "Update", true, false).on_click(cx.listener(move |this, _, window, cx| this.install(available.clone(), window, cx)))
             }))
@@ -242,7 +262,8 @@ impl Render for ExtensionsPanel {
             )
             .into_any_element()
         };
-        let meta = [manifest.publisher.as_str(), &format!("v{}", manifest.version)]
+        let state = if extension.enabled { String::new() } else { "disabled".to_string() };
+        let meta = [manifest.publisher.as_str(), &format!("v{}", manifest.version), state.as_str()]
           .iter()
           .filter(|part| part.len() > 1)
           .copied()

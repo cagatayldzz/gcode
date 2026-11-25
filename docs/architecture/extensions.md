@@ -10,6 +10,13 @@ An **extension** is optional: nothing is installed on a fresh start. The first o
 view). Until it is installed, the AI agents activity button is hidden, and the AI commands (menu, palette, shortcut) open the Extensions
 view with a note instead of starting a session.
 
+**AI Agent** also switches on the AI commit messages: the generate button and the settings button of the commit box. Until it is installed the
+commit box is only its two text fields, and generating a message says to install the extension. The model and the instructions stay in the
+commit settings, which open from the right-click menu of the generate button (**Settings**, **Disable**, **Remove**; the last two ask first).
+
+An installed extension can be **disabled**: an empty `disabled` file in its folder (`set_enabled`). It stays installed and does nothing; the Extensions
+view shows it as disabled with an **Enable** button, and installing or updating it switches it on again.
+
 ## What a package is
 
 The app is compiled, so a package **carries no code**: it is a `manifest.json` that switches on a feature that is already in the app and

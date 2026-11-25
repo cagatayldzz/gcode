@@ -21,7 +21,7 @@ use crate::{
   pull_request::{PullRequestEvent, PullRequestForm, PullRequestTarget},
   settings::{
     activity_ids, settings_for, AccountRecheckRequested, AccountReconnectRequested, AccountRemoveRequested, AddAllProjectsRequested,
-    CommitSettingsRequested, ConnectAccountRequested, SettingsModel,
+    ConnectAccountRequested, SettingsModel,
   },
   settings_window::SettingsWindow,
   terminal::{Terminal, TerminalActivityChanged, TerminalAttentionChanged, TerminalExited},
@@ -727,11 +727,6 @@ impl Workspace {
         cx.subscribe_in(&settings, window, |this, _, event: &AccountRemoveRequested, window, cx| {
           if window.is_window_active() {
             this.remove_account(event.0.clone(), window, cx);
-          }
-        }),
-        cx.subscribe_in(&settings, window, |this, _, _: &CommitSettingsRequested, window, cx| {
-          if window.is_window_active() {
-            this.open_commit_settings(window, cx);
           }
         }),
         // "Add all" is handled by the window the user is in.

@@ -7,10 +7,15 @@ use std::{
 
 const MANIFEST_NAME: &str = "manifest.json";
 
+/// The file in an extension's folder whose presence means it is disabled.
+const DISABLED_MARK: &str = "disabled";
+
 /// An installed extension.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Installed {
   pub manifest: Manifest,
+  /// Whether it is switched on. A disabled extension stays installed but does nothing, until it is enabled again.
+  pub enabled: bool,
 }
 
 /// Where the installed extensions are kept: one folder each, with the manifest in it.
@@ -32,7 +37,8 @@ pub fn installed_in(dir: &Path) -> Vec<Installed> {
       let text = fs::read_to_string(entry.path().join(MANIFEST_NAME)).ok()?;
       let manifest = parse_manifest(&text).ok()?;
       // The folder is named by the id; one that is not was not made here.
-      (entry.file_name().to_str() == Some(manifest.id.as_str())).then_some(Installed { manifest })
+      let enabled = !entry.path().join(DISABLED_MARK).exists();
+      (entry.file_name().to_str() == Some(manifest.id.as_str())).then_some(Installed { manifest, enabled })
     })
     .collect();
   found.sort_by_key(|extension| extension.manifest.name.to_lowercase());
@@ -80,7 +86,28 @@ pub fn install_from(dir: &Path, available: &Available, text: &str) -> Result<Ins
     fs::rename(temporary, folder.join(MANIFEST_NAME))
   };
   write().map_err(|error| ExtensionError::new(format!("Could not save {}: {error}", manifest.name)))?;
-  Ok(Installed { manifest })
+  // A fresh install, or an update, is switched on.
+  let _ = fs::remove_file(folder.join(DISABLED_MARK));
+  Ok(Installed { manifest, enabled: true })
+}
+
+/// Switches an installed extension on or off.
+pub fn set_enabled(id: &str, enabled: bool) -> Result<(), ExtensionError> {
+  set_enabled_in(&extensions_dir(), id, enabled)
+}
+
+/// Switches the extension `id` of `dir` on or off; the manifest stays where it is.
+pub fn set_enabled_in(dir: &Path, id: &str, enabled: bool) -> Result<(), ExtensionError> {
+  if !crate::index::is_plain_id(id) || !dir.join(id).join(MANIFEST_NAME).is_file() {
+    return Err(ExtensionError::new("That extension is not installed."));
+  }
+  let mark = dir.join(id).join(DISABLED_MARK);
+  let result = if enabled {
+    fs::remove_file(&mark).or_else(|error| if error.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(error) })
+  } else {
+    fs::write(&mark, "")
+  };
+  result.map_err(|error| ExtensionError::new(format!("Could not change the extension: {error}")))
 }
 
 /// Removes an installed extension.
