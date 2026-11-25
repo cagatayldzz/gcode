@@ -142,8 +142,11 @@ pub(crate) fn skeleton_lines(count: usize) -> AnyElement {
     .into_any_element()
 }
 
-/// An estimate of the width of one character of a path in the app's text size, from the font size.
-const PATH_CHAR_WIDTH: f32 = 0.54 * 14.;
+/// The text size of a path in the Changes list: one step below the app's text size.
+pub(crate) const CHANGE_PATH_FONT_SIZE: Pixels = px(13.);
+
+/// An estimate of the width of one character of a path in [`CHANGE_PATH_FONT_SIZE`].
+const PATH_CHAR_WIDTH: f32 = 0.54 * 13.;
 
 /// `path` cut to fit `room` pixels: the file name is always kept whole and the end of the folder gives way to `…`
 /// (`app/(page)/finan…/page.client.tsx`), the way a path is shortened in a long file list. A zero `room` (before the first layout)
@@ -158,4 +161,17 @@ pub(crate) fn shortened_path(path: &str, room: f32) -> String {
   };
   let kept = fits.saturating_sub(name.chars().count() + 2).max(1);
   format!("{}…/{name}", folder.chars().take(kept).collect::<String>())
+}
+
+/// `path` cut to fit `room` pixels by dropping the middle (`src/co…er.tsx`), keeping the start and the end of it: for a path shown
+/// beside another, such as the two of a renamed file.
+pub(crate) fn shortened_middle(path: &str, room: f32) -> String {
+  let fits = (room / PATH_CHAR_WIDTH) as usize;
+  let chars: Vec<char> = path.chars().collect();
+  if room <= 0. || chars.len() <= fits || fits < 3 {
+    return path.to_string();
+  }
+  let tail = (fits - 1) / 2;
+  let head = fits - 1 - tail;
+  format!("{}…{}", chars[..head].iter().collect::<String>(), chars[chars.len() - tail..].iter().collect::<String>())
 }

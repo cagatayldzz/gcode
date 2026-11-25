@@ -172,8 +172,8 @@ impl Colors {
       gutter_modified: hex(0xe3c15b),
       renamed: hex(0x0969da),
       conflicted: hex(0xbc4c00),
-      diff_added: hex(0xaceebb).opacity(0.3),
-      diff_removed: hex(0xffcecb).opacity(0.3),
+      diff_added: hex(0xe6ffec),
+      diff_removed: hex(0xffebe9),
     }
   }
 }

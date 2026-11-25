@@ -256,6 +256,15 @@ impl Workspace {
     let file = change.path.clone();
     let selected = self.selected_change.as_ref() == Some(&change.path);
     let included = !self.excluded.contains(&change.path);
+    let room = width.as_f32() - 88.;
+    let path_text = match &change.from {
+      Some(from) => format!(
+        "{} → {}",
+        crate::components::shortened_middle(&from.to_string_lossy(), room / 2. - 12.),
+        crate::components::shortened_middle(&change.path.to_string_lossy(), room / 2. - 12.)
+      ),
+      None => crate::components::shortened_path(&change.path.to_string_lossy(), room),
+    };
     h_flex()
       .id(SharedString::from(format!("change-row-{}", change.path.display())))
       .when(width.is_zero(), |row| row.w_full())
@@ -290,14 +299,12 @@ impl Workspace {
           .items_center()
           .cursor_pointer()
           .child(
-            // One path, the file name last, cut in the middle when the row is narrow: the room is the row less its padding,
-            // the checkbox, the status icon and the gaps.
-            div().flex_1().min_w_0().child(
-              Label::new(crate::components::shortened_path(&change.path.to_string_lossy(), width.as_f32() - 88.))
-                .min_w_0()
-                .whitespace_nowrap()
-                .overflow_hidden(),
-            ),
+            // One path, the file name last, cut when the row is narrow; a renamed file shows where it was before. The room is
+            // the row less its padding, the checkbox, the status icon and the gaps.
+            div()
+              .flex_1()
+              .min_w_0()
+              .child(Label::new(path_text).text_size(crate::components::CHANGE_PATH_FONT_SIZE).min_w_0().whitespace_nowrap().overflow_hidden()),
           )
           .child(Icon::empty().path(change_kind_icon(change.kind)).size_4().flex_none().text_color(kind_color(change.kind, &palette)))
           .on_click(cx.listener({

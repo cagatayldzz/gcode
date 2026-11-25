@@ -12,14 +12,14 @@ impl Workspace {
     }
     let remote = sync.remote.clone();
     let remote_url = sync.url.clone();
-    let (title, done) = if sync.behind > 0 {
-      (format!("Pulling from {remote}"), "Pulled")
+    let title = if sync.behind > 0 {
+      format!("Pulling from {remote}")
     } else if !sync.upstream {
-      ("Publishing branch".to_string(), "Published")
+      "Publishing branch".to_string()
     } else if sync.ahead > 0 {
-      (format!("Pushing to {remote}"), "Pushed")
+      format!("Pushing to {remote}")
     } else {
-      (format!("Fetching {remote}"), "Fetched")
+      format!("Fetching {remote}")
     };
     let progress = Arc::new(Mutex::new(String::from("Connecting…")));
     let fetching_after_push = Arc::new(AtomicBool::new(false));
@@ -96,10 +96,7 @@ impl Workspace {
         // The window may show another project by now: settle the one the work was for, and say which it was.
         this.settle_job(&root, cx);
         match result {
-          Ok(_) => {
-            let message = this.say_where(&root, format!("{done} {remote}."));
-            window.push_notification(Notification::info(message), cx)
-          }
+          Ok(_) => {}
           Err(message) => {
             if let Some(kind) = refusal_kind(&message) {
               this.flag_account_issue(&remote_url, kind, cx);
@@ -649,7 +646,6 @@ impl Workspace {
       Ok(()) => {
         self.refresh_project();
         window.close_dialog(cx);
-        window.push_notification(Notification::info(format!("Created and switched to {}.", name.trim())), cx);
         cx.notify();
       }
       Err(message) => window.push_notification(crate::failure(message), cx),

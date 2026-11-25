@@ -90,8 +90,6 @@ impl Workspace {
             if here && this.git_view == GitView::History {
               this.load_history(cx);
             }
-            let message = this.say_where(&root, format!("Switched to {name}."));
-            window.push_notification(Notification::info(message), cx);
             // The question acts on the open project's stash: it is asked only while the open project is the one that switched.
             if stashed && here {
               this.ask_stashed_changes(name, window, cx);
@@ -344,12 +342,11 @@ impl Workspace {
       "",
       window,
       cx,
-      move |this, name, window, cx| {
+      move |this, name, _, cx| {
         let root = this.projects.active.clone().ok_or("Open a project first.")?;
         ws_git::branch_from_commit(&root, &id, name)?;
         this.refresh_project();
         this.load_history(cx);
-        window.push_notification(Notification::info(format!("Created and switched to {}.", name.trim())), cx);
         Ok(())
       },
     );
@@ -381,12 +378,11 @@ impl Workspace {
       let _ = this.update_in(cx, |this, window, cx| {
         this.committing = false;
         match result {
-          Ok(id) => {
+          Ok(_) => {
             this.clear_commit_draft(&root, window, cx);
             if this.settle_job(&root, cx) {
               this.load_history(cx);
             }
-            window.push_notification(Notification::info(this.say_where(&root, format!("Amended the last commit: {id}."))), cx);
           }
           Err(message) => window.push_notification(crate::failure(message), cx),
         }

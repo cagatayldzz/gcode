@@ -551,7 +551,7 @@ impl Workspace {
     self.commit_summary.update(cx, |input, cx| input.set_value(draft.summary, window, cx));
     self.commit_description.update(cx, |input, cx| input.set_value(draft.description, window, cx));
     if let (Some(root), Some(file)) = (after.clone(), self.selected_change.clone()) {
-      self.change_view.update(cx, |view, cx| view.show(root, file, cx));
+      self.change_view.update(cx, |view, cx| view.show(root, file, None, cx));
     }
     self.file_actions.clear_side();
     self.editor_panel.update(cx, |editor, cx| editor.switch_project(before, after, cx));

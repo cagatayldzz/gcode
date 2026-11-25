@@ -271,10 +271,10 @@ pub(super) fn rail_button(
 /// The color of a changed file's mark: green for new, red for deleted, amber for modified and so on.
 pub(super) fn change_kind_icon(kind: ws_git::ChangeKind) -> &'static str {
   match kind {
-    ws_git::ChangeKind::New => "icons/file-plus.svg",
-    ws_git::ChangeKind::Modified => "icons/file-pen-line.svg",
-    ws_git::ChangeKind::Deleted => "icons/file-minus.svg",
-    ws_git::ChangeKind::Renamed => "icons/file-symlink.svg",
+    ws_git::ChangeKind::New => "icons/square-plus.svg",
+    ws_git::ChangeKind::Modified => "icons/square-dot.svg",
+    ws_git::ChangeKind::Deleted => "icons/square-minus.svg",
+    ws_git::ChangeKind::Renamed => "icons/square-arrow-right.svg",
     ws_git::ChangeKind::Conflicted => "icons/file-exclamation-point.svg",
   }
 }

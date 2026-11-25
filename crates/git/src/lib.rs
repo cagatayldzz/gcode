@@ -51,6 +51,8 @@ impl ChangeKind {
 pub struct Change {
   pub path: PathBuf,
   pub kind: ChangeKind,
+  /// Where a renamed file was before, relative to the repository.
+  pub from: Option<PathBuf>,
 }
 
 /// What the sidebar shows about a project's repository.
@@ -154,7 +156,7 @@ pub fn summary(path: &Path) -> Option<Summary> {
       .and_then(|head| head.symbolic_target().ok().flatten().map(|name| name.trim_start_matches("refs/heads/").to_string()))?,
   };
   let mut options = StatusOptions::new();
-  options.include_untracked(true).recurse_untracked_dirs(true).include_ignored(false);
+  options.include_untracked(true).recurse_untracked_dirs(true).include_ignored(false).renames_head_to_index(true).renames_index_to_workdir(true);
   let mut changes: Vec<Change> = repository
     .statuses(Some(&mut options))
     .map(|statuses| {
@@ -175,7 +177,12 @@ pub fn summary(path: &Path) -> Option<Summary> {
           } else {
             ChangeKind::Modified
           };
-          Some(Change { path: PathBuf::from(entry.path().ok()?), kind })
+          // A renamed file's `entry.path()` is its old path: the new one is in the delta.
+          let rename = (kind == ChangeKind::Renamed).then(|| entry.head_to_index().or_else(|| entry.index_to_workdir())).flatten();
+          let path =
+            rename.as_ref().and_then(|delta| delta.new_file().path()).map(Path::to_path_buf).or_else(|| entry.path().ok().map(PathBuf::from))?;
+          let from = rename.as_ref().and_then(|delta| delta.old_file().path()).map(Path::to_path_buf);
+          Some(Change { path, kind, from })
         })
         .collect()
     })
@@ -245,19 +252,25 @@ pub fn clone(url: &str, parent: &Path, credentials: Option<&Credentials>) -> Res
 /// The unified diff of one file against the last commit (staged and unstaged changes together, untracked
 /// files as new), with the whole file as context. `file` is relative to the repository.
 pub fn file_diff(path: &Path, file: &Path) -> Result<String, String> {
-  working_tree_patch(path, Some(file))
+  working_tree_patch(path, Some(file), None)
+}
+
+/// [`file_diff`] of a renamed file: `from` is where it was before, so the patch shows what changed inside it instead of a deleted
+/// file and a new one.
+pub fn renamed_file_diff(path: &Path, file: &Path, from: &Path) -> Result<String, String> {
+  working_tree_patch(path, Some(file), Some(from))
 }
 
 /// Every staged and unstaged change against HEAD, including untracked files.
 pub fn all_changes_diff(path: &Path) -> Result<String, String> {
-  working_tree_patch(path, None)
+  working_tree_patch(path, None, None)
 }
 
 /// Context lines that cover any file: a diff of one file carries the whole file, so that the interface can expand the unchanged lines
 /// between and around the changes (it collapses them to a few lines at first).
 const WHOLE_FILE: u32 = u32::MAX;
 
-fn working_tree_patch(path: &Path, file: Option<&Path>) -> Result<String, String> {
+fn working_tree_patch(path: &Path, file: Option<&Path>, from: Option<&Path>) -> Result<String, String> {
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
   let head = repository.head().ok().and_then(|head| head.peel_to_tree().ok());
   let mut options = DiffOptions::new();
@@ -265,7 +278,13 @@ fn working_tree_patch(path: &Path, file: Option<&Path>) -> Result<String, String
   if let Some(file) = file {
     options.pathspec(file).context_lines(WHOLE_FILE);
   }
-  let diff = repository.diff_tree_to_workdir_with_index(head.as_ref(), Some(&mut options)).map_err(|error| error.message().to_string())?;
+  if let Some(from) = from {
+    options.pathspec(from);
+  }
+  let mut diff = repository.diff_tree_to_workdir_with_index(head.as_ref(), Some(&mut options)).map_err(|error| error.message().to_string())?;
+  if from.is_some() {
+    diff.find_similar(Some(git2::DiffFindOptions::new().renames(true).for_untracked(true))).map_err(|error| error.message().to_string())?;
+  }
   patch_text(&diff)
 }
 
@@ -1110,7 +1129,7 @@ pub fn commit_detail(path: &Path, id: &str) -> Result<CommitDetail, String> {
         _ => ChangeKind::Modified,
       };
       let file = if kind == ChangeKind::Deleted { delta.old_file().path() } else { delta.new_file().path() }?;
-      Some(Change { path: file.to_path_buf(), kind })
+      Some(Change { path: file.to_path_buf(), kind, from: None })
     })
     .collect();
   files.sort_by(|a, b| a.path.cmp(&b.path));

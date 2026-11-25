@@ -245,3 +245,34 @@ fn changing_the_remote_address_keeps_the_remote_and_adds_origin_when_missing() {
   assert!(set_remote_url(&dir, "  ").is_err());
   fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn a_staged_rename_is_one_change_at_the_new_path_and_its_diff_shows_only_the_edit() {
+  use std::path::Path;
+  use ws_git::{renamed_file_diff, ChangeKind};
+
+  let dir = temp_dir("rename");
+  let repository = git2::Repository::init_opts(&dir, git2::RepositoryInitOptions::new().initial_head("main")).unwrap();
+  let body: String = (0..30).map(|line| format!("line {line}\n")).collect();
+  fs::write(dir.join("old.txt"), &body).unwrap();
+  let mut index = repository.index().unwrap();
+  index.add_path(Path::new("old.txt")).unwrap();
+  let tree = repository.find_tree(index.write_tree().unwrap()).unwrap();
+  let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+  repository.commit(Some("HEAD"), &signature, &signature, "first", &tree, &[]).unwrap();
+
+  fs::rename(dir.join("old.txt"), dir.join("new.txt")).unwrap();
+  fs::write(dir.join("new.txt"), body.replace("line 3\n", "line three\n")).unwrap();
+  index.remove_path(Path::new("old.txt")).unwrap();
+  index.add_path(Path::new("new.txt")).unwrap();
+  index.write().unwrap();
+
+  let found = summary(&dir).unwrap();
+  assert_eq!(found.changes.len(), 1, "{:?}", found.changes);
+  let change = &found.changes[0];
+  assert_eq!((change.path.as_path(), change.kind, change.from.as_deref()), (Path::new("new.txt"), ChangeKind::Renamed, Some(Path::new("old.txt"))));
+  let patch = renamed_file_diff(&dir, Path::new("new.txt"), Path::new("old.txt")).unwrap();
+  assert!(patch.contains("+line three") && patch.contains("-line 3"), "{patch}");
+  assert!(!patch.contains("-line 4"), "{patch}");
+  fs::remove_dir_all(dir).unwrap();
+}

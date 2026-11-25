@@ -14,7 +14,7 @@ use gpui_kit::{
     h_flex,
     label::Label,
     spinner::Spinner,
-    v_flex, ActiveTheme as _, Sizable as _,
+    v_flex, ActiveTheme as _, Icon, Sizable as _,
   },
   *,
 };
@@ -83,6 +83,8 @@ pub(crate) struct ChangeView {
   settings: Entity<SettingsModel>,
   root: PathBuf,
   file: PathBuf,
+  /// Where the file was before, when it was renamed.
+  from: Option<PathBuf>,
   diff: Load<ChangeDiff>,
   task: Option<Task<()>>,
   show_preview: bool,
@@ -100,6 +102,7 @@ impl ChangeView {
       settings,
       root: PathBuf::new(),
       file: PathBuf::new(),
+      from: None,
       diff: Load::Loading,
       task: None,
       show_preview: false,
@@ -113,9 +116,10 @@ impl ChangeView {
   /// Shows the changes of another file of the repository at `root`.
   /// Always starts from a read: the view keeps the last file it showed after the file was committed or deselected, and showing
   /// the same file again must not bring back what it looked like then.
-  pub fn show(&mut self, root: PathBuf, file: PathBuf, cx: &mut Context<Self>) {
+  pub fn show(&mut self, root: PathBuf, file: PathBuf, from: Option<PathBuf>, cx: &mut Context<Self>) {
     self.root = root;
     self.file = file;
+    self.from = from;
     self.diff = Load::Loading;
     self.show_preview = false;
     self.svg_preview = None;
@@ -128,12 +132,15 @@ impl ChangeView {
   /// Reads the file's changes again, and redraws only if they differ from what is shown.
   pub fn reload(&mut self, cx: &mut Context<Self>) {
     self.epoch += 1;
-    let (epoch, root, file) = (self.epoch, self.root.clone(), self.file.clone());
+    let (epoch, root, file, from) = (self.epoch, self.root.clone(), self.file.clone(), self.from.clone());
     let previous = matches!(self.diff, Load::Ready(_)).then(|| self.patch.clone());
     let renderer = cx.svg_renderer();
     let theme = crate::diff_view::highlight_theme(cx);
     let work = cx.background_executor().spawn(async move {
-      let patch = ws_git::file_diff(&root, &file)?;
+      let patch = match &from {
+        Some(from) => ws_git::renamed_file_diff(&root, &file, from)?,
+        None => ws_git::file_diff(&root, &file)?,
+      };
       if previous.as_deref() == Some(patch.as_str()) {
         return Ok(None);
       }
@@ -207,8 +214,13 @@ impl Render for ChangeView {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
-    let name = self.file.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-    let folder = self.file.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
+    let path_label = |path: &Path| {
+      let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+      let folder = path.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
+      h_flex()
+        .when_some(folder, |row, folder| row.child(Label::new(format!("{folder}/")).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground)))
+        .child(Label::new(name).text_size(FONT_SIZE_SM).font_weight(FontWeight::SEMIBOLD))
+    };
     let can_preview =
       self.file.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("svg")) && matches!(self.diff, Load::Ready(ChangeDiff::Text(_)));
     let header = h_flex()
@@ -217,11 +229,10 @@ impl Render for ChangeView {
       .py_1p5()
       .border_b_1()
       .border_color(palette.border)
-      .child(match folder {
-        Some(folder) => Label::new(format!("{folder}/")).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).into_any_element(),
-        None => div().into_any_element(),
+      .when_some(self.from.clone(), |header, from| {
+        header.child(path_label(&from)).child(Icon::empty().path("icons/arrow-right.svg").size_3().mx_2().text_color(theme.muted_foreground))
       })
-      .child(Label::new(name).text_size(FONT_SIZE_SM).font_weight(FontWeight::SEMIBOLD))
+      .child(path_label(&self.file))
       .child(div().flex_1())
       .when(can_preview, |header| {
         header.child(Button::new("toggle-svg-change-preview").ghost().small().label(if self.show_preview { "Source" } else { "Preview" }).on_click(

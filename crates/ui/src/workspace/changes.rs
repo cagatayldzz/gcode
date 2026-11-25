@@ -28,11 +28,17 @@ impl Workspace {
     self.all_changes_open = false;
     // Choosing the file already shown leaves its diff (and scroll position) alone.
     if self.selected_change.as_ref() != Some(&file) {
-      self.change_view.update(cx, |view, cx| view.show(root, file.clone(), cx));
+      let from = self.renamed_from(&file);
+      self.change_view.update(cx, |view, cx| view.show(root, file.clone(), from, cx));
     }
     self.selected_change = Some(file);
     self.selected_entry = None;
     cx.notify();
+  }
+
+  /// Where a renamed changed file was before.
+  pub(super) fn renamed_from(&self, file: &Path) -> Option<PathBuf> {
+    self.git.as_ref()?.changes.iter().find(|change| change.path == file).and_then(|change| change.from.clone())
   }
 
   /// Opens a changed file itself, not its diff, in the editor.
@@ -201,8 +207,7 @@ impl Workspace {
             this.clear_commit_draft(&root, window, cx);
             this.settle_job(&root, cx);
             match pushed {
-              None => window.push_notification(Notification::info(this.say_where(&root, format!("Committed {id}."))), cx),
-              Some(Ok(_)) => window.push_notification(Notification::info(this.say_where(&root, format!("Committed {id} and pushed."))), cx),
+              None | Some(Ok(_)) => {}
               Some(Err(message)) => {
                 if let Some(kind) = refusal_kind(&message) {
                   this.flag_account_issue(&remote_url, kind, cx);
