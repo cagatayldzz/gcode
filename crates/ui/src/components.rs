@@ -270,6 +270,8 @@ pub(crate) fn path_label(path: &str, cx: &App) -> Div {
     .flex_none()
     .whitespace_nowrap()
     .text_size(CHANGE_PATH_FONT_SIZE)
+    // The system's own typeface, as the list of GitHub Desktop has; the interface's Geist and Inter look heavier at this size.
+    .font_family(SYSTEM_FONT)
     .font_weight(FontWeight::NORMAL)
     .children(folder.map(|folder| div().text_color(colors(cx).text_secondary).child(folder)))
     .child(name.to_string())
@@ -297,3 +299,6 @@ pub(crate) fn scrollbar_strip<H: ScrollbarHandle + Clone>(handle: &H, id: impl I
 const STRIP_WIDTH: Pixels = px(13.);
 const STRIP_THUMB_WIDTH: Pixels = px(6.);
 const STRIP_THUMB_INSET: Pixels = px(3.);
+
+/// The family name that GPUI resolves to the typeface of the operating system's interface.
+const SYSTEM_FONT: &str = ".SystemUIFont";
