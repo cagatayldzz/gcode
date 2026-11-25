@@ -44,6 +44,8 @@ pub fn run() {
       KeyBinding::new("cmd-shift-d", SplitDown, None),
       // The terminal's own: they act on the selection and the screen of the shell that has the keyboard.
       KeyBinding::new("cmd-c", CopySelection, Some("Terminal")),
+      // A diff table: copy the text or the lines chosen in it.
+      KeyBinding::new("cmd-c", CopySelection, Some("DiffTable")),
       KeyBinding::new("cmd-v", PasteClipboard, Some("Terminal")),
       KeyBinding::new("cmd-k", ClearBuffer, Some("Terminal")),
     ]);

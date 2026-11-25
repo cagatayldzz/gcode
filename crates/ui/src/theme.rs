@@ -66,6 +66,15 @@ pub(crate) struct Colors {
   /// The whole-line backgrounds of added and removed lines in a diff.
   pub diff_added: Hsla,
   pub diff_removed: Hsla,
+  /// The line-number columns beside them, a step stronger, and the words that changed within a line, stronger still.
+  pub diff_added_gutter: Hsla,
+  pub diff_removed_gutter: Hsla,
+  pub diff_added_word: Hsla,
+  pub diff_removed_word: Hsla,
+  /// The band of folded lines, its expand buttons and its text.
+  pub diff_band: Hsla,
+  pub diff_band_button: Hsla,
+  pub diff_band_text: Hsla,
 }
 
 /// The line between the rows of a list: the theme's border, half as strong, so that it separates without drawing the eye. It follows
@@ -133,6 +142,13 @@ impl Colors {
       conflicted: hex(0xdb6d28),
       diff_added: hex(0x238636).opacity(0.15),
       diff_removed: hex(0xda3633).opacity(0.15),
+      diff_added_gutter: hex(0x238636).opacity(0.3),
+      diff_removed_gutter: hex(0xda3633).opacity(0.3),
+      diff_added_word: hex(0x2ea043).opacity(0.4),
+      diff_removed_word: hex(0xf85149).opacity(0.4),
+      diff_band: hex(0x388bfd).opacity(0.15),
+      diff_band_button: hex(0x388bfd).opacity(0.3),
+      diff_band_text: hex(0x9ecbff),
     }
   }
 
@@ -174,6 +190,13 @@ impl Colors {
       conflicted: hex(0xbc4c00),
       diff_added: hex(0xe6ffec),
       diff_removed: hex(0xffebe9),
+      diff_added_gutter: hex(0xccffd8),
+      diff_removed_gutter: hex(0xffd7d5),
+      diff_added_word: hex(0xabf2bc),
+      diff_removed_word: hex(0xff8182).opacity(0.4),
+      diff_band: hex(0xddf4ff),
+      diff_band_button: hex(0xb6e3ff),
+      diff_band_text: hex(0x0550ae),
     }
   }
 }

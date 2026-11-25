@@ -41,7 +41,7 @@ fn with_editor_language(file: DiffFile) -> DiffFile {
   }
 }
 
-type Styles = Arc<Vec<(Range<usize>, HighlightStyle)>>;
+pub(crate) type Styles = Arc<Vec<(Range<usize>, HighlightStyle)>>;
 
 /// The colors of hunks that were already highlighted, so that showing a diff again (or showing it after [`warm`]) does not parse it again.
 /// Keyed by the language and the text of the hunk: a file that changed has other hunks, and those are the only ones parsed anew.
@@ -64,7 +64,7 @@ fn cache() -> MutexGuard<'static, Option<Cache>> {
   CACHE.lock().unwrap_or_else(|error| error.into_inner())
 }
 
-fn styles_of(theme: &Arc<HighlightTheme>, language: &str, text: &str) -> Styles {
+pub(crate) fn styles_of(theme: &Arc<HighlightTheme>, language: &str, text: &str) -> Styles {
   let mut hasher = DefaultHasher::new();
   (language, text).hash(&mut hasher);
   let key = hasher.finish();
@@ -181,8 +181,12 @@ struct WrapLines(bool);
 
 impl Global for WrapLines {}
 
-fn wraps(cx: &App) -> bool {
+pub(crate) fn wraps(cx: &App) -> bool {
   cx.try_global::<WrapLines>().is_none_or(|wrap| wrap.0)
+}
+
+pub(crate) fn set_wraps(wrap: bool, cx: &mut App) {
+  cx.set_global(WrapLines(wrap));
 }
 
 /// A parsed patch with the lines it changes.

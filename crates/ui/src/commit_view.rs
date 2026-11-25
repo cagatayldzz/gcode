@@ -1,8 +1,8 @@
 //! A commit of the History tab shown in the main area: its message, the files it changed and the diff of the chosen file.
 
 use crate::{
-  diff_view::ShownDiff,
-  settings::{code_font_size, SettingsModel},
+  diff_table::{prepare, table_controls, DiffTable},
+  settings::SettingsModel,
   theme::{colors, row_divider, FONT_SIZE_SM},
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -74,7 +74,7 @@ pub(crate) struct CommitView {
   id: String,
   detail: Load<CommitDetail>,
   selected: Option<PathBuf>,
-  diff: Load<ShownDiff>,
+  diff: Load<Entity<DiffTable>>,
   /// Which commit and file the answers being awaited belong to, so a late one for another is ignored.
   epoch: u64,
   /// The message box is unfolded to show more of the message, and the details of the commit are written out.
@@ -151,9 +151,8 @@ impl CommitView {
     let theme = crate::diff_view::highlight_theme(cx);
     let work = cx.background_executor().spawn(async move {
       let patch = ws_git::commit_file_diff(&root, &id, &file)?;
-      let files = crate::diff_view::parse_patch(&patch)?;
       crate::diff_view::warm(&theme, &patch);
-      Ok::<_, String>((files, patch))
+      prepare(&theme, &patch, &file)
     });
     cx.spawn(async move |this, cx| {
       let result = work.await;
@@ -162,8 +161,10 @@ impl CommitView {
           return;
         }
         this.diff = match result {
-          Ok((files, _)) if files.is_empty() => Load::Failed("This file has no text changes to show.".into()),
-          Ok((files, patch)) => Load::Ready(ShownDiff::new(files, &patch, cx)),
+          Ok(prepared) => {
+            let settings = this.settings.clone();
+            Load::Ready(cx.new(|cx| DiffTable::new(prepared, settings, cx)))
+          }
           Err(message) => Load::Failed(message.into()),
         };
         cx.notify();
@@ -410,8 +411,7 @@ impl Render for CommitView {
     let diff = match &self.diff {
       Load::Loading => spinner(),
       Load::Failed(error) => message(error.clone(), false),
-      Load::Ready(state) if !state.is_ready() => crate::components::skeleton_lines(16),
-      Load::Ready(state) => v_flex()
+      Load::Ready(table) => v_flex()
         .size_full()
         .min_h_0()
         // The path on the left, the buttons that move through the changes and set the diff at the right end.
@@ -431,19 +431,9 @@ impl Render for CommitView {
                 .min_w_0()
                 .children(self.selected.as_ref().map(|file| crate::components::file_path_bar("commit", &file.to_string_lossy(), None, cx))),
             )
-            .child(div().flex_none().child(crate::diff_view::diff_controls(state.state()))),
+            .child(div().flex_none().child(table_controls(table))),
         )
-        .child(
-          div()
-            .flex_1()
-            .min_h_0()
-            .min_w_0()
-            .overflow_hidden()
-            .relative()
-            .cursor_text()
-            .child(state.view(cx).header_visible(false).border_0().text_size(code_font_size(&self.settings, cx)).size_full())
-            .child(state.number_rule(cx)),
-        )
+        .child(div().flex_1().min_h_0().min_w_0().child(table.clone()))
         .into_any_element(),
     };
     v_flex().size_full().min_w_0().bg(theme.background).child(header).child(

@@ -3,8 +3,8 @@
 
 use crate::{
   commit_view::Load,
-  diff_view::ShownDiff,
-  settings::{code_font_size, SettingsModel},
+  diff_table::{prepare, table_controls, DiffTable},
+  settings::SettingsModel,
   theme::colors,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -26,7 +26,7 @@ use std::{
 const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 
 enum ChangeDiff {
-  Text(ShownDiff),
+  Text(Entity<DiffTable>),
   Image(ImageChanges),
 }
 
@@ -145,6 +145,7 @@ impl ChangeView {
         return Ok(None);
       }
       crate::diff_view::warm(&theme, &patch);
+      let prepared = prepare(&theme, &patch, &file);
       let image = ImageChanges::format(&file)
         .filter(|_| patch.lines().any(|line| line.starts_with("Binary files ")))
         .map(|format| {
@@ -153,7 +154,7 @@ impl ChangeView {
           })
         })
         .transpose();
-      Ok::<_, String>(Some((patch, image)))
+      Ok::<_, String>(Some((patch, image, prepared)))
     });
     self.task = Some(cx.spawn(async move |this, cx| {
       let result = work.await;
@@ -164,14 +165,16 @@ impl ChangeView {
         this.task = None;
         match result {
           Ok(None) => return,
-          Ok(Some((patch, image))) => {
+          Ok(Some((patch, image, prepared))) => {
             this.diff = match image {
               Ok(Some(image)) if image.original.is_some() || image.current.is_some() => Load::Ready(ChangeDiff::Image(image)),
               Err(error) => Load::Failed(format!("Could not preview the image: {error}").into()),
-              _ => match crate::diff_view::parse_patch(&patch) {
-                Ok(files) if files.is_empty() => Load::Failed("This file has no text changes to show.".into()),
-                Ok(files) => Load::Ready(ChangeDiff::Text(ShownDiff::new(files, &patch, cx))),
-                Err(error) => Load::Failed(format!("Could not read the changes: {error}").into()),
+              _ => match prepared {
+                Ok(prepared) => {
+                  let settings = this.settings.clone();
+                  Load::Ready(ChangeDiff::Text(cx.new(|cx| DiffTable::new(prepared, settings, cx))))
+                }
+                Err(message) => Load::Failed(message.into()),
               },
             };
             this.patch = patch;
@@ -242,7 +245,7 @@ impl Render for ChangeView {
       })
       // The previous/next/options buttons of a text diff sit at the right end of the path.
       .children(match &self.diff {
-        Load::Ready(ChangeDiff::Text(state)) if !self.show_preview => Some(crate::diff_view::diff_controls(state.state())),
+        Load::Ready(ChangeDiff::Text(table)) if !self.show_preview => Some(table_controls(table)),
         _ => None,
       });
     let loading = || {
@@ -264,18 +267,8 @@ impl Render for ChangeView {
         Some(Load::Failed(message)) => failed(message),
         _ => loading(),
       },
-      Load::Ready(ChangeDiff::Text(state)) if !state.is_ready() => crate::components::skeleton_lines(16),
-      Load::Ready(ChangeDiff::Text(state)) =>
       // The path is in the header above: the diff does not repeat it.
-      {
-        div()
-          .size_full()
-          .relative()
-          .cursor_text()
-          .child(state.view(cx).header_visible(false).border_0().text_size(code_font_size(&self.settings, cx)).size_full())
-          .child(state.number_rule(cx))
-          .into_any_element()
-      }
+      Load::Ready(ChangeDiff::Text(table)) => div().size_full().child(table.clone()).into_any_element(),
     };
     v_flex().size_full().bg(theme.background).child(header).child(v_flex().flex_1().min_h_0().child(body))
   }

@@ -124,9 +124,9 @@ rejected branch line, or what the remote said) instead of git's generic last lin
 ## Diffs in the interface
 
 `file_diff` and `commit_file_diff` carry the whole file as context, so that the Kit's Expand Up / Down / All reach lines far from the changes (the Kit
-shows three lines around each change at first). `all_changes_diff` keeps the usual three, since it covers many files. `ChangeView` hands the patch to
-the Kit `Diff` through `ShownDiff`; long lines wrap in every diff, and "Wrap long lines" in the diff options menu switches that for the session.
-Three details live in `diff_view.rs`:
+shows three lines around each change at first). `all_changes_diff` keeps the usual three, since it covers many files. `ChangeView` and `CommitView` hand the patch to `DiffTable` (`diff_table.rs`, over the lines and folds of `diff_model.rs`), which draws
+the one-file diff itself: three lines around each change, a band of folded lines with expand arrows (20 lines at a time), unified or side by side, long lines wrapped
+or scrolling sideways (the same `WrapLines` setting as the Kit diffs), and text chosen by dragging or lines chosen by their numbers (⌘C copies). The all-changes view and the editor's preview still use the Kit `Diff` through `ShownDiff`; three details live in `diff_view.rs`:
 
 - **Wrapping** is one setting (`WrapLines`) read by `ShownDiff::view`, so every place that shows a diff follows it.
 

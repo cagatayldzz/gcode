@@ -13,6 +13,8 @@ mod components;
 mod connect_account;
 mod connections;
 mod daemon;
+mod diff_model;
+mod diff_table;
 mod diff_view;
 mod editor;
 mod explorer;

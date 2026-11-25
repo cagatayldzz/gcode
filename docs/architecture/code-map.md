@@ -68,6 +68,8 @@ repository/
 | `commit_view.rs` | `CommitView`: a commit of History (message, files, diff) |
 | `all_changes.rs` | `AllChanges`: one virtualized diff of the whole working tree |
 | `diff_view.rs` | `ShownDiff`: the Kit `Diff` with theme-colored lines, `parse_patch` (language-aware), and `warm`: hunks are colored in the background when a patch is read (and for files that just got changes) and kept in a cache by language and text, so a diff paints with its colors from the first frame |
+| `diff_model.rs` | the lines of one file's patch, the layout of folded runs and expanded lines, and the words that changed within a line; no interface code, tested in `crates/ui/tests/diff_model.rs` |
+| `diff_table.rs` | `DiffTable`: the diff of one file in Changes and History, drawn with a virtual list instead of the Kit `Diff` (number columns with rules, a band of folded lines with expand arrows, unified and side by side, wrapped or scrolling lines, text and line selection with Copy) |
 | `merge_dialog.rs` | the merge conflict resolver |
 | `explorer.rs` | folder tree rows |
 | `project_search.rs` | search/replace engine (runs on the background executor) |
