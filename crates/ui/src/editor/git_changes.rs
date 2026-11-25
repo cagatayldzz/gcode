@@ -2,9 +2,7 @@
 
 use super::*;
 use crate::{diff_view, theme::colors};
-use gpui_kit::base::input::{
-  GutterDecoration, GutterDecorationCollection, OverviewRulerDecoration, OverviewRulerDecorationCollection, OverviewRulerLane, RopeExt as _,
-};
+use gpui_kit::base::input::{GutterDecoration, GutterDecorationCollection, RopeExt as _};
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::diff::{DiffLinePosition, DiffSide};
 use gpui_kit::component::{h_flex, Disableable as _};
@@ -18,17 +16,12 @@ pub(super) struct GitPreview {
 
 pub(super) struct GitChanges {
   gutter: GutterDecorationCollection,
-  overview: OverviewRulerDecorationCollection,
   diff: EditorDiff,
 }
 
 impl GitChanges {
   pub(super) fn new(state: &mut EditorState, cx: &mut Context<EditorState>) -> Self {
-    Self {
-      gutter: state.create_gutter_decorations_collection(Vec::new(), cx),
-      overview: state.create_overview_ruler_decorations_collection(Vec::new(), cx),
-      diff: EditorDiff::default(),
-    }
+    Self { gutter: state.create_gutter_decorations_collection(Vec::new(), cx), diff: EditorDiff::default() }
   }
 
   pub(super) fn update(&mut self, diff: EditorDiff, state: &Entity<EditorState>, cx: &mut App) {
@@ -39,10 +32,6 @@ impl GitChanges {
     let offset = |line| if line < text.lines_len() { text.line_start_offset(line) } else { text.len() };
     let marks: Vec<_> = diff.changes.iter().map(|change| (offset(change.lines.start)..offset(change.lines.end), change_color(change, cx))).collect();
     self.gutter.set(marks.iter().map(|(range, color)| GutterDecoration::new(range.clone()).with_color(*color)).collect(), cx);
-    self.overview.set(
-      marks.iter().map(|(range, color)| OverviewRulerDecoration::new(range.clone()).with_lane(OverviewRulerLane::Left).with_color(*color)).collect(),
-      cx,
-    );
     self.diff = diff;
   }
 }
@@ -52,7 +41,7 @@ pub(crate) fn change_color(change: &EditorChange, cx: &App) -> Hsla {
   if change.lines.is_empty() {
     palette.deleted
   } else if change.removed {
-    palette.link
+    palette.gutter_modified
   } else {
     palette.new
   }

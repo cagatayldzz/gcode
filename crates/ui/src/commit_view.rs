@@ -28,6 +28,29 @@ const FILE_ROW_HEIGHT: Pixels = px(32.);
 /// The width of the list of changed files.
 const FILES_WIDTH: Pixels = px(280.);
 
+/// The room for the path in a changed file's line: the list's width less the padding, the status mark and the gap before the path.
+const PATH_WIDTH: f32 = 226.;
+
+/// An estimate of the width of one character of the path, from the font size.
+const CHAR_WIDTH: f32 = 0.54 * 14.;
+
+/// The folder of a changed file with a trailing slash, as much of it as fits next to `name`: when it does not all fit, the folders in the
+/// middle are replaced by `…` (`app/settings/users/…/`) and the first ones are kept, the way a path is shortened in a long file list.
+fn shortened_folder(folder: &str, name: &str) -> String {
+  let room = (PATH_WIDTH / CHAR_WIDTH) as usize;
+  let fits = |text: &str| text.chars().count() + name.chars().count() <= room;
+  let whole = format!("{folder}/");
+  if fits(&whole) {
+    return whole;
+  }
+  let folders: Vec<&str> = folder.split('/').collect();
+  (1..folders.len())
+    .rev()
+    .map(|kept| format!("{}/…/", folders[..kept].join("/")))
+    .find(|shortened| fits(shortened))
+    .unwrap_or_else(|| "…/".to_string())
+}
+
 /// The tallest the commit message grows to: a few lines when folded, most of the window when unfolded; longer messages scroll.
 const MESSAGE_FOLDED_HEIGHT: Rems = rems(6.5);
 const MESSAGE_UNFOLDED_HEIGHT: Rems = rems(28.);
@@ -173,11 +196,17 @@ impl CommitView {
       .when(selected, |row| row.bg(palette.selected))
       .hover(|row| row.bg(palette.hover))
       .child(Label::new(change.kind.mark()).w_4().flex_none().text_color(mark))
-      // The folder first, dimmed, and the file name after it: the folder is what gives way when the row is narrow.
-      .when_some(folder, |row, folder| {
-        row.child(Label::new(format!("{folder}/")).text_color(theme.muted_foreground).min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
-      })
-      .child(Label::new(name).flex_none().whitespace_nowrap())
+      // One path: the folder dimmed, then the file name right after it with no gap. The middle of the folder gives way when the row is narrow.
+      .child(
+        h_flex()
+          .flex_1()
+          .min_w_0()
+          .overflow_hidden()
+          .when_some(folder.map(|folder| shortened_folder(&folder, &name)), |path, folder| {
+            path.child(Label::new(folder).text_color(theme.muted_foreground).flex_none().whitespace_nowrap())
+          })
+          .child(Label::new(name).min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis()),
+      )
       .on_click(cx.listener(move |this, _, _, cx| this.select_file(file.clone(), cx)))
   }
 }

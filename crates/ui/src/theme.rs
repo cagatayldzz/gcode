@@ -59,6 +59,8 @@ pub(crate) struct Colors {
   pub new: Hsla,
   pub deleted: Hsla,
   pub modified: Hsla,
+  /// The bar in the editor's gutter beside lines that were changed.
+  pub gutter_modified: Hsla,
   pub renamed: Hsla,
   pub conflicted: Hsla,
   /// The whole-line backgrounds of added and removed lines in a diff.
@@ -126,6 +128,7 @@ impl Colors {
       new: hex(0x3fb950),
       deleted: hex(0xf85149),
       modified: hex(0xd29922),
+      gutter_modified: hex(0xd29922),
       renamed: hex(0x4493f8),
       conflicted: hex(0xdb6d28),
       diff_added: hex(0x238636).opacity(0.15),
@@ -166,6 +169,7 @@ impl Colors {
       new: hex(0x1a7f37),
       deleted: hex(0xd1242f),
       modified: hex(0x9a6700),
+      gutter_modified: hex(0xe3c15b),
       renamed: hex(0x0969da),
       conflicted: hex(0xbc4c00),
       diff_added: hex(0xaceebb).opacity(0.3),
@@ -265,7 +269,7 @@ pub(crate) fn apply_theme(choice: ThemeChoice, font: FontChoice, code_font_size:
     syntax.label = syntax_color(label);
     // The name of a class that is built or listed, and the names of the line-based files (see `minimap::outline`).
     syntax.constructor = syntax_color(type_name);
-    syntax.comment = syntax_color(hex(if dark { 0x8b949e } else { 0x6e7781 }));
+    syntax.comment = syntax_color(hex(if dark { 0x8b949e } else { 0x8c959f }));
     syntax.comment_doc = syntax.comment;
     syntax.string = syntax_color(string);
     syntax.keyword = syntax_color(keyword);
