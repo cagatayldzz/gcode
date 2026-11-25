@@ -222,6 +222,24 @@ pub fn switch_branch_with(path: &Path, name: &str, changes: Changes) -> Result<(
   Ok(())
 }
 
+/// Creates a branch and switches to it with the changes in the working tree set aside as asked. [`Changes::Bring`] is what
+/// [`super::create_branch`] does; [`Changes::Leave`] stashes them under the branch being left first, so the new branch starts
+/// clean, and puts them back if the branch could not be made.
+pub fn create_branch_with(path: &Path, name: &str, changes: Changes) -> Result<(), String> {
+  let name = name.trim();
+  let repository = super::check_new_branch(path, name)?;
+  let current = repository.head().ok().and_then(|head| head.shorthand().ok().map(str::to_string)).unwrap_or_default();
+  if changes == Changes::Bring || !has_changes(path) {
+    return super::create_branch(path, name);
+  }
+  stash_changes(path, &current)?;
+  if let Err(error) = super::create_branch(path, name) {
+    let _ = restore_stash(path, &current);
+    return Err(error);
+  }
+  Ok(())
+}
+
 fn stash_message(branch: &str) -> String {
   format!("{STASH_MARK}{branch}>")
 }

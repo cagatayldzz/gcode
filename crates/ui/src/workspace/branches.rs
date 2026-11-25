@@ -28,13 +28,84 @@ impl Workspace {
     if git.changes.is_empty() {
       self.run_switch(name, None, window, cx);
     } else {
-      self.ask_switch_changes(name, window, cx);
+      let target = name.clone();
+      self.ask_changes(
+        "Switch Branch",
+        "Switch Branch",
+        name,
+        move |this, changes, window, cx| this.run_switch(target.clone(), Some(changes), window, cx),
+        window,
+        cx,
+      );
     }
   }
 
-  fn ask_switch_changes(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+  /// Creates a branch and switches to it. With uncommitted changes it first asks what to do with them: they come along, or stay
+  /// stashed on the branch being left.
+  pub(super) fn create_branch_asking(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else {
+      window.push_notification(crate::failure("Open a project first."), cx);
+      return;
+    };
+    // A name that cannot be used is reported before anything is asked.
+    if let Err(message) = ws_git::check_new_branch(&root, name.trim()) {
+      window.push_notification(crate::failure(message), cx);
+      return;
+    }
+    window.close_dialog(cx);
+    if self.git.as_ref().is_some_and(|git| git.changes.is_empty()) {
+      self.run_create(name, None, window, cx);
+    } else {
+      let target = name.clone();
+      self.ask_changes(
+        "Create a Branch",
+        "Create Branch",
+        name,
+        move |this, changes, window, cx| this.run_create(target.clone(), Some(changes), window, cx),
+        window,
+        cx,
+      );
+    }
+  }
+
+  fn run_create(&mut self, name: String, changes: Option<Changes>, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(root) = self.projects.active.clone() else { return };
+    let work = cx.background_executor().spawn({
+      let root = root.clone();
+      async move {
+        match changes {
+          Some(changes) => ws_git::create_branch_with(&root, &name, changes),
+          None => ws_git::create_branch(&root, &name),
+        }
+      }
+    });
+    cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.settle_job(&root, cx);
+        if let Err(message) = result {
+          window.push_notification(crate::failure(message), cx);
+        }
+        cx.notify();
+      });
+    })
+    .detach();
+  }
+
+  /// Asks what to do with the uncommitted changes before moving to the branch `name` (an existing one, or one about to be made):
+  /// leave them on the current branch, or bring them along. `run` carries out the choice.
+  fn ask_changes(
+    &mut self,
+    title: &'static str,
+    confirm: &'static str,
+    name: String,
+    run: impl Fn(&mut Self, Changes, &mut Window, &mut Context<Self>) + 'static,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
     let Some(git) = self.git.as_ref() else { return };
     let current = git.branch.clone();
+    let run = Rc::new(run);
     let workspace = cx.entity();
     // What the radio choice is now: it lives outside the dialog, which is built again every time it is drawn.
     let choice = Rc::new(Cell::new(Changes::Leave));
@@ -66,9 +137,9 @@ impl Workspace {
             window.refresh();
           })
       };
-      let (switch_workspace, switch_name, switch_choice) = (workspace.clone(), name.clone(), choice.clone());
+      let (switch_workspace, switch_run, switch_choice) = (workspace.clone(), run.clone(), choice.clone());
       dialog
-        .title("Switch Branch")
+        .title(title)
         .width(px(480.))
         .p_0()
         .child(
@@ -108,10 +179,10 @@ impl Workspace {
             .border_t_1()
             .border_color(palette.border)
             .child(dialog_button("switch-cancel", "Cancel", false, |_, _| {}))
-            .child(dialog_button("switch-confirm", "Switch Branch", true, move |window, cx| {
-              let name = switch_name.clone();
+            .child(dialog_button("switch-confirm", confirm, true, move |window, cx| {
               let changes = switch_choice.get();
-              switch_workspace.update(cx, |this, cx| this.run_switch(name, Some(changes), window, cx));
+              let run = switch_run.clone();
+              switch_workspace.update(cx, |this, cx| run(this, changes, window, cx));
             })),
         )
     });

@@ -605,7 +605,7 @@ impl Workspace {
     self._dialog_subscription = Some(cx.subscribe_in(&input, window, |this, input, event: &InputEvent, window, cx| {
       if let InputEvent::PressEnter { .. } = event {
         let name = input.read(cx).value().to_string();
-        this.create_branch_named(&name, window, cx);
+        this.create_branch_asking(name, window, cx);
       }
     }));
     let workspace = cx.entity();
@@ -631,25 +631,12 @@ impl Workspace {
             .child(Button::new("new-branch-cancel").outline().label("Cancel").on_click(|_, window, cx| window.close_dialog(cx)))
             .child(Button::new("new-branch-create").primary().label("Create Branch").on_click(move |_, window, cx| {
               let name = name.read(cx).value().to_string();
-              create.update(cx, |this, cx| this.create_branch_named(&name, window, cx));
+              create.update(cx, |this, cx| this.create_branch_asking(name, window, cx));
             })),
         )
     });
     let focus = input.read(cx).focus_handle(cx);
     window.defer(cx, move |window, cx| focus.focus(window, cx));
-  }
-
-  /// Creates a branch at the current commit and switches to it; the dialog closes when it worked, and otherwise says why.
-  fn create_branch_named(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
-    let result = self.projects.active.clone().ok_or_else(|| "Open a project first.".to_string()).and_then(|root| ws_git::create_branch(&root, name));
-    match result {
-      Ok(()) => {
-        self.refresh_project();
-        window.close_dialog(cx);
-        cx.notify();
-      }
-      Err(message) => window.push_notification(crate::failure(message), cx),
-    }
   }
 
   /// Opens or closes the repository menu of the title bar; opening clears the filter and focuses it.

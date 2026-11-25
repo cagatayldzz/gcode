@@ -8,8 +8,8 @@ pub mod editor_diff;
 
 mod branch;
 pub use branch::{
-  branch_entries, delete_branch, delete_remote_branch, discard_stash, has_changes, has_stash, rename_branch, restore_stash, stash_changes,
-  switch_branch_with, upstream_remote, BranchEntry, Changes, SWITCH_OVERWRITE,
+  branch_entries, create_branch_with, delete_branch, delete_remote_branch, discard_stash, has_changes, has_stash, rename_branch, restore_stash,
+  stash_changes, switch_branch_with, upstream_remote, BranchEntry, Changes, SWITCH_OVERWRITE,
 };
 
 mod commit_actions;
@@ -485,10 +485,8 @@ pub fn branches(path: &Path) -> Result<Vec<String>, String> {
   Ok(names)
 }
 
-/// Creates a branch at the current commit and switches to it, like `git switch -c`. The changes in the working tree come along.
-/// In a repository without commits the branch just becomes the name of the unborn one.
-pub fn create_branch(path: &Path, name: &str) -> Result<(), String> {
-  let name = name.trim();
+/// Whether a branch called `name` (already trimmed) could be created now; gives the repository when it can.
+pub fn check_new_branch(path: &Path, name: &str) -> Result<Repository, String> {
   if name.is_empty() {
     return Err("Enter a branch name.".into());
   }
@@ -502,6 +500,14 @@ pub fn create_branch(path: &Path, name: &str) -> Result<(), String> {
   if repository.find_branch(name, git2::BranchType::Local).is_ok() {
     return Err(format!("A branch named {name} already exists."));
   }
+  Ok(repository)
+}
+
+/// Creates a branch at the current commit and switches to it, like `git switch -c`. The changes in the working tree come along.
+/// In a repository without commits the branch just becomes the name of the unborn one.
+pub fn create_branch(path: &Path, name: &str) -> Result<(), String> {
+  let name = name.trim();
+  let repository = check_new_branch(path, name)?;
   match repository.head().ok().and_then(|head| head.peel_to_commit().ok()) {
     Some(commit) => {
       repository.branch(name, &commit, false).map_err(|error| error.message().to_string())?;

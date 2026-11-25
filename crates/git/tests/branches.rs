@@ -448,3 +448,29 @@ fn a_diff_of_many_files_matches_bracketed_paths_literally() {
   assert!(!diff.contains("other"));
   let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_new_branch_takes_the_changes_along_or_leaves_them_stashed() {
+  let dir = repository("create-with-changes");
+  fs::write(dir.join("a.txt"), "one\n").unwrap();
+  commit_all(&dir, "initial");
+  let current = |dir: &std::path::Path| git2::Repository::open(dir).unwrap().head().unwrap().shorthand().unwrap().to_string();
+
+  fs::write(dir.join("a.txt"), "changed\n").unwrap();
+  ws_git::create_branch_with(&dir, "brought", ws_git::Changes::Bring).unwrap();
+  assert_eq!(current(&dir), "brought");
+  assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "changed\n");
+  commit_all(&dir, "brought");
+
+  fs::write(dir.join("a.txt"), "more\n").unwrap();
+  ws_git::create_branch_with(&dir, "clean", ws_git::Changes::Leave).unwrap();
+  assert_eq!(current(&dir), "clean");
+  assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "changed\n");
+  assert!(ws_git::has_stash(&dir, "brought"));
+
+  // A name that cannot be used stops before anything is stashed.
+  fs::write(dir.join("a.txt"), "again\n").unwrap();
+  assert!(ws_git::create_branch_with(&dir, "brought", ws_git::Changes::Leave).is_err());
+  assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "again\n");
+  fs::remove_dir_all(dir).unwrap();
+}
