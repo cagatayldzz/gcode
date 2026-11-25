@@ -40,7 +40,9 @@ pub fn run() {
       KeyBinding::new("cmd-shift-m", MentionProjects, None),
       KeyBinding::new("cmd-shift-f", SearchProject, None),
       KeyBinding::new("cmd-enter", OpenSearchResults, Some("ProjectSearch")),
-      KeyBinding::new("cmd-d", SplitRight, None),
+      // A binding without a context counts as the deepest match and would win over the editor's own ⌘D (add next occurrence), so
+      // splitting is bound to the terminal only.
+      KeyBinding::new("cmd-d", SplitRight, Some("Terminal")),
       KeyBinding::new("cmd-shift-d", SplitDown, None),
       // The terminal's own: they act on the selection and the screen of the shell that has the keyboard.
       KeyBinding::new("cmd-c", CopySelection, Some("Terminal")),
