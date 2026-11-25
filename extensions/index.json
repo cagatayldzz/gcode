@@ -27,6 +27,33 @@
       "version": "0.0.0",
       "icon": "icons/headphones.svg",
       "status": "draft"
+    },
+    {
+      "id": "issues",
+      "name": "Issues",
+      "description": "The issues of the repository's host: browse, filter and open them without leaving the app. In development.",
+      "publisher": "gcode",
+      "version": "0.0.0",
+      "icon": "icons/circle-dot.svg",
+      "status": "draft"
+    },
+    {
+      "id": "actions",
+      "name": "Actions",
+      "description": "The CI runs and workflows of the repository's host, with their status and logs. In development.",
+      "publisher": "gcode",
+      "version": "0.0.0",
+      "icon": "icons/workflow.svg",
+      "status": "draft"
+    },
+    {
+      "id": "scanning",
+      "name": "Scanning",
+      "description": "Code analysis, dependency updates like Dependabot, and security alerts for the repository. In development.",
+      "publisher": "gcode",
+      "version": "0.0.0",
+      "icon": "icons/shield-check.svg",
+      "status": "draft"
     }
   ]
 }

@@ -39,7 +39,7 @@ Extensions view then offers **Update** for installed copies whose version differ
 ## Drafts
 
 An index entry with `"status": "draft"` (and no `package` or `sha256`) is only a sketch: the Marketplace lists it with **Coming soon** and
-`install` refuses it. Spotify and YouTube Music are drafts. To make one real, add its `<id>/manifest.json`, replace `status` with `package` and `sha256`,
+`install` refuses it. Spotify, YouTube Music, Issues, Actions and Scanning (code analysis, dependency updates, security alerts) are drafts. To make one real, add its `<id>/manifest.json`, replace `status` with `package` and `sha256`,
 and build the feature in the app that the manifest switches on.
 
 ## In the interface
