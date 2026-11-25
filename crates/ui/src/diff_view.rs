@@ -290,8 +290,8 @@ impl ShownDiff {
       .soft_wrap(wraps(cx))
       .change_background(false)
       .hover_highlight(DiffHoverHighlight::Both)
-      // The `@@` line only repeats what the row of folded lines below it says.
-      .hunk_separator(DiffHunkSeparator::Simple)
+      // The `@@ -a,b +c,d @@ scope` line above each hunk, as GitHub Desktop shows it.
+      .hunk_separator(DiffHunkSeparator::Metadata)
       .decorations(decorations)
   }
 }
