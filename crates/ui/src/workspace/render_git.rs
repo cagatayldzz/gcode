@@ -161,7 +161,7 @@ impl Workspace {
       let detail = if let Some(work) = self.remote_work_here() {
         work.progress.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
       } else if !sync.upstream {
-        format!("Send it to {}", sync.remote)
+        format!("Publish this branch to {}", sync.remote)
       } else {
         match sync.last_fetched {
           Some(time) => format!("Last fetched {}", time_ago(time)),
