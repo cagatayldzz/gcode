@@ -738,8 +738,8 @@ impl EditorPanel {
     let state = cx.new(|cx| {
       let mut state =
         EditorState::new(window, cx).language(language).line_number(true).gutter_decorations_width(window.rem_size() / 4.).default_value(text);
-      // Long lines are not wrapped: the file scrolls sideways, as on GitHub.
-      state.set_soft_wrap(false, window, cx);
+      // Code scrolls sideways when a line is long, as on GitHub; prose (Markdown) wraps at the edge of the editor.
+      state.set_soft_wrap(language == "markdown", window, cx);
       // The editor's scrollbars (vertical, and horizontal for long lines) stay visible instead of fading out when the file is not scrolling.
       state.set_scrollbar_renderer(Some(Rc::new(|context, _, _| {
         let axis = context.axis();
