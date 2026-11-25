@@ -41,6 +41,9 @@ pub fn installed_in(dir: &Path) -> Vec<Installed> {
 
 /// Downloads the package of `available`, checks it and installs it.
 pub fn install(available: &Available) -> Result<Installed, ExtensionError> {
+  if available.draft {
+    return Err(ExtensionError::new(format!("{} is not available yet.", available.name)));
+  }
   let (status, body) = ws_activity::timed(
     "http",
     || format!("GET {} (install an extension)", available.package_url),
@@ -59,6 +62,9 @@ pub fn install(available: &Available) -> Result<Installed, ExtensionError> {
 /// Installs the downloaded manifest `text` of `available` in `dir`: the text must be what the index says (its SHA-256), and say it is
 /// the extension the index named. Written as a whole or not at all.
 pub fn install_from(dir: &Path, available: &Available, text: &str) -> Result<Installed, ExtensionError> {
+  if available.draft {
+    return Err(ExtensionError::new(format!("{} is not available yet.", available.name)));
+  }
   if hex(&Sha256::digest(text.as_bytes())) != available.sha256 {
     return Err(ExtensionError::new("The download does not match its published checksum."));
   }

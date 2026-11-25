@@ -82,6 +82,7 @@ mod entries;
 mod file_actions;
 mod git;
 mod helpers;
+mod missing_project;
 mod profiles;
 mod projects;
 mod quick_open;
@@ -383,6 +384,9 @@ pub struct Workspace {
   search_epoch: u64,
   /// The changed files left out of the next commit.
   excluded: HashSet<PathBuf>,
+  /// The changed files chosen together in the Changes list (⌘-click, ⇧-click), and where a ⇧-click range starts.
+  chosen_changes: HashSet<PathBuf>,
+  choice_anchor: Option<PathBuf>,
   commit_summary: Entity<InputState>,
   commit_description: Entity<TextareaState>,
   /// A commit is being made.
@@ -497,6 +501,10 @@ pub struct Workspace {
   _terminal_pulse_task: Task<()>,
   /// A check for projects whose folder was deleted is running.
   syncing: bool,
+  /// The listed projects whose folder is gone, found by the last check; they stay listed, and opening one says so.
+  missing_projects: HashSet<PathBuf>,
+  /// A missing project is being cloned again.
+  recovering: bool,
   dock: Entity<DockArea>,
   editor_panel: Entity<EditorPanel>,
   file_actions: FileActions,
@@ -571,6 +579,8 @@ impl Workspace {
       search_cancellation: None,
       search_epoch: 0,
       excluded: HashSet::new(),
+      chosen_changes: HashSet::new(),
+      choice_anchor: None,
       commit_summary: commit_summary.clone(),
       commit_description: commit_description.clone(),
       committing: false,
@@ -794,6 +804,8 @@ impl Workspace {
         }
       }),
       syncing: false,
+      missing_projects: HashSet::new(),
+      recovering: false,
     };
     this.sync_projects(window, cx);
     this.check_remote_rename(cx);
@@ -942,7 +954,9 @@ impl Render for Workspace {
       self.dock.clone().into_any_element()
     };
     // The terminals take the whole main area, like a terminal window; the sidebar stays beside it.
-    let main_area = if let Some(settings) = &self.project_settings {
+    let main_area = if self.active_project_missing() {
+      self.render_missing_project(cx)
+    } else if let Some(settings) = &self.project_settings {
       settings.clone().into_any_element()
     } else if self.terminal_open {
       self.render_terminal_area(window, cx).into_any_element()

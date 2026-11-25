@@ -9,6 +9,24 @@
       "icon": "icons/bot-message-square.svg",
       "package": "ai-agent/manifest.json",
       "sha256": "62517a9156f4688173525b9cba4db117c6b084b87fff77f69cd79a8f251ba1fa"
+    },
+    {
+      "id": "spotify",
+      "name": "Spotify",
+      "description": "Spotify, inside the app. In development.",
+      "publisher": "gcode",
+      "version": "0.0.0",
+      "icon": "icons/music.svg",
+      "status": "draft"
+    },
+    {
+      "id": "youtube-music",
+      "name": "YouTube Music",
+      "description": "YouTube Music, inside the app. In development.",
+      "publisher": "gcode",
+      "version": "0.0.0",
+      "icon": "icons/headphones.svg",
+      "status": "draft"
     }
   ]
 }

@@ -282,3 +282,25 @@ fn swapping_two_projects_exchanges_their_places_and_keeps_their_categories() {
   assert!(!list.swap_projects(&PathBuf::from("/work/a"), &PathBuf::from("/work/a")));
   assert!(!list.swap_projects(&PathBuf::from("/work/a"), &PathBuf::from("/work/missing")));
 }
+
+#[test]
+fn the_address_a_project_was_cloned_from_is_remembered_and_saved() {
+  let dir = std::env::temp_dir().join(format!("ws-remote-{}", std::process::id()));
+  std::fs::create_dir_all(&dir).unwrap();
+  let file = dir.join("projects.json");
+  let mut list = ProjectList::default();
+  list.add(PathBuf::from("/work/a"));
+  assert!(list.set_remote_url(&PathBuf::from("/work/a"), "git@example.com:o/a.git"));
+  // The same address again changes nothing; an empty one never erases what is known; an unlisted project is ignored.
+  assert!(!list.set_remote_url(&PathBuf::from("/work/a"), "git@example.com:o/a.git"));
+  assert!(!list.set_remote_url(&PathBuf::from("/work/a"), "  "));
+  assert!(!list.set_remote_url(&PathBuf::from("/work/none"), "x"));
+  list.save(&file).unwrap();
+  let loaded = ProjectList::load(&file);
+  assert_eq!(loaded.projects[0].remote_url.as_deref(), Some("git@example.com:o/a.git"));
+  // It follows the project when the folder is relocated.
+  let mut moved = loaded;
+  assert!(moved.relocate(&PathBuf::from("/work/a"), &PathBuf::from("/work/b")));
+  assert_eq!(moved.projects[0].remote_url.as_deref(), Some("git@example.com:o/a.git"));
+  std::fs::remove_dir_all(dir).unwrap();
+}

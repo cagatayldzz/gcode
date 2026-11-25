@@ -25,6 +25,8 @@ pub struct Available {
   pub package_url: String,
   /// The SHA-256 of the manifest, as the index says it must be.
   pub sha256: String,
+  /// Only a sketch: listed so that it can be seen, but it has no package yet and cannot be installed.
+  pub draft: bool,
 }
 
 /// `owner/name` of the GitHub repository that publishes the extensions.
@@ -74,9 +76,12 @@ pub fn parse_index(json: &str, slug: &str) -> Result<Vec<Available>, ExtensionEr
       .iter()
       .filter_map(|entry| {
         let (id, package, sha256) = (text(entry, "id"), text(entry, "package"), text(entry, "sha256").to_ascii_lowercase());
+        let draft = entry["status"].as_str() == Some("draft");
         let plain =
           |part: &str| !part.is_empty() && part != ".." && part != "." && part.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
-        let valid = is_plain_id(&id) && package.split('/').all(plain) && sha256.len() == 64 && sha256.chars().all(|c| c.is_ascii_hexdigit());
+        // A draft has no package to check; any other entry needs a plain path and the hash of its manifest.
+        let valid =
+          is_plain_id(&id) && (draft || (package.split('/').all(plain) && sha256.len() == 64 && sha256.chars().all(|c| c.is_ascii_hexdigit())));
         valid.then(|| Available {
           name: Some(text(entry, "name")).filter(|name| !name.is_empty()).unwrap_or_else(|| id.clone()),
           description: text(entry, "description"),
@@ -85,8 +90,9 @@ pub fn parse_index(json: &str, slug: &str) -> Result<Vec<Available>, ExtensionEr
           icon: Some(text(entry, "icon"))
             .filter(|icon| icon.starts_with("icons/") && !icon.contains(".."))
             .unwrap_or_else(|| "icons/package.svg".into()),
-          package_url: format!("{prefix}{package}"),
-          sha256,
+          package_url: if draft { String::new() } else { format!("{prefix}{package}") },
+          sha256: if draft { String::new() } else { sha256 },
+          draft,
           id,
         })
       })

@@ -20,11 +20,13 @@ pub struct Project {
   pub favorite: bool,
   /// Branches the user starred in this project: listed first in the branch menu. Kept here, not in the repository.
   pub favorite_branches: Vec<String>,
+  /// Where the repository was cloned from, as it was last seen: what "Clone Again" uses when the folder is gone.
+  pub remote_url: Option<String>,
 }
 
 impl Project {
   pub fn new(path: PathBuf) -> Self {
-    Self { path, category: None, name: None, icon: None, color: None, favorite: false, favorite_branches: Vec::new() }
+    Self { path, category: None, name: None, icon: None, color: None, favorite: false, favorite_branches: Vec::new(), remote_url: None }
   }
 
   /// The folder's name.
@@ -84,6 +86,7 @@ impl ProjectList {
                 .and_then(Value::as_array)
                 .map(|names| names.iter().filter_map(|name| name.as_str().map(str::to_owned)).collect())
                 .unwrap_or_default(),
+              remote_url: text(object, "remote_url").filter(|url| !url.is_empty()),
             }),
             _ => None,
           })
@@ -120,6 +123,7 @@ impl ProjectList {
           "color": project.color,
           "favorite": project.favorite,
           "favorite_branches": project.favorite_branches,
+          "remote_url": project.remote_url,
         })).collect::<Vec<_>>(),
       "categories": self.categories.iter().map(|category| json!({ "id": category.id, "name": category.name, "collapsed": category.collapsed })).collect::<Vec<_>>(),
       "active": self.active.as_ref().map(|path| path.to_string_lossy()),
@@ -181,6 +185,18 @@ impl ProjectList {
       self.active = Some(to.to_path_buf());
     }
     true
+  }
+
+  /// Remembers where a project's repository comes from. Returns whether that changed anything (so the list needs saving).
+  pub fn set_remote_url(&mut self, path: &Path, url: &str) -> bool {
+    let url = Some(url.trim().to_owned()).filter(|url| !url.is_empty());
+    match self.projects.iter_mut().find(|project| project.path == path) {
+      Some(project) if project.remote_url != url && url.is_some() => {
+        project.remote_url = url;
+        true
+      }
+      _ => false,
+    }
   }
 
   /// Stars or unstars a project.

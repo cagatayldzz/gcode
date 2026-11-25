@@ -15,6 +15,10 @@ impl Workspace {
   /// Starts a shell in the open project if it has none: a project is not left without one.
   pub(super) fn ensure_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
+    // A shell cannot start in a folder that is gone; the project's page says so instead.
+    if !root.is_dir() {
+      return;
+    }
     if self.terminal_tabs.get(&root).is_none_or(Arrangement::is_empty) {
       if let Some(terminal) = self.start_terminal(root.clone(), window, cx) {
         self.terminal_tabs.entry(root).or_insert_with(Arrangement::new).add_tab(terminal);

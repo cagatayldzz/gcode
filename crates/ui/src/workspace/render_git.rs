@@ -2,6 +2,7 @@
 
 use super::*;
 use gpui_kit::component::avatar::Avatar;
+use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::ElementExt as _;
 
 /// The fixed height of a line in the Changes list: the virtualized list needs every row's height before it draws.
@@ -246,6 +247,95 @@ impl Workspace {
     git.changes.iter().filter(|change| query.is_empty() || change.path.to_string_lossy().to_lowercase().contains(query)).collect()
   }
 
+  /// ⌘-click: adds a file to the chosen ones, or takes it out. The file that is open starts the choice.
+  fn toggle_change_choice(&mut self, file: PathBuf, cx: &mut Context<Self>) {
+    if self.chosen_changes.is_empty() {
+      self.chosen_changes.extend(self.selected_change.clone());
+    }
+    if !self.chosen_changes.remove(&file) {
+      self.chosen_changes.insert(file.clone());
+    }
+    self.choice_anchor = Some(file);
+    cx.notify();
+  }
+
+  /// ⇧-click: chooses every file of the list between the one chosen last and this one.
+  fn extend_change_choice(&mut self, file: PathBuf, cx: &mut Context<Self>) {
+    let query = self.changes_filter.read(cx).value().trim().to_lowercase();
+    let paths: Vec<PathBuf> = self.visible_changes(&query).into_iter().map(|change| change.path.clone()).collect();
+    let anchor = self.choice_anchor.clone().or_else(|| self.selected_change.clone()).unwrap_or_else(|| file.clone());
+    if let (Some(from), Some(to)) = (paths.iter().position(|path| *path == anchor), paths.iter().position(|path| *path == file)) {
+      self.chosen_changes = paths[from.min(to)..=from.max(to)].iter().cloned().collect();
+    }
+    cx.notify();
+  }
+
+  /// The files chosen together that are still changed, in the order of the list; more than one only when several were chosen.
+  fn chosen_changed_files(&self) -> Vec<PathBuf> {
+    let Some(git) = self.git.as_ref() else { return Vec::new() };
+    git.changes.iter().filter(|change| self.chosen_changes.contains(&change.path)).map(|change| change.path.clone()).collect()
+  }
+
+  /// The right-click menu of several chosen files: what can be done to all of them at once.
+  fn chosen_menu(menu: PopupMenu, workspace: &Entity<Self>, files: &[PathBuf], busy: bool) -> PopupMenu {
+    let count = files.len();
+    let extensions: HashSet<String> =
+      files.iter().filter_map(|file| file.extension().map(|extension| extension.to_string_lossy().into_owned())).collect();
+    let common_extension =
+      (extensions.len() == 1 && files.iter().all(|file| file.extension().is_some())).then(|| extensions.into_iter().next()).flatten();
+    let (discard, ignore, ignore_extension, include, exclude) =
+      (workspace.clone(), workspace.clone(), workspace.clone(), workspace.clone(), workspace.clone());
+    let (discard_files, ignore_files, include_files, exclude_files) = (files.to_vec(), files.to_vec(), files.to_vec(), files.to_vec());
+    let copied = files.iter().map(|file| file.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
+    menu
+      .item(PopupMenuItem::new(format!("Discard {count} Selected Changes…")).icon(Icon::empty().path("icons/trash.svg")).disabled(busy).on_click(
+        move |_, window, cx| {
+          discard.update(cx, |this, cx| {
+            this.confirm_discard_changes(discard_files.clone(), window, cx);
+            this.chosen_changes.clear();
+          })
+        },
+      ))
+      .separator()
+      .item(PopupMenuItem::new(format!("Ignore {count} Selected Files (Add to .gitignore)")).icon(Icon::empty().path("icons/eye-off.svg")).on_click(
+        move |_, window, cx| {
+          let patterns = ignore_files.iter().map(|file| format!("/{}", file.display())).collect();
+          ignore.update(cx, |this, cx| {
+            this.ignore_patterns(patterns, window, cx);
+            this.chosen_changes.clear();
+          })
+        },
+      ))
+      .when_some(common_extension, |menu, extension| {
+        menu.item(
+          PopupMenuItem::new(format!("Ignore All .{extension} Files (Add to .gitignore)"))
+            .icon(Icon::empty().path("icons/eye-off.svg"))
+            .on_click(move |_, window, cx| ignore_extension.update(cx, |this, cx| this.ignore_patterns(vec![format!("*.{extension}")], window, cx))),
+        )
+      })
+      .separator()
+      .item(PopupMenuItem::new("Include Selected Files").icon(Icon::empty().path("icons/check.svg")).on_click(move |_, _, cx| {
+        include.update(cx, |this, cx| {
+          for file in &include_files {
+            this.excluded.remove(file);
+          }
+          cx.notify();
+        })
+      }))
+      .item(PopupMenuItem::new("Exclude Selected Files").icon(Icon::empty().path("icons/x.svg")).on_click(move |_, _, cx| {
+        exclude.update(cx, |this, cx| {
+          this.excluded.extend(exclude_files.iter().cloned());
+          cx.notify();
+        })
+      }))
+      .separator()
+      .item(
+        PopupMenuItem::new("Copy Relative Paths")
+          .icon(Icon::empty().path("icons/copy.svg"))
+          .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()))),
+      )
+  }
+
   /// One line of the Changes list: a checkbox, the file name with its folder, and the kind of change. Its height is fixed
   /// ([`CHANGE_ROW_HEIGHT`]) because the list is virtualized, and its width is the list's own: a virtual list lays its rows out
   /// at their content width, so a percentage would leave short rows narrow and long ones unclipped.
@@ -254,7 +344,13 @@ impl Workspace {
     let workspace = cx.entity();
     let root = self.projects.active.clone().unwrap_or_default();
     let file = change.path.clone();
-    let selected = self.selected_change.as_ref() == Some(&change.path);
+    let selected = self.selected_change.as_ref() == Some(&change.path) || self.chosen_changes.contains(&change.path);
+    // Right-clicking one of several chosen files acts on all of them.
+    let chosen = Some(self.chosen_changes.len())
+      .filter(|count| *count > 1)
+      .filter(|_| self.chosen_changes.contains(&change.path))
+      .map(|_| self.chosen_changed_files())
+      .filter(|files| files.len() > 1);
     let included = !self.excluded.contains(&change.path);
     // The file name first, then its folder in a smaller, secondary color; a renamed file shows where it was before the folder. Both
     // are cut with an ellipsis by the row's width.
@@ -277,8 +373,9 @@ impl Workspace {
       .when(!last, |row| row.border_b_1())
       .border_color(crate::theme::row_divider(&palette))
       .items_center()
-      .when(selected, |row| row.bg(palette.selected))
-      .hover(|row| row.bg(palette.hover))
+      // A chosen row has the blue of the band in a diff, and keeps it under the pointer.
+      .when(selected, |row| row.bg(palette.diff_band))
+      .hover(|row| row.bg(if selected { palette.diff_band } else { palette.hover }))
       .child(Checkbox::new(SharedString::from(format!("include-{}", change.path.display()))).checked(included).on_click(cx.listener({
         let file = file.clone();
         move |this, checked: &bool, _, cx| {
@@ -323,9 +420,16 @@ impl Workspace {
             let file = file.clone();
             // A double click opens the file itself, in the editor with the Explorer; one click shows its diff.
             move |this, event: &ClickEvent, window, cx| {
-              if event.click_count() >= 2 {
+              let modifiers = event.modifiers();
+              if modifiers.platform {
+                this.toggle_change_choice(file.clone(), cx);
+              } else if modifiers.shift {
+                this.extend_change_choice(file.clone(), cx);
+              } else if event.click_count() >= 2 {
                 this.open_change_in_editor(&file, window, cx);
               } else {
+                this.chosen_changes.clear();
+                this.choice_anchor = Some(file.clone());
                 this.open_change(file.clone(), cx);
               }
             }
@@ -338,6 +442,9 @@ impl Workspace {
         let ignore_folder = file.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
         let ignore_extension = file.extension().map(|extension| extension.to_string_lossy().into_owned());
         move |menu, _, _| {
+          if let Some(files) = &chosen {
+            return Self::chosen_menu(menu, &workspace, files, busy);
+          }
           let ignore_workspace = workspace.clone();
           let ignore_file = file.clone();
           let (ignore_folder, ignore_extension) = (ignore_folder.clone(), ignore_extension.clone());
@@ -416,6 +523,14 @@ impl Workspace {
       changes.iter().enumerate().map(|(offset, change)| this.change_row(change, width, first + offset + 1 == total, cx)).collect()
     })
     .track_scroll(&self.changes_scroll);
+    // The scrollbar strip is shown only when the rows are taller than the list. The height of the list is known once it was drawn, so
+    // the first time a frame is asked for again.
+    let viewport = self.changes_scroll.bounds().size.height;
+    let overflows = !viewport.is_zero() && CHANGE_ROW_HEIGHT * shown as f32 > viewport;
+    if viewport.is_zero() {
+      let this = workspace.clone();
+      cx.defer(move |cx| this.update(cx, |_, cx| cx.notify()));
+    }
     let summary_filled = !self.commit_summary.read(cx).value().trim().is_empty();
     let label = match chosen {
       1 => format!("Commit 1 file to {}", git.branch),
@@ -589,7 +704,7 @@ impl Workspace {
                   .size_full()
                   .bg(palette.background)
                   .child(div().relative().flex_1().min_w_0().h_full().child(changes_list))
-                  .child(crate::components::scrollbar_strip(&self.changes_scroll, "changes-scrollbar", cx)),
+                  .when(overflows, |row| row.child(crate::components::scrollbar_strip(&self.changes_scroll, "changes-scrollbar", cx))),
               )
             },
           ),

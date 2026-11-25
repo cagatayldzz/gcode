@@ -36,6 +36,12 @@ folder, so changing a manifest without updating its hash in `index.json` fails C
 **To publish a change:** edit `extensions/<id>/manifest.json`, raise its `version`, update `sha256` in `index.json` (`shasum -a 256`). The
 Extensions view then offers **Update** for installed copies whose version differs.
 
+## Drafts
+
+An index entry with `"status": "draft"` (and no `package` or `sha256`) is only a sketch: the Marketplace lists it with **Coming soon** and
+`install` refuses it. Spotify and YouTube Music are drafts. To make one real, add its `<id>/manifest.json`, replace `status` with `package` and `sha256`,
+and build the feature in the app that the manifest switches on.
+
 ## In the interface
 
 `ExtensionsPanel` (`extensions.rs`) is the sidebar view behind the Extensions button of the activity bar: a search field, **Installed**,

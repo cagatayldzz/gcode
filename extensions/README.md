@@ -6,3 +6,5 @@ commit**, and raise `version`: the app refuses a download that does not match th
 
 A package carries no code. It switches on a feature that is in the app and chooses among what that feature offers (for the AI Agent:
 which agents to show). What a command runs is decided by the app, never by a manifest.
+
+An entry with `"status": "draft"` and no `package`/`sha256` is listed as *Coming soon* and cannot be installed (Spotify and YouTube Music are drafts).

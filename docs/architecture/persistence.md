@@ -79,7 +79,7 @@ file; `ProjectIndex::open` uses the saved one while nothing changed, else walks 
 ```json
 {
   "projects": [
-    { "path": "/path/to/a", "category": null, "color": "#8b7bff", "icon": "rocket", "favorite": true, "favorite_branches": ["develop"] },
+    { "path": "/path/to/a", "category": null, "color": "#8b7bff", "icon": "rocket", "favorite": true, "favorite_branches": ["develop"], "remote_url": "git@example.com:o/a.git" },
     { "path": "/path/to/b", "category": "category-1", "name": "Billing" }
   ],
   "categories": [{ "id": "category-1", "name": "", "collapsed": false }],
@@ -88,6 +88,11 @@ file; `ProjectIndex::open` uses the saved one while nothing changed, else walks 
 ```
 
 A plain list of paths also loads.
+
+`remote_url` is the address of the repository as it was last seen (read from the open project's remote). It is what **Clone Again** uses when
+the project's folder is deleted outside the app: such a project stays in the list, and opening it shows "Can't find …" with **Locate…** (points the
+project at another folder, `ProjectList::relocate`), **Clone Again** (when an address is known) and **Remove**. The folders are checked in the
+background on every refresh round (`Workspace::sync_projects`); a project whose folder returns is shown again.
 
 ## Not stored yet
 

@@ -17,6 +17,7 @@ fn available(text: &str) -> Available {
     icon: "icons/bot-message-square.svg".into(),
     package_url: "https://raw.githubusercontent.com/o/r/main/extensions/ai-agent/manifest.json".into(),
     sha256: sha256(text),
+    draft: false,
   }
 }
 
@@ -103,11 +104,26 @@ fn the_published_index_matches_the_manifests_in_the_repository() {
   let slug = ws_extensions::repository_slug().expect("the repository is configured");
   let listed = parse_index(&index, slug).unwrap();
   assert!(listed.iter().any(|available| available.id == ws_extensions::AI_AGENT));
-  for available in listed {
+  for available in listed.into_iter().filter(|available| !available.draft) {
     let text = std::fs::read_to_string(root.join(&available.id).join("manifest.json")).unwrap();
     // Installing into a scratch folder checks the hash and the id, as a download would.
     let dir = tempfile::tempdir().unwrap();
     install_from(dir.path(), &available, &text)
       .unwrap_or_else(|error| panic!("{}: {error} (update the hash in extensions/index.json)", available.id));
   }
+}
+
+#[test]
+fn a_draft_is_listed_without_a_package_and_cannot_be_installed() {
+  let index = r#"{"extensions":[
+    {"id":"spotify","name":"Spotify","description":"d","status":"draft","icon":"icons/music.svg"},
+    {"id":"no-package","name":"Broken"}
+  ]}"#;
+  let listed = parse_index(index, "o/r").unwrap();
+  // The entry that is no draft and has no package is left out; the draft is kept with nothing to download.
+  assert_eq!(listed.iter().map(|available| available.id.as_str()).collect::<Vec<_>>(), ["spotify"]);
+  assert!(listed[0].draft && listed[0].package_url.is_empty() && listed[0].sha256.is_empty());
+  let dir = tempfile::tempdir().unwrap();
+  assert!(install_from(dir.path(), &listed[0], MANIFEST).unwrap_err().to_string().contains("not available yet"));
+  assert!(installed_in(dir.path()).is_empty());
 }

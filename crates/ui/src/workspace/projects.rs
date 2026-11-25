@@ -594,6 +594,7 @@ impl Workspace {
       Some(root) => {
         self.git = ws_git::summary(root);
         self.rows = explorer::rows(root, &self.expanded);
+        self.remember_remote();
       }
       None => {
         self.git = None;
@@ -602,7 +603,8 @@ impl Workspace {
     }
   }
 
-  /// Takes projects whose folder was deleted out of the list, off the interface thread, and says which.
+  /// Finds the projects whose folder was deleted or moved, off the interface thread. They stay in the list: opening one shows what can be
+  /// done (locate the folder, clone it again, remove the project). A project whose folder came back is shown again.
   pub(super) fn sync_projects(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     if self.syncing || self.projects.projects.is_empty() {
       return;
@@ -611,18 +613,19 @@ impl Workspace {
     let list = self.projects.clone();
     let work = cx.background_executor().spawn(async move { list.missing_paths() });
     cx.spawn_in(window, async move |this, cx| {
-      let missing = work.await;
+      let missing: HashSet<PathBuf> = work.await.into_iter().collect();
       let _ = this.update_in(cx, |this, window, cx| {
         this.syncing = false;
-        let names: Vec<String> =
-          missing.iter().filter_map(|path| this.projects.projects.iter().find(|project| &project.path == path)).map(Project::name).collect();
-        if names.is_empty() {
+        if this.missing_projects == missing {
           return;
         }
-        for path in &missing {
-          this.remove_project(path, window, cx);
+        let returned = this.projects.active.as_ref().is_some_and(|root| this.missing_projects.contains(root) && !missing.contains(root));
+        this.missing_projects = missing;
+        if returned {
+          this.refresh_project();
+          this.ensure_terminal(window, cx);
         }
-        window.push_notification(Notification::info(format!("Removed {}: the folder no longer exists.", names.join(", "))), cx);
+        cx.notify();
       });
     })
     .detach();
@@ -683,6 +686,7 @@ impl Workspace {
           this.warm_new_changes(&root, git.as_ref(), cx);
           this.git = git;
           this.rows = rows;
+          this.remember_remote();
           cx.notify();
         }
         if let Some((path, strategy)) = &reveal {

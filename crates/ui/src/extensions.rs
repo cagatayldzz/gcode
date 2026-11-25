@@ -261,18 +261,17 @@ impl Render for ExtensionsPanel {
         let busy = self.busy.contains(&available.id);
         let action = if busy {
           busy_mark().into_any_element()
+        } else if available.draft {
+          // Only a sketch for now: there is nothing to install yet.
+          Label::new("Coming soon").text_size(FONT_SIZE_SM).text_color(palette.text_secondary).into_any_element()
         } else {
           let install = available.clone();
           button(available.id.clone(), "Install", true, false)
             .on_click(cx.listener(move |this, _, window, cx| this.install(install.clone(), window, cx)))
             .into_any_element()
         };
-        let meta = [available.publisher.as_str(), &format!("v{}", available.version)]
-          .iter()
-          .filter(|part| part.len() > 1)
-          .copied()
-          .collect::<Vec<_>>()
-          .join(" · ");
+        let version = if available.draft { String::new() } else { format!("v{}", available.version) };
+        let meta = [available.publisher.as_str(), version.as_str()].iter().filter(|part| part.len() > 1).copied().collect::<Vec<_>>().join(" · ");
         self.item(&available.id, &available.name, &available.description, meta, &available.icon, action, cx).into_any_element()
       })
       .collect();
