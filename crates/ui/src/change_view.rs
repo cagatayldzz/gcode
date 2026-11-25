@@ -5,7 +5,7 @@ use crate::{
   commit_view::Load,
   diff_view::ShownDiff,
   settings::{code_font_size, SettingsModel},
-  theme::{colors, FONT_SIZE_SM},
+  theme::colors,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -14,7 +14,7 @@ use gpui_kit::{
     h_flex,
     label::Label,
     spinner::Spinner,
-    v_flex, ActiveTheme as _, Icon, Sizable as _,
+    v_flex, ActiveTheme as _, Sizable as _,
   },
   *,
 };
@@ -214,13 +214,6 @@ impl Render for ChangeView {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
-    let path_label = |path: &Path| {
-      let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-      let folder = path.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
-      h_flex()
-        .when_some(folder, |row, folder| row.child(Label::new(format!("{folder}/")).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground)))
-        .child(Label::new(name).text_size(FONT_SIZE_SM).font_weight(FontWeight::SEMIBOLD))
-    };
     let can_preview =
       self.file.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("svg")) && matches!(self.diff, Load::Ready(ChangeDiff::Text(_)));
     let header = h_flex()
@@ -229,10 +222,12 @@ impl Render for ChangeView {
       .py_1p5()
       .border_b_1()
       .border_color(palette.border)
-      .when_some(self.from.clone(), |header, from| {
-        header.child(path_label(&from)).child(Icon::empty().path("icons/arrow-right.svg").size_3().mx_2().text_color(theme.muted_foreground))
-      })
-      .child(path_label(&self.file))
+      .child(crate::components::file_path_bar(
+        "change",
+        &self.file.to_string_lossy(),
+        self.from.as_deref().map(|from| from.to_string_lossy()).as_deref(),
+        cx,
+      ))
       .child(div().flex_1())
       .when(can_preview, |header| {
         header.child(Button::new("toggle-svg-change-preview").ghost().small().label(if self.show_preview { "Source" } else { "Preview" }).on_click(
@@ -275,8 +270,10 @@ impl Render for ChangeView {
       {
         div()
           .size_full()
+          .relative()
           .cursor_text()
           .child(state.view(cx).header_visible(false).border_0().text_size(code_font_size(&self.settings, cx)).size_full())
+          .child(state.number_rule(cx))
           .into_any_element()
       }
     };

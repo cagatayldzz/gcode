@@ -13,6 +13,7 @@ use gpui_kit::{
     clipboard::Clipboard,
     h_flex,
     label::Label,
+    resizable::{h_resizable, resizable_panel},
     scroll::{Scrollbar, ScrollbarAxis, ScrollbarMode},
     spinner::Spinner,
     v_flex, v_virtual_list, ActiveTheme as _, Icon, Sizable as _, VirtualListScrollHandle,
@@ -23,21 +24,26 @@ use std::{path::PathBuf, rc::Rc};
 use ws_git::{ChangeKind, CommitDetail};
 
 /// The fixed height of a changed file's line: the virtualized list needs every row's height before it draws.
-const FILE_ROW_HEIGHT: Pixels = px(32.);
+const FILE_ROW_HEIGHT: Pixels = px(28.);
 
-/// The width of the list of changed files.
+/// The text size of the list of changed files: one step below the app's text size, like the Changes list.
+const FILE_FONT_SIZE: Pixels = crate::components::CHANGE_PATH_FONT_SIZE;
+
+/// The width of the list of changed files when a commit is opened, and how narrow and how wide it can be dragged.
 const FILES_WIDTH: Pixels = px(280.);
+const FILES_MIN_WIDTH: Pixels = px(200.);
+const FILES_MAX_WIDTH: Pixels = px(800.);
 
-/// The room for the path in a changed file's line: the list's width less the padding, the status mark and the gap before the path.
-const PATH_WIDTH: f32 = 226.;
+/// What a changed file's line keeps for other things than the path: the padding, the status mark and the gap before the path.
+const PATH_MARGIN: f32 = 54.;
 
 /// An estimate of the width of one character of the path, from the font size.
-const CHAR_WIDTH: f32 = 0.54 * 14.;
+const CHAR_WIDTH: f32 = 0.54 * 13.;
 
 /// The folder of a changed file with a trailing slash, as much of it as fits next to `name`: when it does not all fit, the folders in the
 /// middle are replaced by `…` (`app/settings/users/…/`) and the first ones are kept, the way a path is shortened in a long file list.
-fn shortened_folder(folder: &str, name: &str) -> String {
-  let room = (PATH_WIDTH / CHAR_WIDTH) as usize;
+fn shortened_folder(folder: &str, name: &str, width: f32) -> String {
+  let room = ((width - PATH_MARGIN) / CHAR_WIDTH) as usize;
   let fits = |text: &str| text.chars().count() + name.chars().count() <= room;
   let whole = format!("{folder}/");
   if fits(&whole) {
@@ -195,17 +201,20 @@ impl CommitView {
       .cursor_pointer()
       .when(selected, |row| row.bg(palette.selected))
       .hover(|row| row.bg(palette.hover))
-      .child(Label::new(change.kind.mark()).w_4().flex_none().text_color(mark))
+      .child(Label::new(change.kind.mark()).text_size(FILE_FONT_SIZE).w_4().flex_none().text_color(mark))
       // One path: the folder dimmed, then the file name right after it with no gap. The middle of the folder gives way when the row is narrow.
       .child(
         h_flex()
           .flex_1()
           .min_w_0()
           .overflow_hidden()
-          .when_some(folder.map(|folder| shortened_folder(&folder, &name)), |path, folder| {
-            path.child(Label::new(folder).text_color(theme.muted_foreground).flex_none().whitespace_nowrap())
-          })
-          .child(Label::new(name).min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis()),
+          .when_some(
+            folder.map(|folder| shortened_folder(&folder, &name, if width.is_zero() { FILES_WIDTH.as_f32() } else { width.as_f32() })),
+            |path, folder| {
+              path.child(Label::new(folder).text_size(FILE_FONT_SIZE).text_color(theme.muted_foreground).flex_none().whitespace_nowrap())
+            },
+          )
+          .child(Label::new(name).text_size(FILE_FONT_SIZE).min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis()),
       )
       .on_click(cx.listener(move |this, _, _, cx| this.select_file(file.clone(), cx)))
   }
@@ -362,12 +371,9 @@ impl Render for CommitView {
       .children(body_box)
       .child(footer);
     let count = detail.files.len();
+    // No border of its own on the right: the handle of the split draws the line between the list and the diff.
     let files = v_flex()
-      .w(FILES_WIDTH)
-      .flex_none()
-      .h_full()
-      .border_r_1()
-      .border_color(palette.border)
+      .size_full()
       .child(
         Label::new(if count == 1 { "1 changed file".to_string() } else { format!("{count} changed files") })
           .px_3()
@@ -405,17 +411,47 @@ impl Render for CommitView {
       Load::Loading => spinner(),
       Load::Failed(error) => message(error.clone(), false),
       Load::Ready(state) if !state.is_ready() => crate::components::skeleton_lines(16),
-      Load::Ready(state) => div()
+      Load::Ready(state) => v_flex()
         .size_full()
-        .cursor_text()
-        .child(state.with_controls(state.view(cx).border_0().text_size(code_font_size(&self.settings, cx)).size_full(), cx))
+        .min_h_0()
+        // The path on the left, the buttons that move through the changes and set the diff at the right end.
+        .child(
+          h_flex()
+            .flex_none()
+            .gap_2()
+            .px_4()
+            .py_1p5()
+            .items_center()
+            .justify_between()
+            .border_b_1()
+            .border_color(palette.border)
+            .child(
+              div()
+                .flex_1()
+                .min_w_0()
+                .children(self.selected.as_ref().map(|file| crate::components::file_path_bar("commit", &file.to_string_lossy(), None, cx))),
+            )
+            .child(div().flex_none().child(crate::diff_view::diff_controls(state.state()))),
+        )
+        .child(
+          div()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .overflow_hidden()
+            .relative()
+            .cursor_text()
+            .child(state.view(cx).header_visible(false).border_0().text_size(code_font_size(&self.settings, cx)).size_full())
+            .child(state.number_rule(cx)),
+        )
         .into_any_element(),
     };
-    v_flex()
-      .size_full()
-      .min_w_0()
-      .bg(theme.background)
-      .child(header)
-      .child(h_flex().flex_1().min_h_0().child(files).child(div().flex_1().min_w_0().h_full().child(diff)))
+    v_flex().size_full().min_w_0().bg(theme.background).child(header).child(
+      div().flex_1().min_h_0().child(
+        h_resizable("commit-files-split")
+          .child(resizable_panel().size(FILES_WIDTH).size_range(FILES_MIN_WIDTH..FILES_MAX_WIDTH).fixed().child(files))
+          .child(resizable_panel().child(div().size_full().min_w_0().child(diff))),
+      ),
+    )
   }
 }

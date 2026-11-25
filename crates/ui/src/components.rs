@@ -8,9 +8,11 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
     button::ButtonCustomVariant,
+    clipboard::Clipboard,
     h_flex,
     input::{Input, InputState, Textarea, TextareaState},
     skeleton::Skeleton,
+    text::{TextView, TextViewStyle},
     v_flex, ActiveTheme as _,
   },
   *,
@@ -174,4 +176,43 @@ pub(crate) fn shortened_middle(path: &str, room: f32) -> String {
   let tail = (fits - 1) / 2;
   let head = fits - 1 - tail;
   format!("{}…{}", chars[..head].iter().collect::<String>(), chars[chars.len() - tail..].iter().collect::<String>())
+}
+
+/// Escapes what Markdown would read as formatting, so that a path shows as it is written.
+fn plain_markdown(text: &str) -> String {
+  let mut escaped = String::with_capacity(text.len());
+  for character in text.chars() {
+    if "\\`*_{}[]<>()#+-.!|~".contains(character) {
+      escaped.push('\\');
+    }
+    escaped.push(character);
+  }
+  escaped
+}
+
+/// A changed file's path above its diff: a copy button, then the path as text that can be selected with the mouse. A renamed file
+/// shows where it was before, then an arrow. `id` tells the path bars of different places apart.
+pub(crate) fn file_path_bar(id: &str, path: &str, from: Option<&str>, cx: &App) -> impl IntoElement {
+  let text = match from {
+    Some(from) => format!("{} → {}", plain_markdown(from), plain_markdown(path)),
+    None => plain_markdown(path),
+  };
+  h_flex()
+    .min_w_0()
+    .gap_2()
+    .items_center()
+    .child(
+      div()
+        .flex_none()
+        .cursor_pointer()
+        .child(Clipboard::new(SharedString::from(format!("copy-{id}-path"))).value(path.to_string()).tooltip("Copy relative path")),
+    )
+    .child(
+      TextView::markdown(SharedString::from(format!("{id}-path")), text)
+        .selectable(true)
+        .style(TextViewStyle { paragraph_gap: rems(0.), ..Default::default() })
+        .min_w_0()
+        .text_size(crate::theme::FONT_SIZE_SM)
+        .text_color(cx.theme().foreground),
+    )
 }

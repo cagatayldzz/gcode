@@ -5,7 +5,7 @@ use gpui_kit::component::avatar::Avatar;
 use gpui_kit::component::ElementExt as _;
 
 /// The fixed height of a line in the Changes list: the virtualized list needs every row's height before it draws.
-const CHANGE_ROW_HEIGHT: Pixels = px(32.);
+const CHANGE_ROW_HEIGHT: Pixels = px(28.);
 
 impl Workspace {
   /// The row sizes of the Changes list, rebuilt only when the number of files changes.

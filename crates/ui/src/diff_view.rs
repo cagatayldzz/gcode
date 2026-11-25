@@ -6,7 +6,7 @@ use gpui_kit::{
   base::input::Rope,
   component::{
     button::{Button, ButtonVariants as _},
-    diff::{Diff, DiffDecoration, DiffFile, DiffHoverHighlight, DiffInlineUnit, DiffLineRange, DiffMode, DiffSide, DiffState},
+    diff::{Diff, DiffDecoration, DiffFile, DiffHoverHighlight, DiffHunkSeparator, DiffInlineUnit, DiffLineRange, DiffMode, DiffSide, DiffState},
     h_flex,
     highlighter::{HighlightTheme, SyntaxHighlighter},
     menu::{DropdownMenu as _, PopupMenuItem},
@@ -189,6 +189,8 @@ fn wraps(cx: &App) -> bool {
 pub(crate) struct ShownDiff {
   state: Entity<DiffState>,
   changed: Vec<ChangedRange>,
+  /// The digits of the longest line number, which sets the width of the line-number columns.
+  digits: usize,
   /// Files whose colors (syntax, changed words) the Kit is still preparing; the diff is not shown before they are in, so that it
   /// does not paint as plain text first and change under the eyes.
   waiting: Rc<Cell<usize>>,
@@ -201,6 +203,7 @@ impl ShownDiff {
   /// Shows `files`, which were parsed from `patch`. The owner is redrawn as the colors come in; until then [`Self::is_ready`] is false.
   pub fn new<T: 'static>(files: Vec<DiffFile>, patch: &str, cx: &mut Context<T>) -> Self {
     let changed = changed_ranges(patch, &files);
+    let digits = widest_line_digits(patch);
     let waiting = Rc::new(Cell::new(files.len()));
     let state = cx.new(|cx| DiffState::new(files, cx).with_mode(DiffMode::Unified));
     let theme_subscription = state.update(cx, |state, cx| {
@@ -238,7 +241,7 @@ impl ShownDiff {
         }
       }
     });
-    Self { state, changed, waiting, _theme_subscription: theme_subscription, _prepared: prepared, _give_up: give_up }
+    Self { state, changed, digits, waiting, _theme_subscription: theme_subscription, _prepared: prepared, _give_up: give_up }
   }
 
   /// Whether the colors are in, so that the diff can be shown. A diff whose files were replaced ([`Self::set_files`]) stays shown.
@@ -248,6 +251,7 @@ impl ShownDiff {
 
   pub fn set_files(&mut self, files: Vec<DiffFile>, patch: &str, cx: &mut App) {
     self.changed = changed_ranges(patch, &files);
+    self.digits = widest_line_digits(patch);
     self.state.update(cx, |state, cx| state.set_files(files, cx));
   }
 
@@ -260,7 +264,19 @@ impl ShownDiff {
       .size_full()
       .min_h_0()
       .child(h_flex().px_2().py_1().justify_end().border_b_1().border_color(cx.theme().border).child(diff_controls(&self.state)))
-      .child(div().flex_1().min_h_0().min_w_0().overflow_hidden().child(diff))
+      .child(div().flex_1().min_h_0().min_w_0().overflow_hidden().relative().child(diff).child(self.number_rule(cx)))
+  }
+
+  /// Two thin rules, one between the old and the new line numbers and one after the new ones, to be laid over the diff (a `relative` parent of the same size).
+  /// The Kit has no such rule, so it is placed from the Kit's own sizes: both are in rems, the columns being as wide as the digits
+  /// of the longest line number plus a rem, after half a rem of padding. It stands still while the diff scrolls sideways,
+  /// which a diff that wraps long lines (the default) never does.
+  pub fn number_rule(&self, cx: &App) -> impl IntoElement {
+    let digits = self.digits as f32;
+    let column = f32::from(cx.theme().mono_font_size) / 16. * 0.7 * digits + 1.;
+    let rule = |columns: f32| div().absolute().top_0().bottom_0().left(rems(0.5 + column * columns)).w_px().bg(cx.theme().border);
+    // One after the old numbers, one after the new ones.
+    div().absolute().inset_0().child(rule(1.)).child(rule(2.))
   }
 
   /// The Kit diff, to be given the sizes and options of the place that shows it.
@@ -270,7 +286,13 @@ impl ShownDiff {
       let background = if range.side == DiffSide::Original { palette.diff_removed } else { palette.diff_added };
       DiffDecoration::new(DiffLineRange::new(range.path.clone(), range.side, range.start, range.end)).with_background(background)
     });
-    Diff::new(&self.state).soft_wrap(wraps(cx)).change_background(false).hover_highlight(DiffHoverHighlight::Both).decorations(decorations)
+    Diff::new(&self.state)
+      .soft_wrap(wraps(cx))
+      .change_background(false)
+      .hover_highlight(DiffHoverHighlight::Both)
+      // The `@@` line only repeats what the row of folded lines below it says.
+      .hunk_separator(DiffHunkSeparator::Simple)
+      .decorations(decorations)
   }
 }
 
@@ -411,4 +433,23 @@ fn changed_ranges(patch: &str, files: &[DiffFile]) -> Vec<ChangedRange> {
     }
   });
   ranges
+}
+
+/// The digits of the longest line number of a patch, read from its hunk headers (`@@ -start,count +start,count @@`).
+fn widest_line_digits(patch: &str) -> usize {
+  let end = |range: &str| {
+    let (start, count) = range.split_once(',').unwrap_or((range, "1"));
+    start.parse::<usize>().unwrap_or(0) + count.parse::<usize>().unwrap_or(1)
+  };
+  let widest = patch
+    .lines()
+    .filter_map(|line| line.strip_prefix("@@ -"))
+    .filter_map(|header| {
+      let (old, rest) = header.split_once(" +")?;
+      let new = rest.split_once(' ')?.0;
+      Some(end(old).max(end(new)))
+    })
+    .max()
+    .unwrap_or(1);
+  widest.saturating_sub(1).max(1).to_string().len()
 }
