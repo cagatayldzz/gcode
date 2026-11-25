@@ -249,7 +249,7 @@ impl Workspace {
   /// One line of the Changes list: a checkbox, the file name with its folder, and the kind of change. Its height is fixed
   /// ([`CHANGE_ROW_HEIGHT`]) because the list is virtualized, and its width is the list's own: a virtual list lays its rows out
   /// at their content width, so a percentage would leave short rows narrow and long ones unclipped.
-  fn change_row(&self, change: &ws_git::Change, width: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
+  fn change_row(&self, change: &ws_git::Change, width: Pixels, last: bool, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let workspace = cx.entity();
     let root = self.projects.active.clone().unwrap_or_default();
@@ -257,13 +257,12 @@ impl Workspace {
     let selected = self.selected_change.as_ref() == Some(&change.path);
     let included = !self.excluded.contains(&change.path);
     let room = width.as_f32() - 88.;
-    let path_text = match &change.from {
-      Some(from) => format!(
-        "{} → {}",
-        crate::components::shortened_middle(&from.to_string_lossy(), room / 2. - 12.),
-        crate::components::shortened_middle(&change.path.to_string_lossy(), room / 2. - 12.)
-      ),
-      None => crate::components::shortened_path(&change.path.to_string_lossy(), room),
+    let path = match &change.from {
+      Some(from) => h_flex()
+        .child(crate::components::path_label(&crate::components::shortened_middle(&from.to_string_lossy(), room / 2. - 12.), cx))
+        .child(div().px_1().text_color(palette.text_secondary).child("→"))
+        .child(crate::components::path_label(&crate::components::shortened_middle(&change.path.to_string_lossy(), room / 2. - 12.), cx)),
+      None => h_flex().child(crate::components::path_label(&crate::components::shortened_path(&change.path.to_string_lossy(), room), cx)),
     };
     h_flex()
       .id(SharedString::from(format!("change-row-{}", change.path.display())))
@@ -274,7 +273,7 @@ impl Workspace {
       .h(CHANGE_ROW_HEIGHT)
       .gap_1p5()
       .px_3()
-      .border_b_1()
+      .when(!last, |row| row.border_b_1())
       .border_color(palette.border)
       .items_center()
       .when(selected, |row| row.bg(palette.selected))
@@ -301,10 +300,7 @@ impl Workspace {
           .child(
             // One path, the file name last, cut when the row is narrow; a renamed file shows where it was before. The room is
             // the row less its padding, the checkbox, the status icon and the gaps.
-            div()
-              .flex_1()
-              .min_w_0()
-              .child(Label::new(path_text).text_size(crate::components::CHANGE_PATH_FONT_SIZE).min_w_0().whitespace_nowrap().overflow_hidden()),
+            div().flex_1().min_w_0().overflow_hidden().child(path),
           )
           .child(Icon::empty().path(change_kind_icon(change.kind)).size_4().flex_none().text_color(kind_color(change.kind, &palette)))
           .on_click(cx.listener({
@@ -395,10 +391,13 @@ impl Workspace {
     let shown = self.visible_changes(&query).len();
     let changes_list = v_virtual_list(workspace.clone(), "git-changes", self.change_sizes(shown), |this, range, _, cx| {
       let query = this.changes_filter.read(cx).value().trim().to_lowercase();
-      let changes: Vec<ws_git::Change> =
-        this.visible_changes(&query).get(range).map(|rows| rows.iter().map(|change| (*change).clone()).collect()).unwrap_or_default();
+      let all = this.visible_changes(&query);
+      let total = all.len();
+      let first = range.start;
+      let changes: Vec<ws_git::Change> = all.get(range).map(|rows| rows.iter().map(|change| (*change).clone()).collect()).unwrap_or_default();
       let width = this.changes_scroll.bounds().size.width;
-      changes.iter().map(|change| this.change_row(change, width, cx)).collect()
+      // The last row has no line under it: the one of what follows the list (the commit box) is there.
+      changes.iter().enumerate().map(|(offset, change)| this.change_row(change, width, first + offset + 1 == total, cx)).collect()
     })
     .track_scroll(&self.changes_scroll);
     let summary_filled = !self.commit_summary.read(cx).value().trim().is_empty();
@@ -570,16 +569,11 @@ impl Workspace {
             |list| {
               // The scrollbar has a column of its own beside the list, so that it never covers the status icons of the rows.
               list.child(
-                h_flex().size_full().bg(palette.background).child(div().relative().flex_1().min_w_0().h_full().child(changes_list)).child(
-                  // A strip of its own, a shade darker than the list, as the scrollbars of the system have.
-                  div().relative().flex_none().w(Scrollbar::width()).h_full().bg(palette.surface).border_l_1().border_color(palette.border).child(
-                    Scrollbar::new(&self.changes_scroll)
-                      .id("changes-scrollbar")
-                      .axis(ScrollbarAxis::Vertical)
-                      .mode(ScrollbarMode::Always)
-                      .viewport_from_layout(),
-                  ),
-                ),
+                h_flex()
+                  .size_full()
+                  .bg(palette.background)
+                  .child(div().relative().flex_1().min_w_0().h_full().child(changes_list))
+                  .child(crate::components::scrollbar_strip(&self.changes_scroll, "changes-scrollbar", cx)),
               )
             },
           ),
@@ -739,30 +733,33 @@ impl Workspace {
         .label(format!("Load {HISTORY_PAGE} more commits"))
         .on_click(cx.listener(|this, _, _, cx| this.load_more_history(false, cx)))
     });
-    div()
-      .relative()
+    // The scrollbar has a strip of its own beside the list, so that it never covers the rows.
+    h_flex()
       .flex_1()
       .min_h_0()
+      .bg(colors(cx).background)
       .child(
-        v_flex()
-          .id("history-list")
-          .size_full()
-          .overflow_y_scroll()
-          .track_scroll(&self.history_scroll)
-          .on_scroll(cx.listener(move |_, _: &ScrollEvent, _, cx| {
-            if !paged {
-              return;
-            }
-            cx.spawn(async move |this, cx| {
-              cx.background_executor().timer(HISTORY_SCROLL_SETTLE).await;
-              let _ = this.update(cx, |this, cx| this.load_more_history(true, cx));
-            })
-            .detach();
-          }))
-          .children(rows)
-          .children(more),
+        div().relative().flex_1().min_w_0().h_full().child(
+          v_flex()
+            .id("history-list")
+            .size_full()
+            .overflow_y_scroll()
+            .track_scroll(&self.history_scroll)
+            .on_scroll(cx.listener(move |_, _: &ScrollEvent, _, cx| {
+              if !paged {
+                return;
+              }
+              cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(HISTORY_SCROLL_SETTLE).await;
+                let _ = this.update(cx, |this, cx| this.load_more_history(true, cx));
+              })
+              .detach();
+            }))
+            .children(rows)
+            .children(more),
+        ),
       )
-      .child(div().absolute().inset_0().child(crate::components::slim_scrollbar(&self.history_scroll, "history-scrollbar", cx)))
+      .child(crate::components::scrollbar_strip(&self.history_scroll, "history-scrollbar", cx))
       .into_any_element()
   }
 

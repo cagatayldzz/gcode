@@ -11,7 +11,7 @@ use gpui_kit::{
     clipboard::Clipboard,
     h_flex,
     input::{Input, InputState, Textarea, TextareaState},
-    scroll::{Scrollbar, ScrollbarHandle, ScrollbarMode},
+    scroll::{Scrollbar, ScrollbarHandle, ScrollbarMode, ScrollbarThumbStyle},
     skeleton::Skeleton,
     text::{TextView, TextViewStyle},
     v_flex, ActiveTheme as _, Icon,
@@ -259,3 +259,41 @@ pub(crate) fn kind_color(kind: ws_git::ChangeKind, palette: &crate::theme::Color
 pub(crate) fn change_kind_mark(kind: ws_git::ChangeKind, cx: &App) -> Icon {
   Icon::empty().path(change_kind_icon(kind)).size_4().text_color(kind_color(kind, &colors(cx)))
 }
+
+/// A path as the Changes list shows it: the folders in the secondary color, the file name after them in the text color.
+pub(crate) fn path_label(path: &str, cx: &App) -> Div {
+  let (folder, name) = match path.rsplit_once('/') {
+    Some((folder, name)) => (Some(format!("{folder}/")), name),
+    None => (None, path),
+  };
+  h_flex()
+    .flex_none()
+    .whitespace_nowrap()
+    .text_size(CHANGE_PATH_FONT_SIZE)
+    .font_weight(FontWeight::NORMAL)
+    .children(folder.map(|folder| div().text_color(colors(cx).text_secondary).child(folder)))
+    .child(name.to_string())
+}
+
+/// The strip of a scrollbar that stays in view: a column of its own beside a list, a shade darker than the list, with a thin round thumb,
+/// so that it never covers what the list shows. Put it after the list in a row; the list is the part with `flex_1`.
+pub(crate) fn scrollbar_strip<H: ScrollbarHandle + Clone>(handle: &H, id: impl Into<ElementId>, cx: &App) -> Div {
+  let palette = colors(cx);
+  div().relative().flex_none().w(STRIP_WIDTH).h_full().bg(palette.surface).border_l_1().border_color(palette.border).child(
+    Scrollbar::vertical(handle).id(id).mode(ScrollbarMode::Always).viewport_from_layout().styles(|styles| {
+      let thumb = |style: ScrollbarThumbStyle| style.width(STRIP_THUMB_WIDTH).inset(STRIP_THUMB_INSET).radius(STRIP_THUMB_WIDTH);
+      styles
+        .track(|track| track.width(STRIP_WIDTH))
+        .track_hover(|track| track.width(STRIP_WIDTH))
+        .track_active(|track| track.width(STRIP_WIDTH))
+        .thumb(thumb)
+        .thumb_hover(thumb)
+        .thumb_active(thumb)
+    }),
+  )
+}
+
+/// The strip of [`scrollbar_strip`], and the thumb in it: a little narrower than the Kit's 16 pixels.
+const STRIP_WIDTH: Pixels = px(13.);
+const STRIP_THUMB_WIDTH: Pixels = px(6.);
+const STRIP_THUMB_INSET: Pixels = px(3.);

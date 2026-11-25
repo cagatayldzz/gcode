@@ -556,26 +556,34 @@ impl Render for DiffTable {
     }
     let rows = list(self.list.clone(), cx.processor(|this, ix: usize, _, cx| this.row(ix, cx)));
     let scrolls_sideways = !self.wrap;
-    div()
+    let strip = crate::components::scrollbar_strip(&self.list, "diff-scrollbar", cx);
+    h_flex()
       .id("diff-table")
       .key_context("DiffTable")
       .track_focus(&self.focus)
       .on_action(cx.listener(|this, _: &CopySelection, _, cx| this.copy(cx)))
-      .relative()
       .size_full()
       .overflow_hidden()
       .bg(palette.background)
       .child(
         div()
-          .id("diff-horizontal")
-          .size_full()
-          .when(scrolls_sideways, |body| body.overflow_x_hidden())
-          .track_scroll(&self.scroll_x)
-          .child(if scrolls_sideways { rows.w(self.content_width(size)).min_w_full().h_full() } else { rows.size_full() }),
+          .relative()
+          .flex_1()
+          .min_w_0()
+          .h_full()
+          .overflow_hidden()
+          .child(
+            div()
+              .id("diff-horizontal")
+              .size_full()
+              .when(scrolls_sideways, |body| body.overflow_x_hidden())
+              .track_scroll(&self.scroll_x)
+              .child(if scrolls_sideways { rows.w(self.content_width(size)).min_w_full().h_full() } else { rows.size_full() }),
+          )
+          .when(scrolls_sideways, |table| table.child(ScrollableMask::new(Axis::Horizontal, &self.scroll_x).id("diff-horizontal-wheel")))
+          .when(scrolls_sideways, |table| table.child(div().absolute().inset_0().child(Scrollbar::horizontal(&self.scroll_x)))),
       )
-      .when(scrolls_sideways, |table| table.child(ScrollableMask::new(Axis::Horizontal, &self.scroll_x).id("diff-horizontal-wheel")))
-      .child(div().absolute().inset_0().child(crate::components::slim_scrollbar(&self.list, "diff-scrollbar", cx)))
-      .when(scrolls_sideways, |table| table.child(div().absolute().inset_0().child(Scrollbar::horizontal(&self.scroll_x))))
+      .child(strip)
       // A drag over the numbers or the text may end anywhere.
       .on_mouse_up(
         MouseButton::Left,

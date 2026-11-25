@@ -422,6 +422,8 @@ pub struct Workspace {
   /// How many commits the History view asks for now, and its scroll position (to load more near the end).
   history_limit: usize,
   history_scroll: ScrollHandle,
+  /// The scroll position of the list in the branch menu, which has a scrollbar strip of its own.
+  branch_scroll: ScrollHandle,
   changes_scroll: VirtualListScrollHandle,
   /// Row sizes of the virtualized Changes list.
   change_sizes: RefCell<Rc<Vec<Size<Pixels>>>>,
@@ -599,6 +601,7 @@ impl Workspace {
       switching_branch: None,
       history_limit: HISTORY_PAGE,
       history_scroll: ScrollHandle::new(),
+      branch_scroll: ScrollHandle::new(),
       changes_scroll: VirtualListScrollHandle::new(),
       change_sizes: RefCell::new(Rc::new(Vec::new())),
       index_task: Task::ready(()),

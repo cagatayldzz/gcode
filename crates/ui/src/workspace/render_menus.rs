@@ -3,6 +3,15 @@
 use super::*;
 
 impl Workspace {
+  /// A scrolling list of the branch menu with the scrollbar strip beside it, shown only while the list is taller than its room.
+  fn scrolling_list(&self, list: Stateful<Div>, cx: &App) -> Div {
+    let overflows = self.branch_scroll.max_offset().y > px(0.);
+    h_flex()
+      .items_stretch()
+      .child(div().flex_1().min_w_0().bg(colors(cx).background).child(list))
+      .when(overflows, |row| row.child(crate::components::scrollbar_strip(&self.branch_scroll, "branch-scrollbar", cx)))
+  }
+
   /// Shows the branch, the sync button and the problem counts on the left, and the open file status on the right.
   pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
@@ -247,20 +256,24 @@ impl Workspace {
               .into_any_element()
           };
           let mut rows: Vec<AnyElement> = Vec::new();
-          let sections = [("Default Branch", defaults), ("Favorites", favorites), ("Recent Branches", recent), ("Other Branches", others)];
+          // The default branch is the first row and needs no heading; it gets room above it instead, as the last row has below.
+          let starts_with_row = !defaults.is_empty();
+          let sections = [(None, defaults), (Some("Favorites"), favorites), (Some("Recent Branches"), recent), (Some("Other Branches"), others)];
           for (label, entries) in sections {
             if entries.is_empty() {
               continue;
             }
-            rows.push(
-              Label::new(label)
-                .px_2()
-                .pt_2()
-                .text_size(FONT_SIZE_SM)
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme.muted_foreground)
-                .into_any_element(),
-            );
+            if let Some(label) = label {
+              rows.push(
+                Label::new(label)
+                  .px_2()
+                  .pt_2()
+                  .text_size(FONT_SIZE_SM)
+                  .font_weight(FontWeight::SEMIBOLD)
+                  .text_color(theme.muted_foreground)
+                  .into_any_element(),
+              );
+            }
             rows.extend(entries.iter().map(&make_row));
           }
           let new_branch = {
@@ -277,13 +290,17 @@ impl Workspace {
               h_flex().gap_2().items_center().p_3().pb_0().child(div().flex_1().child(crate::components::soft_input(&filter, cx))).child(new_branch),
             )
             .child(
-              div().id("branch-list").max_h(list_height).overflow_y_scrollbar().child(
-                v_flex()
-                  .gap_0p5()
-                  .px_3()
-                  .pb_3()
-                  .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground)))
-                  .children(rows),
+              self.scrolling_list(
+                div().id("branch-list").max_h(list_height).overflow_y_scroll().track_scroll(&self.branch_scroll).child(
+                  v_flex()
+                    .gap_0p5()
+                    .px_3()
+                    .pb_3()
+                    .when(starts_with_row, |list| list.pt_3())
+                    .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground)))
+                    .children(rows),
+                ),
+                cx,
               ),
             )
             .into_any_element()
@@ -323,35 +340,37 @@ impl Workspace {
               } else if shown.is_empty() {
                 Label::new("No matching pull requests").px_2().py_1().text_color(theme.muted_foreground).into_any_element()
               } else {
-                div()
-                  .id("pull-request-list")
-                  .max_h(menu_height)
-                  .overflow_y_scrollbar()
-                  .child(v_flex().gap_0p5().px_3().children(shown.into_iter().map(|request| {
-                    let url = request.url.clone();
-                    v_flex()
-                      .id(SharedString::from(format!("pull-request-{}", request.url)))
-                      .px_2()
-                      .py_1()
-                      .rounded_md()
-                      .cursor_pointer()
-                      .hover(|row| row.bg(palette.hover))
-                      .child(
-                        Label::new(if request.draft { format!("{} (draft)", request.title) } else { request.title.clone() })
-                          .overflow_hidden()
-                          .whitespace_nowrap()
-                          .text_ellipsis(),
-                      )
-                      .child(
-                        Label::new(format!("#{} · {} · {} → {}", request.number, request.author, request.source, request.target))
-                          .text_size(FONT_SIZE_SM)
-                          .text_color(theme.muted_foreground)
-                          .overflow_hidden()
-                          .whitespace_nowrap()
-                          .text_ellipsis(),
-                      )
-                      .on_click(move |_, _, cx| cx.open_url(&url))
-                  })))
+                self
+                  .scrolling_list(
+                    div().id("pull-request-list").max_h(menu_height).overflow_y_scroll().track_scroll(&self.branch_scroll).child(
+                      v_flex().gap_0p5().px_3().children(shown.into_iter().map(|request| {
+                        let url = request.url.clone();
+                        v_flex()
+                          .id(SharedString::from(format!("pull-request-{}", request.url)))
+                          .px_2()
+                          .py_1()
+                          .rounded_md()
+                          .cursor_pointer()
+                          .hover(|row| row.bg(palette.hover))
+                          .child(
+                            Label::new(if request.draft { format!("{} (draft)", request.title) } else { request.title.clone() })
+                              .overflow_hidden()
+                              .whitespace_nowrap()
+                              .text_ellipsis(),
+                          )
+                          .child(
+                            Label::new(format!("#{} · {} · {} → {}", request.number, request.author, request.source, request.target))
+                              .text_size(FONT_SIZE_SM)
+                              .text_color(theme.muted_foreground)
+                              .overflow_hidden()
+                              .whitespace_nowrap()
+                              .text_ellipsis(),
+                          )
+                          .on_click(move |_, _, cx| cx.open_url(&url))
+                      })),
+                    ),
+                    cx,
+                  )
                   .into_any_element()
               }
             }
