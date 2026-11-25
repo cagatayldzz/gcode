@@ -1,18 +1,57 @@
 //! Native menus for the menu bar and Dock icon.
 
 use crate::{
-  AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, GoToFile, NewClaude, NewCodex, OpenCommandPalette, OpenSettings, Quit, SaveFile,
-  SwitchProfile, ToggleAgents, ToggleTerminal, ViewOnHost,
+  AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, GoToFile, NewClaude, NewCodex, OpenCommandPalette, OpenRecentFile,
+  OpenRecentProject, OpenSettings, Quit, SaveFile, SwitchProfile, ToggleAgents, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::*;
-use ws_storage::Profile;
+use ws_storage::{Profile, RecentEntry, RecentList};
 
 fn profile_item(profile: &Profile) -> MenuItem {
   MenuItem::action(profile.name.clone(), SwitchProfile { id: profile.id.clone() })
 }
 
-pub(crate) fn dock_menu(profiles: &[Profile]) -> Vec<MenuItem> {
-  [MenuItem::action("Profiles", NoAction).disabled(true)].into_iter().chain(profiles.iter().map(profile_item)).collect()
+/// How many recent files and projects the Dock menu lists together, and the fewest projects it shows when there are that many.
+const DOCK_RECENT: usize = 10;
+const DOCK_MIN_PROJECTS: usize = 5;
+
+fn name_of(entry: &RecentEntry) -> String {
+  entry.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| entry.path.display().to_string())
+}
+
+pub(crate) fn dock_menu(profiles: &[Profile], recent: &RecentList) -> Vec<MenuItem> {
+  // What is gone from the disk is not offered.
+  let present = |entries: &[RecentEntry]| entries.iter().filter(|entry| entry.path.exists()).cloned().collect::<Vec<_>>();
+  let present = RecentList { files: present(&recent.files), projects: present(&recent.projects) };
+  let (files, projects) = present.menu_entries(DOCK_RECENT, DOCK_MIN_PROJECTS);
+  let files: Vec<MenuItem> = files
+    .iter()
+    .map(|entry| {
+      MenuItem::action(
+        format!("\u{1F4C4}  {}", name_of(entry)),
+        OpenRecentFile { profile: entry.profile.clone(), path: entry.path.to_string_lossy().into_owned() },
+      )
+    })
+    .collect();
+  let projects: Vec<MenuItem> = projects
+    .iter()
+    .map(|entry| {
+      MenuItem::action(
+        format!("\u{1F4C1}  {}", name_of(entry)),
+        OpenRecentProject { profile: entry.profile.clone(), path: entry.path.to_string_lossy().into_owned() },
+      )
+    })
+    .collect();
+  let mut menu = Vec::new();
+  for group in [files, projects] {
+    if !group.is_empty() {
+      menu.extend(group);
+      menu.push(MenuItem::separator());
+    }
+  }
+  menu.push(MenuItem::action("Profiles", NoAction).disabled(true));
+  menu.extend(profiles.iter().map(profile_item));
+  menu
 }
 
 /// The menus. `host` names the service of the open project's remote ("GitHub", "GitLab", "Azure DevOps", or a host name): the

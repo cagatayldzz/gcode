@@ -130,6 +130,7 @@ impl Workspace {
   fn delete_profile(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
     let Some(removed) = update_profiles(cx, |list| list.remove(id)) else { return };
     release_settings(&removed.id, cx);
+    crate::recent::forget_profile(&removed.id, cx);
     self.sync_menus(true, cx);
     cx.notify();
     // Its tokens leave the Keychain with the files, off the interface thread.

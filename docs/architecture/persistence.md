@@ -8,6 +8,7 @@ Everything gCode owns lives in one data directory:
 ├── commit.json              commit message generation settings (mode 0600, holds the API key)
 ├── activity.log             only when `ws_activity::start` is called; the bug button's panel reads the log from memory instead
 ├── window.json              window placement, shared by all profiles
+├── recent.json              files edited and projects opened last (with their profile), shared by all profiles; feeds the Dock menu
 ├── index/<hash>.idx         per-project file index (binary; a cache)
 ├── projects.json            ┐
 ├── accounts.json            ├─ the "default" profile keeps these directly here
@@ -41,6 +42,7 @@ profiles do not.
 | File | Type | Written |
 | --- | --- | --- |
 | `profiles.json` | `ProfileList` (id and name of each profile, the one used last) | when a profile is added, renamed or deleted, and when a window of another profile comes to the front |
+| `recent.json` | `RecentList` (the 20 files saved last and the 20 projects opened last, each with the id of its profile) | when a file is saved or a project is opened, only if the order changed; entries of a removed project or deleted profile are dropped |
 | `commit.json` | `ws_commitgen::Config` (provider, API key, model, language, style, push after commit) | when the commit message settings are saved |
 | `window.json` | `WindowPlacement` (position, size, maximized or full screen) | half a second after the window stops moving or resizing, and at once when the window closes or the app quits |
 | `index/<hash>.idx` | `ProjectIndex` of one project | in the background when a project is opened and its saved index is no longer right |

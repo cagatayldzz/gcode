@@ -82,7 +82,8 @@ repository/
 | `commit_settings.rs` | the commit message dialog |
 | `connections.rs`, `connect_account.rs`, `repository_picker.rs`, `pull_request.rs` | accounts list, the Connect dialog, the repository list of Clone, the Create pull request dialog |
 | `updates.rs` | `UpdateState`, `AppUpdate` and the Updates page |
-| `menus.rs` | the menu bar and Dock menu |
+| `menus.rs` | the menu bar and Dock menu (recent files on top, recent projects below, then the profiles) |
+| `recent.rs` | the recent files and projects behind the Dock menu, and its commands |
 
 ### Plain data (no window needed)
 

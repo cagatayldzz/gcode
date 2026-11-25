@@ -713,6 +713,10 @@ impl Workspace {
           ActiveTab::File(path) => {
             this.selected_entry = Some(path.clone());
             this.selected_change = None;
+            // The Explorer shows where the file is: its folders open and the tree scrolls to it only if it is out of sight.
+            if let Some(root) = this.projects.active.clone() {
+              this.show_explorer_entry(&root, path.clone(), ScrollStrategy::Nearest, cx);
+            }
           }
           ActiveTab::Nothing => {
             this.selected_entry = None;
@@ -859,8 +863,14 @@ impl Workspace {
     if self.file_actions.focused_side(window, cx).is_some() {
       return;
     }
+    let file = self.editor_panel.read(cx).active_file().map(Path::to_path_buf);
     match self.editor_panel.update(cx, |editor, cx| editor.save(cx)) {
-      Ok(_) => cx.notify(),
+      Ok(saved) => {
+        if let (true, Some(file)) = (saved, file) {
+          crate::recent::record_file(&self.profile.id, &file, cx);
+        }
+        cx.notify();
+      }
       Err(error) => window.push_notification(crate::failure(format!("Could not save: {error}")), cx),
     }
     // The file's own change shows up in the Git list without waiting for the next read.

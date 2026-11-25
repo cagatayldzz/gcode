@@ -15,6 +15,7 @@ use gpui_kit::{
   },
   *,
 };
+use std::path::PathBuf;
 use ws_storage::{Profile, ProfileList, WindowMode, WindowPlacement};
 
 /// The profiles, loaded when first needed. Every change is written to `profiles.json` at once.
@@ -44,8 +45,7 @@ pub(crate) fn update_profiles<T>(cx: &mut App, change: impl FnOnce(&mut ProfileL
     eprintln!("Could not save the profiles: {error}");
   }
   if list.profiles != previous_profiles {
-    let menu = crate::menus::dock_menu(&list.profiles);
-    cx.set_dock_menu(menu);
+    crate::recent::refresh_dock_menu(cx);
   }
   result
 }
@@ -101,8 +101,24 @@ pub fn open_window(profile: Profile, cx: &mut App) {
       false
     });
     workspace.update(cx, |workspace, cx| workspace.warm_index(cx));
+    let (profile, active) = workspace.read_with(cx, |workspace, _| (workspace.profile().id.clone(), workspace.project_list().active.clone()));
+    if let Some(active) = active {
+      crate::recent::record_project(&profile, &active, cx);
+    }
     let focus = workspace.read(cx).focus_handle().clone();
     focus.focus(window, cx);
+  });
+}
+
+/// Opens a recent file or project from the Dock menu: the window of the profile comes forward (or opens), and shows the project.
+pub(crate) fn open_recent(profile: &str, path: PathBuf, file: bool, cx: &mut App) {
+  switch_profile(profile, cx);
+  let Some(handle) = profile_window(profile, cx) else { return };
+  let Some(root) = handle.downcast::<gpui_kit::base::Root>() else { return };
+  let _ = root.update(cx, |root, window, cx| {
+    if let Ok(workspace) = root.view().clone().downcast::<Workspace>() {
+      workspace.update(cx, |workspace, cx| workspace.open_recent(path, file, window, cx));
+    }
   });
 }
 
@@ -136,7 +152,7 @@ pub(crate) fn init(cx: &mut App) {
   // The menu bar until the first window sets its own.
   let list = profile_list(cx);
   cx.set_menus(crate::menus(None, &list.profiles, &list.last));
-  cx.set_dock_menu(crate::menus::dock_menu(&list.profiles));
+  crate::recent::refresh_dock_menu(cx);
   cx.on_action(|action: &SwitchProfile, cx| {
     let id = action.id.clone();
     cx.defer(move |cx| switch_profile(&id, cx));

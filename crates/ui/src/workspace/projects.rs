@@ -221,7 +221,28 @@ impl Workspace {
     self.terminal_tabs.remove(path);
     self.agent_tabs.remove(path);
     self.views.remove(path);
+    crate::recent::forget_project(&self.profile.id, path, cx);
     cx.notify();
+  }
+
+  /// Opens a project, or a file inside one, that the Dock menu offered: the project that holds the file comes first.
+  pub(crate) fn open_recent(&mut self, path: PathBuf, file: bool, window: &mut Window, cx: &mut Context<Self>) {
+    let project = self
+      .projects
+      .projects
+      .iter()
+      .filter(|project| if file { path.starts_with(&project.path) } else { path == project.path })
+      .max_by_key(|project| project.path.components().count())
+      .map(|project| project.path.clone());
+    let Some(project) = project else {
+      window.push_notification(crate::failure(format!("{} is no longer in this profile.", path.display())), cx);
+      crate::recent::forget_project(&self.profile.id, &path, cx);
+      return;
+    };
+    self.select_project(project, window, cx);
+    if file {
+      self.open_file(path, window, cx);
+    }
   }
 
   /// The activity bar's project settings button: the settings of the open project take the main area, or give it back.
@@ -504,6 +525,9 @@ impl Workspace {
     change(&mut self.projects);
     if let Err(error) = self.projects.save(&self.profile.projects_path()) {
       eprintln!("Could not save the project list: {error}");
+    }
+    if let Some(active) = self.projects.active.clone() {
+      crate::recent::record_project(&self.profile.id, &active, cx);
     }
     self.all_changes_open = false;
     self.all_changes.update(cx, |view, cx| view.reset(cx));
