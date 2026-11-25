@@ -173,6 +173,9 @@ struct ChangedRange {
 /// The longest a new diff is held back for its colors; past this it is shown as it is.
 const COLORS_WAIT: Duration = Duration::from_millis(500);
 
+/// How soon after the Kit reports a change of size the window is drawn again.
+const REDRAW_EVERY: Duration = Duration::from_millis(16);
+
 /// A parsed patch with the lines it changes.
 pub(crate) struct ShownDiff {
   state: Entity<DiffState>,
@@ -196,12 +199,24 @@ impl ShownDiff {
       cx.observe_global::<Theme>(|state, cx| state.set_syntax_highlighter(diff_highlighter(cx), cx))
     });
     // The Kit tells its observers once for each file it has prepared (and when other things change, which only makes this early).
+    // It also tells them when the diff was measured at another size: the owner is drawn again then, so that the lines take the width
+    // they have now and not the one they had when the diff was last drawn.
+    // The Kit measures during the paint: a change it notices there (the window or a pane got another width) is not drawn by itself
+    // until the next input, so a frame is asked for once the paint is over (at most one for each `REDRAW_EVERY`).
+    let redraw_pending = Rc::new(Cell::new(false));
     let prepared = cx.observe(&state, {
       let waiting = waiting.clone();
       move |_, _, cx| {
-        if waiting.get() > 0 {
-          waiting.set(waiting.get() - 1);
-          cx.notify();
+        waiting.set(waiting.get().saturating_sub(1));
+        cx.notify();
+        if !redraw_pending.replace(true) {
+          let redraw_pending = redraw_pending.clone();
+          cx.spawn(async move |_, cx| {
+            cx.background_executor().timer(REDRAW_EVERY).await;
+            redraw_pending.set(false);
+            cx.update(|cx| cx.refresh_windows());
+          })
+          .detach();
         }
       }
     });
