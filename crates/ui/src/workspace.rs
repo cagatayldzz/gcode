@@ -10,7 +10,7 @@ use crate::{
   connect_account::{AccountConnected, ConnectAccount},
   connections::{credentials_for_repository, describe, AccountsList},
   editor::{ActiveTab, EditorPanel, FileLocation, FileLocationCommand, OpenLocation},
-  explorer,
+  explorer, extensions,
   mention_picker::{MentionChoice, MentionPicker, ProjectsChosen},
   merge_dialog::{MergeDialog, MergeEvent},
   profiles::ProfileManager,
@@ -179,6 +179,7 @@ enum SidebarTab {
   Explorer,
   Search,
   Git,
+  Extensions,
 }
 
 impl SidebarTab {
@@ -188,16 +189,18 @@ impl SidebarTab {
       SidebarTab::Explorer => "explorer",
       SidebarTab::Search => "search",
       SidebarTab::Git => "git",
+      SidebarTab::Extensions => "extensions",
     }
   }
 
-  const ALL: [SidebarTab; 3] = [SidebarTab::Explorer, SidebarTab::Search, SidebarTab::Git];
+  const ALL: [SidebarTab; 4] = [SidebarTab::Explorer, SidebarTab::Search, SidebarTab::Git, SidebarTab::Extensions];
 
   fn icon(self) -> Icon {
     match self {
       SidebarTab::Explorer => Icon::empty().path("icons/folder-tree.svg"),
       SidebarTab::Search => Icon::new(IconName::Search),
       SidebarTab::Git => Icon::empty().path("icons/git-branch.svg"),
+      SidebarTab::Extensions => Icon::empty().path("icons/blocks.svg"),
     }
   }
 
@@ -206,6 +209,7 @@ impl SidebarTab {
       SidebarTab::Explorer => "Explorer",
       SidebarTab::Search => "Search",
       SidebarTab::Git => "Git",
+      SidebarTab::Extensions => "Extensions",
     }
   }
 }
@@ -465,6 +469,8 @@ pub struct Workspace {
   branch_filter: Entity<InputState>,
   /// Narrows the list of changed files by name.
   changes_filter: Entity<InputState>,
+  /// The Extensions view of the sidebar.
+  extensions_panel: Entity<extensions::ExtensionsPanel>,
   /// The repository menu of the title bar is open.
   projects_menu_open: bool,
   project_filter: Entity<InputState>,
@@ -518,6 +524,7 @@ impl Workspace {
     let commit_description = cx.new(|cx| TextareaState::new(window, cx).placeholder("Description"));
     let branch_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find or create a branch"));
     let changes_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
+    let extensions_panel = cx.new(|cx| extensions::ExtensionsPanel::new(window, cx));
     let project_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find a project"));
     let compare_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Select Branch to Compare…"));
     let mut this = Self {
@@ -625,6 +632,7 @@ impl Workspace {
       branches: Vec::new(),
       branch_filter: branch_filter.clone(),
       changes_filter: changes_filter.clone(),
+      extensions_panel: extensions_panel.clone(),
       projects_menu_open: false,
       project_filter: project_filter.clone(),
       window_save: Task::ready(()),
@@ -648,6 +656,13 @@ impl Workspace {
         // The menus list what the filter field matches.
         cx.subscribe(&branch_filter, |_, _, _: &InputEvent, cx| cx.notify()),
         cx.subscribe(&changes_filter, |_, _, _: &InputEvent, cx| cx.notify()),
+        // Removing the AI Agent extension closes the AI view if it was open.
+        cx.subscribe(&extensions_panel, |this, _, _: &extensions::ExtensionsChanged, cx| {
+          if this.agent_open && extensions::enabled_agents(cx).is_empty() {
+            this.agent_open = false;
+          }
+          cx.notify();
+        }),
         cx.subscribe(&project_filter, |_, _, _: &InputEvent, cx| cx.notify()),
         // Choosing the field lists the branches; typing narrows them; Enter takes the first one.
         cx.subscribe_in(&compare_filter, window, |this, _, event: &InputEvent, window, cx| match event {
@@ -931,7 +946,7 @@ impl Render for Workspace {
       settings.clone().into_any_element()
     } else if self.terminal_open {
       self.render_terminal_area(window, cx).into_any_element()
-    } else if self.agent_open {
+    } else if self.agent_open && !extensions::enabled_agents(cx).is_empty() {
       self.render_agent_area(window, cx)
     } else {
       editor_area

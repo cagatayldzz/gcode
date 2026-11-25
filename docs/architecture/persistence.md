@@ -10,6 +10,7 @@ Everything gCode owns lives in one data directory:
 ├── window.json              window placement, shared by all profiles
 ├── recent.json              files edited and projects opened last (with their profile), shared by all profiles; feeds the Dock menu
 ├── index/<hash>.idx         per-project file index (binary; a cache)
+├── extensions/<id>/manifest.json   an installed extension (see Extensions); shared by all profiles
 ├── projects.json            ┐
 ├── accounts.json            ├─ the "default" profile keeps these directly here
 ├── preferences.json         ┘

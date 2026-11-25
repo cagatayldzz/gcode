@@ -11,6 +11,14 @@ pub(crate) enum AgentKind {
 impl AgentKind {
   pub const ALL: [AgentKind; 2] = [AgentKind::Codex, AgentKind::Claude];
 
+  /// The id an extension's manifest names the agent by.
+  pub fn id(self) -> &'static str {
+    match self {
+      AgentKind::Codex => "codex",
+      AgentKind::Claude => "claude",
+    }
+  }
+
   pub fn label(self) -> &'static str {
     match self {
       AgentKind::Codex => "Codex",

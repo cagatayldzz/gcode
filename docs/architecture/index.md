@@ -72,5 +72,5 @@ Rendering is a pure function of state: **no state changes and no focus requests 
 - [Window layout](./window-layout.md) — how the window is composed
 - [Workspace & state](./workspace.md) — projects, switching, the refresh loop
 - [Terminals](./terminal.md) · [Git](./git.md) · [Editor & performance](./editor.md)
-- [Hosting & accounts](./hosting.md) · [Commit messages](./commit-messages.md) · [Updates](./updates.md)
+- [Hosting & accounts](./hosting.md) · [Commit messages](./commit-messages.md) · [Updates](./updates.md) · [Extensions](./extensions.md)
 - [Persistence](./persistence.md) — every file gCode writes

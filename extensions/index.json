@@ -1,0 +1,14 @@
+{
+  "extensions": [
+    {
+      "id": "ai-agent",
+      "name": "AI Agent",
+      "description": "Codex and Claude sessions in their own view, one terminal tab each.",
+      "publisher": "gcode",
+      "version": "1.0.0",
+      "icon": "icons/bot-message-square.svg",
+      "package": "ai-agent/manifest.json",
+      "sha256": "62517a9156f4688173525b9cba4db117c6b084b87fff77f69cd79a8f251ba1fa"
+    }
+  ]
+}

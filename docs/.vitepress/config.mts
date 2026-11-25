@@ -72,6 +72,7 @@ export default defineConfig({
             { text: 'Hosting & accounts', link: '/architecture/hosting' },
             { text: 'Commit messages', link: '/architecture/commit-messages' },
             { text: 'Updates', link: '/architecture/updates' },
+            { text: 'Extensions', link: '/architecture/extensions' },
             { text: 'Persistence', link: '/architecture/persistence' }
           ]
         }

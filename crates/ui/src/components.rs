@@ -148,37 +148,6 @@ pub(crate) fn skeleton_lines(count: usize) -> AnyElement {
 /// The text size of a path in the Changes list.
 pub(crate) const CHANGE_PATH_FONT_SIZE: Pixels = px(14.);
 
-/// An estimate of the width of one character of a path in [`CHANGE_PATH_FONT_SIZE`].
-const PATH_CHAR_WIDTH: f32 = 0.54 * 14.;
-
-/// `path` cut to fit `room` pixels: the file name is always kept whole and the end of the folder gives way to `…`
-/// (`app/(page)/finan…/page.client.tsx`), the way a path is shortened in a long file list. A zero `room` (before the first layout)
-/// leaves the path as it is.
-pub(crate) fn shortened_path(path: &str, room: f32) -> String {
-  let fits = (room / PATH_CHAR_WIDTH) as usize;
-  if room <= 0. || path.chars().count() <= fits {
-    return path.to_string();
-  }
-  let Some((folder, name)) = path.rsplit_once('/') else {
-    return path.to_string();
-  };
-  let kept = fits.saturating_sub(name.chars().count() + 2).max(1);
-  format!("{}…/{name}", folder.chars().take(kept).collect::<String>())
-}
-
-/// `path` cut to fit `room` pixels by dropping the middle (`src/co…er.tsx`), keeping the start and the end of it: for a path shown
-/// beside another, such as the two of a renamed file.
-pub(crate) fn shortened_middle(path: &str, room: f32) -> String {
-  let fits = (room / PATH_CHAR_WIDTH) as usize;
-  let chars: Vec<char> = path.chars().collect();
-  if room <= 0. || chars.len() <= fits || fits < 3 {
-    return path.to_string();
-  }
-  let tail = (fits - 1) / 2;
-  let head = fits - 1 - tail;
-  format!("{}…{}", chars[..head].iter().collect::<String>(), chars[chars.len() - tail..].iter().collect::<String>())
-}
-
 /// Escapes what Markdown would read as formatting, so that a path shows as it is written.
 fn plain_markdown(text: &str) -> String {
   let mut escaped = String::with_capacity(text.len());
@@ -237,10 +206,10 @@ pub(crate) fn slim_scrollbar<H: ScrollbarHandle + Clone>(handle: &H, id: impl In
 /// The color of a changed file's mark: green for new, red for deleted, amber for modified and so on.
 pub(crate) fn change_kind_icon(kind: ws_git::ChangeKind) -> &'static str {
   match kind {
-    ws_git::ChangeKind::New => "icons/square-plus.svg",
-    ws_git::ChangeKind::Modified => "icons/square-dot.svg",
-    ws_git::ChangeKind::Deleted => "icons/square-minus.svg",
-    ws_git::ChangeKind::Renamed => "icons/square-arrow-right.svg",
+    ws_git::ChangeKind::New => "icons/file-plus.svg",
+    ws_git::ChangeKind::Modified => "icons/file-pen-line.svg",
+    ws_git::ChangeKind::Deleted => "icons/file-minus.svg",
+    ws_git::ChangeKind::Renamed => "icons/file-symlink.svg",
     ws_git::ChangeKind::Conflicted => "icons/triangle-alert.svg",
   }
 }
@@ -258,23 +227,6 @@ pub(crate) fn kind_color(kind: ws_git::ChangeKind, palette: &crate::theme::Color
 /// The mark of a kind of change, as in the Changes list: a square with a plus for a new file, a dot for a modified one and so on.
 pub(crate) fn change_kind_mark(kind: ws_git::ChangeKind, cx: &App) -> Icon {
   Icon::empty().path(change_kind_icon(kind)).size_4().text_color(kind_color(kind, &colors(cx)))
-}
-
-/// A path as the Changes list shows it: the folders in the secondary color, the file name after them in the text color.
-pub(crate) fn path_label(path: &str, cx: &App) -> Div {
-  let (folder, name) = match path.rsplit_once('/') {
-    Some((folder, name)) => (Some(format!("{folder}/")), name),
-    None => (None, path),
-  };
-  h_flex()
-    .flex_none()
-    .whitespace_nowrap()
-    .text_size(CHANGE_PATH_FONT_SIZE)
-    // The system's own typeface, as the list of GitHub Desktop has; the interface's Geist and Inter look heavier at this size.
-    .font_family(SYSTEM_FONT)
-    .font_weight(FontWeight::NORMAL)
-    .children(folder.map(|folder| div().text_color(colors(cx).text_secondary).child(folder)))
-    .child(name.to_string())
 }
 
 /// The strip of a scrollbar that stays in view: a column of its own beside a list, a shade darker than the list, with a thin round thumb,
@@ -299,6 +251,3 @@ pub(crate) fn scrollbar_strip<H: ScrollbarHandle + Clone>(handle: &H, id: impl I
 const STRIP_WIDTH: Pixels = px(13.);
 const STRIP_THUMB_WIDTH: Pixels = px(6.);
 const STRIP_THUMB_INSET: Pixels = px(3.);
-
-/// The family name that GPUI resolves to the typeface of the operating system's interface.
-const SYSTEM_FONT: &str = ".SystemUIFont";

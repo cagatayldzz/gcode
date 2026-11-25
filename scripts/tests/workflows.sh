@@ -18,7 +18,7 @@ assert_contains "runs-on: macos-15" "$ci" "CI builds on macOS 15, the oldest sys
 assert_not_contains "macos-26" "$ci$release" "no workflow waits for the scarce macos-26 runners"
 assert_contains "bash scripts/tests/run.sh" "$ci" "CI runs the shell tests"
 assert_contains "cancel-in-progress: \${{ github.event_name == 'pull_request' }}" "$ci" "CI cancels superseded runs of pull requests only, never a push to main"
-assert_contains "cargo test \$CI_CARGO_FLAGS -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-language -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index" "$ci" "CI tests the core crates"
+assert_contains "cargo test \$CI_CARGO_FLAGS -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-language -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-extensions -p ws-index" "$ci" "CI tests the core crates"
 assert_contains "-D warnings" "$ci" "CI treats warnings as errors"
 
 assert_contains "workflow_dispatch:" "$release" "release is started by hand"

@@ -68,6 +68,7 @@ repository/
 | `commit_view.rs` | `CommitView`: a commit of History (message, files, diff) |
 | `all_changes.rs` | `AllChanges`: one virtualized diff of the whole working tree |
 | `diff_view.rs` | `ShownDiff`: the Kit `Diff` with theme-colored lines, `parse_patch` (language-aware), and `warm`: hunks are colored in the background when a patch is read (and for files that just got changes) and kept in a cache by language and text, so a diff paints with its colors from the first frame |
+| `extensions.rs` | `ExtensionsPanel` (the Extensions view: installed list, marketplace, install and uninstall), the shared state of what is installed, `enabled_agents` |
 | `diff_model.rs` | the lines of one file's patch, the layout of folded runs and expanded lines, and the words that changed within a line; no interface code, tested in `crates/ui/tests/diff_model.rs` |
 | `diff_table.rs` | `DiffTable`: the diff of one file in Changes and History, drawn with a virtual list instead of the Kit `Diff` (number columns with rules, a band of folded lines with expand arrows, unified and side by side, wrapped or scrolling lines, text and line selection with Copy) |
 | `merge_dialog.rs` | the merge conflict resolver |
@@ -114,6 +115,7 @@ repository/
 | **`ws-language`** | `find_server` (the project's own TypeScript server, else `typescript-language-server`), `Session` (`start`, `sync`, `close`), `Update`, `Problem`, `Severity` |
 | **`ws-activity`** | `timed`, `record`, `error`, `entries`, `version`, `clear` (the newest 2000 lines are always kept in memory; `start`/`stop` also write a file): lines marked `INFO`, `SLOW` (over 500 ms) or `ERROR`: Git commands, requests, refresh and history reads, the commit message steps, and every error notification |
 | **`ws-updater`** | `check`, `prepare`, `install`, `SWAP_SCRIPT`, `Release` |
+| **`ws-extensions`** | See [Extensions](./extensions.md): `fetch_index`, `install`, `uninstall`, `installed`, `Available`, `Manifest` |
 | **`ws-version`** | `is_newer` |
 | **`ws-capture`** | `cargo run -p ws-capture -- window\|screen [--out FILE] [--delay SECONDS]`: saves a PNG (default `<data dir>/captures/`) with macOS `screencapture`; needs Accessibility and Screen Recording access for the terminal |
 | **`ws-visual-check`** | `cargo run -p ws-visual-check -- <png> <x> <y> <w> <h>` |

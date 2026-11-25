@@ -9112,6 +9112,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ws-extensions"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "ws-activity",
+ "ws-product",
+ "ws-storage",
+]
+
+[[package]]
 name = "ws-git"
 version = "0.1.0"
 dependencies = [
@@ -9192,6 +9204,7 @@ dependencies = [
  "unicode-width",
  "ws-activity",
  "ws-commitgen",
+ "ws-extensions",
  "ws-git",
  "ws-hosting",
  "ws-index",

@@ -256,13 +256,14 @@ impl Workspace {
     let file = change.path.clone();
     let selected = self.selected_change.as_ref() == Some(&change.path);
     let included = !self.excluded.contains(&change.path);
-    let room = width.as_f32() - 88.;
-    let path = match &change.from {
-      Some(from) => h_flex()
-        .child(crate::components::path_label(&crate::components::shortened_middle(&from.to_string_lossy(), room / 2. - 12.), cx))
-        .child(div().px_1().text_color(palette.text_secondary).child("→"))
-        .child(crate::components::path_label(&crate::components::shortened_middle(&change.path.to_string_lossy(), room / 2. - 12.), cx)),
-      None => h_flex().child(crate::components::path_label(&crate::components::shortened_path(&change.path.to_string_lossy(), room), cx)),
+    // The file name first, then its folder in a smaller, secondary color; a renamed file shows where it was before the folder. Both
+    // are cut with an ellipsis by the row's width.
+    let name = change.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let folder = change.path.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
+    let detail = match (&change.from, folder) {
+      (Some(from), Some(folder)) => Some(format!("{folder}  ← {}", from.display())),
+      (Some(from), None) => Some(format!("← {}", from.display())),
+      (None, folder) => folder,
     };
     h_flex()
       .id(SharedString::from(format!("change-row-{}", change.path.display())))
@@ -274,7 +275,7 @@ impl Workspace {
       .gap_1p5()
       .px_3()
       .when(!last, |row| row.border_b_1())
-      .border_color(palette.border)
+      .border_color(crate::theme::row_divider(&palette))
       .items_center()
       .when(selected, |row| row.bg(palette.selected))
       .hover(|row| row.bg(palette.hover))
@@ -300,7 +301,22 @@ impl Workspace {
           .child(
             // One path, the file name last, cut when the row is narrow; a renamed file shows where it was before. The room is
             // the row less its padding, the checkbox, the status icon and the gaps.
-            div().flex_1().min_w_0().overflow_hidden().child(path),
+            h_flex()
+              .flex_1()
+              .min_w_0()
+              .gap_2()
+              .items_baseline()
+              .child(
+                Label::new(name)
+                  .text_size(crate::components::CHANGE_PATH_FONT_SIZE)
+                  .font_weight(FontWeight::MEDIUM)
+                  .flex_none()
+                  .max_w_3_4()
+                  .truncate(),
+              )
+              .children(
+                detail.map(|detail| Label::new(detail).flex_1().min_w_0().text_size(FONT_SIZE_SM).text_color(palette.text_secondary).truncate()),
+              ),
           )
           .child(Icon::empty().path(change_kind_icon(change.kind)).size_4().flex_none().text_color(kind_color(change.kind, &palette)))
           .on_click(cx.listener({

@@ -47,6 +47,7 @@ ws-language = { path = "crates/language" }
 ws-hosting = { path = "crates/hosting" }
 ws-version = { path = "crates/version" }
 ws-updater = { path = "crates/updater" }
+ws-extensions = { path = "crates/extensions" }
 ureq = { version = "3.5.2", features = ["json"] }
 
 [workspace.lints.rust]

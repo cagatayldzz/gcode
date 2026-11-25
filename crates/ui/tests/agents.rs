@@ -81,3 +81,9 @@ fn every_agent_has_a_distinct_name_command_and_icon() {
     }
   }
 }
+
+#[test]
+fn every_agent_has_the_plain_id_an_extension_manifest_names_it_by() {
+  let ids: Vec<&str> = AgentKind::ALL.iter().map(|kind| kind.id()).collect();
+  assert_eq!(ids, ["codex", "claude"]);
+}

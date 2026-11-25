@@ -45,7 +45,7 @@ jobs:
           shared-key: ci-lint-macos
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Lint core packages
-        run: cargo clippy $CI_CARGO_FLAGS -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-language -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index --all-targets -- -D warnings
+        run: cargo clippy $CI_CARGO_FLAGS -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-language -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-extensions -p ws-index --all-targets -- -D warnings
 
   test:
     name: Test
@@ -61,7 +61,7 @@ jobs:
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Test core packages
-        run: cargo test $CI_CARGO_FLAGS -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-language -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index
+        run: cargo test $CI_CARGO_FLAGS -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-language -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-extensions -p ws-index
       # One build profile for both steps: `cargo check` would compile every dependency a second time.
       - name: Build the interface crates
         run: cargo test $CI_CARGO_FLAGS -p ws-ui -p ws-app --no-run

@@ -38,9 +38,9 @@ jobs:
         with:
           shared-key: core
       - name: Lint core packages
-        run: cargo clippy --locked -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index --all-targets -- -D warnings
+        run: cargo clippy --locked -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-extensions -p ws-index --all-targets -- -D warnings
       - name: Test core packages
-        run: cargo test --locked -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-index
+        run: cargo test --locked -p ws-terminal -p ws-git -p ws-storage -p ws-commitgen -p ws-activity -p ws-hosting -p ws-version -p ws-updater -p ws-extensions -p ws-index
 
   prepare:
     name: 2 · Prepare version

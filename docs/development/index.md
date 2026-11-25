@@ -70,6 +70,7 @@ changes. The VitePress dependency is managed separately through Bun.
 | `ws-hosting` | lib | GitHub, GitLab and Azure DevOps accounts, repositories and pull requests |
 | `ws-version` | lib | version comparison for update detection |
 | `ws-updater` | lib | self-update from GitHub releases |
+| `ws-extensions` | lib | optional features installed from packages published in the repository |
 | `ws-index` | lib | project file index, fuzzy ranking and highlighting of `.env`, `.gitignore` and Dockerfiles |
 | `ws-visual-check` | tool | inspect screenshot pixels and map them to window coordinates |
 

@@ -1,0 +1,10 @@
+{
+  "id": "ai-agent",
+  "name": "AI Agent",
+  "version": "1.0.0",
+  "description": "Codex and Claude sessions in their own view, one terminal tab each.",
+  "publisher": "gcode",
+  "contributes": {
+    "agents": ["codex", "claude"]
+  }
+}

@@ -18,6 +18,7 @@ mod diff_table;
 mod diff_view;
 mod editor;
 mod explorer;
+mod extensions;
 mod find_bar;
 mod job_scope;
 mod labels;
@@ -137,6 +138,7 @@ pub fn init(cx: &mut App) {
   syntax::register_highlights();
   profiles::init(cx);
   recent::init(cx);
+  extensions::init(cx);
   if let Err(error) = cx.text_system().add_fonts(vec![
     // Static weights: the text system picks a weight by font file, so a variable font would draw every weight as regular.
     std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/Geist-Regular.ttf")),

@@ -26,6 +26,7 @@ anyhow = "1.0.105"
 lsp-types = { version = "0.97.0", features = ["proposed"] }
 ws-hosting.workspace = true
 ws-updater.workspace = true
+ws-extensions.workspace = true
 gpui-kit.workspace = true
 gpui-kit-assets.workspace = true
 futures.workspace = true

@@ -218,6 +218,7 @@ impl Workspace {
     let content = match self.sidebar_tab {
       SidebarTab::Explorer => self.render_explorer(cx).into_any_element(),
       SidebarTab::Search => self.render_project_search(cx),
+      SidebarTab::Extensions => self.extensions_panel.clone().into_any_element(),
       SidebarTab::Git => match self.render_git(cx) {
         Some(git) => git.into_any_element(),
         None => Label::new("Not a Git repository").text_color(cx.theme().muted_foreground).p_3().into_any_element(),
@@ -261,6 +262,9 @@ impl Workspace {
               let entering_explorer = tab == SidebarTab::Explorer && this.sidebar_tab != tab;
               this.sidebar_tab = tab;
               this.hovered_folder = None;
+              if tab == SidebarTab::Extensions {
+                this.extensions_panel.update(cx, |panel, cx| panel.ensure_loaded(cx));
+              }
               if entering_explorer {
                 let active_file = this.editor_panel.read(cx).active_file().map(Path::to_path_buf);
                 if let (Some(root), Some(path)) = (this.projects.active.clone(), active_file) {
@@ -389,7 +393,10 @@ impl Workspace {
         })
         .into_any_element(),
     );
-    buttons.insert("agents", agents.into_any_element());
+    // The AI view has a button only while the AI Agent extension is installed.
+    if !extensions::enabled_agents(cx).is_empty() {
+      buttons.insert("agents", agents.into_any_element());
+    }
     let layout = self.settings.read(cx).preferences.activity_bar.clone();
     v_flex()
       .w(ACTIVITY_BAR_WIDTH)
@@ -482,10 +489,11 @@ impl Workspace {
     };
     let project = SharedString::from(root.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default());
     let workspace = cx.entity();
+    let enabled_agents = extensions::enabled_agents(cx);
     let picker =
       Button::new("agent-new").ghost().xsmall().icon(Icon::empty().path("icons/plus.svg").size_4()).tooltip("New agent session").dropdown_menu(
         move |menu, _, _| {
-          AgentKind::ALL.into_iter().fold(menu, |menu, kind| {
+          enabled_agents.iter().copied().fold(menu, |menu, kind| {
             let workspace = workspace.clone();
             menu.item(
               PopupMenuItem::new(kind.label())

@@ -64,8 +64,8 @@ pub(crate) struct CommitSettingsRequested;
 impl EventEmitter<CommitSettingsRequested> for SettingsModel {}
 
 /// The buttons of the activity bar, by id and name, in their default order.
-pub(crate) const ACTIVITY_ITEMS: [(&str, &str); 5] =
-  [("explorer", "Explorer"), ("search", "Search"), ("git", "Git"), ("terminal", "Terminal"), ("agents", "AI agents")];
+pub(crate) const ACTIVITY_ITEMS: [(&str, &str); 6] =
+  [("explorer", "Explorer"), ("search", "Search"), ("git", "Git"), ("extensions", "Extensions"), ("terminal", "Terminal"), ("agents", "AI agents")];
 
 /// The ids of [`ACTIVITY_ITEMS`].
 pub(crate) fn activity_ids() -> Vec<&'static str> {

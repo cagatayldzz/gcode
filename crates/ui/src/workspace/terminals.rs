@@ -216,6 +216,9 @@ impl Workspace {
 
   /// The activity bar's AI button and its shortcut: the AI view takes the main area, or gives it back to the editor.
   pub fn toggle_agents(&mut self, _: &ToggleAgents, window: &mut Window, cx: &mut Context<Self>) {
+    if self.agents_missing(window, cx) {
+      return;
+    }
     if self.agent_open {
       self.hide_terminal(window, cx);
     } else {
@@ -225,6 +228,18 @@ impl Workspace {
       self.focus_agent(window, cx);
       cx.notify();
     }
+  }
+
+  /// Whether the AI Agent extension is missing: then the view of the extensions opens, with a note, since that is where it is installed.
+  fn agents_missing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    if !extensions::enabled_agents(cx).is_empty() {
+      return false;
+    }
+    self.sidebar_tab = SidebarTab::Extensions;
+    self.extensions_panel.update(cx, |panel, cx| panel.ensure_loaded(cx));
+    window.push_notification(Notification::info("Install the AI Agent extension to use agents."), cx);
+    cx.notify();
+    true
   }
 
   pub fn new_codex(&mut self, _: &NewCodex, window: &mut Window, cx: &mut Context<Self>) {
@@ -238,6 +253,9 @@ impl Workspace {
   /// Starts an agent in a tab of its own in the open project and shows the AI view. It runs in the user's login shell, so
   /// the PATH of their shell finds it.
   pub(super) fn new_agent(&mut self, kind: AgentKind, window: &mut Window, cx: &mut Context<Self>) {
+    if self.agents_missing(window, cx) {
+      return;
+    }
     let Some(root) = self.projects.active.clone() else { return };
     let shell = std::env::var("SHELL").ok().filter(|shell| !shell.is_empty()).unwrap_or_else(|| "/bin/zsh".to_owned());
     let program = (shell, vec!["-l".to_owned(), "-i".to_owned(), "-c".to_owned(), kind.shell_line()]);
