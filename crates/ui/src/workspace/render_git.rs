@@ -250,15 +250,12 @@ impl Workspace {
   /// ([`CHANGE_ROW_HEIGHT`]) because the list is virtualized, and its width is the list's own: a virtual list lays its rows out
   /// at their content width, so a percentage would leave short rows narrow and long ones unclipped.
   fn change_row(&self, change: &ws_git::Change, width: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
-    let theme = cx.theme().clone();
     let palette = colors(cx);
     let workspace = cx.entity();
     let root = self.projects.active.clone().unwrap_or_default();
     let file = change.path.clone();
     let selected = self.selected_change.as_ref() == Some(&change.path);
     let included = !self.excluded.contains(&change.path);
-    let name = change.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-    let folder = change.path.parent().map(|parent| parent.display().to_string()).filter(|parent| !parent.is_empty());
     h_flex()
       .id(SharedString::from(format!("change-row-{}", change.path.display())))
       .when(width.is_zero(), |row| row.w_full())
@@ -293,14 +290,14 @@ impl Workspace {
           .items_center()
           .cursor_pointer()
           .child(
-            h_flex()
-              .flex_1()
-              .min_w_0()
-              .gap_2()
-              .child(Label::new(name).min_w_0().font_weight(FontWeight::MEDIUM).truncate())
-              .when_some(folder, |row, folder| {
-                row.child(Label::new(folder).flex_1().min_w_0().text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).truncate())
-              }),
+            // One path, the file name last, cut in the middle when the row is narrow: the room is the row less its padding,
+            // the checkbox, the status icon and the gaps.
+            div().flex_1().min_w_0().child(
+              Label::new(crate::components::shortened_path(&change.path.to_string_lossy(), width.as_f32() - 88.))
+                .min_w_0()
+                .whitespace_nowrap()
+                .overflow_hidden(),
+            ),
           )
           .child(Icon::empty().path(change_kind_icon(change.kind)).size_4().flex_none().text_color(kind_color(change.kind, &palette)))
           .on_click(cx.listener({

@@ -141,3 +141,21 @@ pub(crate) fn skeleton_lines(count: usize) -> AnyElement {
     .children((0..count).map(|line| skeleton_bar([90., 70., 80., 45., 60., 85.][line % 6], px(12.))))
     .into_any_element()
 }
+
+/// An estimate of the width of one character of a path in the app's text size, from the font size.
+const PATH_CHAR_WIDTH: f32 = 0.54 * 14.;
+
+/// `path` cut to fit `room` pixels: the file name is always kept whole and the end of the folder gives way to `…`
+/// (`app/(page)/finan…/page.client.tsx`), the way a path is shortened in a long file list. A zero `room` (before the first layout)
+/// leaves the path as it is.
+pub(crate) fn shortened_path(path: &str, room: f32) -> String {
+  let fits = (room / PATH_CHAR_WIDTH) as usize;
+  if room <= 0. || path.chars().count() <= fits {
+    return path.to_string();
+  }
+  let Some((folder, name)) = path.rsplit_once('/') else {
+    return path.to_string();
+  };
+  let kept = fits.saturating_sub(name.chars().count() + 2).max(1);
+  format!("{}…/{name}", folder.chars().take(kept).collect::<String>())
+}
