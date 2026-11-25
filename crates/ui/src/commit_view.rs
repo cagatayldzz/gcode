@@ -173,19 +173,11 @@ impl CommitView {
       .when(selected, |row| row.bg(palette.selected))
       .hover(|row| row.bg(palette.hover))
       .child(Label::new(change.kind.mark()).w_4().flex_none().text_color(mark))
-      .child(Label::new(name).min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
+      // The folder first, dimmed, and the file name after it: the folder is what gives way when the row is narrow.
       .when_some(folder, |row, folder| {
-        row.child(
-          Label::new(folder)
-            .text_size(FONT_SIZE_SM)
-            .text_color(theme.muted_foreground)
-            .flex_1()
-            .min_w_0()
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .text_ellipsis(),
-        )
+        row.child(Label::new(format!("{folder}/")).text_color(theme.muted_foreground).min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis())
       })
+      .child(Label::new(name).flex_none().whitespace_nowrap())
       .on_click(cx.listener(move |this, _, _, cx| this.select_file(file.clone(), cx)))
   }
 }

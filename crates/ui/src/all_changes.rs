@@ -266,7 +266,6 @@ impl Render for AllChanges {
     let header_view = view.clone();
     let diff = diff
       .view(cx)
-      .soft_wrap(true)
       .text_size(code_font_size(&self.settings, cx))
       .border_0()
       .size_full()

@@ -225,7 +225,7 @@ impl EditorPanel {
       ));
     Some(v_flex().flex_none().h_56().min_h_0().border_b_1().border_color(cx.theme().border).child(bar).child(div().flex_1().min_h_0().child(
       if preview.shown.is_ready() {
-        preview.shown.with_controls(preview.shown.view(cx).soft_wrap(true).size_full(), cx).into_any_element()
+        preview.shown.with_controls(preview.shown.view(cx).size_full(), cx).into_any_element()
       } else {
         crate::components::skeleton_lines(16)
       },

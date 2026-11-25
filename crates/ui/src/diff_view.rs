@@ -176,6 +176,15 @@ const COLORS_WAIT: Duration = Duration::from_millis(500);
 /// How soon after the Kit reports a change of size the window is drawn again.
 const REDRAW_EVERY: Duration = Duration::from_millis(16);
 
+/// Whether long lines wrap in every diff (on) or scroll sideways (off). One setting for all the places that show a diff.
+struct WrapLines(bool);
+
+impl Global for WrapLines {}
+
+fn wraps(cx: &App) -> bool {
+  cx.try_global::<WrapLines>().is_none_or(|wrap| wrap.0)
+}
+
 /// A parsed patch with the lines it changes.
 pub(crate) struct ShownDiff {
   state: Entity<DiffState>,
@@ -261,7 +270,7 @@ impl ShownDiff {
       let background = if range.side == DiffSide::Original { palette.diff_removed } else { palette.diff_added };
       DiffDecoration::new(DiffLineRange::new(range.path.clone(), range.side, range.start, range.end)).with_background(background)
     });
-    Diff::new(&self.state).change_background(false).hover_highlight(DiffHoverHighlight::Both).decorations(decorations)
+    Diff::new(&self.state).soft_wrap(wraps(cx)).change_background(false).hover_highlight(DiffHoverHighlight::Both).decorations(decorations)
   }
 }
 
@@ -299,12 +308,17 @@ pub(crate) fn diff_controls(state: &Entity<DiffState>) -> impl IntoElement {
           let mode = state.mode();
           let emphasis = state.inline_unit();
           let mut menu = menu;
+          let wrap = wraps(cx);
           for (label, choice) in [("Unified", DiffMode::Unified), ("Side by side", DiffMode::Split)] {
             let target = options.clone();
             menu = menu.item(PopupMenuItem::new(label).checked(mode == choice).on_click(move |_, _, cx| {
               target.update(cx, |state, cx| state.set_mode(choice, cx));
             }));
           }
+          menu = menu.separator().item(PopupMenuItem::new("Wrap long lines").checked(wrap).on_click(move |_, _, cx| {
+            cx.set_global(WrapLines(!wrap));
+            cx.refresh_windows();
+          }));
           menu = menu.separator();
           for (label, choice) in [
             ("Highlight changed words", Some(DiffInlineUnit::Word)),

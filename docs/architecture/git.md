@@ -123,7 +123,12 @@ rejected branch line, or what the remote said) instead of git's generic last lin
 
 ## Diffs in the interface
 
-`file_diff` produces a unified patch that `ChangeView` hands to the Kit `Diff` through `ShownDiff`. Two details live in `diff_view.rs`:
+`file_diff` and `commit_file_diff` carry the whole file as context, so that the Kit's Expand Up / Down / All reach lines far from the changes (the Kit
+shows three lines around each change at first). `all_changes_diff` keeps the usual three, since it covers many files. `ChangeView` hands the patch to
+the Kit `Diff` through `ShownDiff`; long lines wrap in every diff, and "Wrap long lines" in the diff options menu switches that for the session.
+Three details live in `diff_view.rs`:
+
+- **Wrapping** is one setting (`WrapLines`) read by `ShownDiff::view`, so every place that shows a diff follows it.
 
 - **Whole-line backgrounds** for added and removed lines come from the theme palette (`diff_added`, `diff_removed`), computed from the patch.
 - **`parse_patch`** gives each file the language the editor uses for it, because the Kit detects languages from the extension alone. A file the

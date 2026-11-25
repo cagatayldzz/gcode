@@ -265,7 +265,7 @@ impl Render for ChangeView {
         div()
           .size_full()
           .cursor_text()
-          .child(state.view(cx).header_visible(false).soft_wrap(true).border_0().text_size(code_font_size(&self.settings, cx)).size_full())
+          .child(state.view(cx).header_visible(false).border_0().text_size(code_font_size(&self.settings, cx)).size_full())
           .into_any_element()
       }
     };

@@ -243,7 +243,7 @@ pub fn clone(url: &str, parent: &Path, credentials: Option<&Credentials>) -> Res
 }
 
 /// The unified diff of one file against the last commit (staged and unstaged changes together, untracked
-/// files as new). `file` is relative to the repository.
+/// files as new), with the whole file as context. `file` is relative to the repository.
 pub fn file_diff(path: &Path, file: &Path) -> Result<String, String> {
   working_tree_patch(path, Some(file))
 }
@@ -253,13 +253,17 @@ pub fn all_changes_diff(path: &Path) -> Result<String, String> {
   working_tree_patch(path, None)
 }
 
+/// Context lines that cover any file: a diff of one file carries the whole file, so that the interface can expand the unchanged lines
+/// between and around the changes (it collapses them to a few lines at first).
+const WHOLE_FILE: u32 = u32::MAX;
+
 fn working_tree_patch(path: &Path, file: Option<&Path>) -> Result<String, String> {
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
   let head = repository.head().ok().and_then(|head| head.peel_to_tree().ok());
   let mut options = DiffOptions::new();
   options.include_untracked(true).show_untracked_content(true).recurse_untracked_dirs(true);
   if let Some(file) = file {
-    options.pathspec(file);
+    options.pathspec(file).context_lines(WHOLE_FILE);
   }
   let diff = repository.diff_tree_to_workdir_with_index(head.as_ref(), Some(&mut options)).map_err(|error| error.message().to_string())?;
   patch_text(&diff)
@@ -1084,7 +1088,7 @@ fn commit_diff<'a>(repository: &'a Repository, commit: &git2::Commit, file: Opti
   let parent = commit.parent(0).ok().and_then(|parent| parent.tree().ok());
   let mut options = DiffOptions::new();
   if let Some(file) = file {
-    options.pathspec(file);
+    options.pathspec(file).context_lines(WHOLE_FILE);
   }
   repository.diff_tree_to_tree(parent.as_ref(), Some(&tree), Some(&mut options)).map_err(|error| error.message().to_string())
 }
@@ -1125,7 +1129,7 @@ pub fn commit_detail(path: &Path, id: &str) -> Result<CommitDetail, String> {
   })
 }
 
-/// The unified diff of one file in a commit, against its first parent. `file` is relative to the repository.
+/// The unified diff of one file in a commit, against its first parent, with the whole file as context. `file` is relative to the repository.
 pub fn commit_file_diff(path: &Path, id: &str, file: &Path) -> Result<String, String> {
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
   let commit =
