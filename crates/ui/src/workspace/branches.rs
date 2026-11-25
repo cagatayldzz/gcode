@@ -21,7 +21,7 @@ impl Workspace {
     self.branch_menu_open = false;
     cx.notify();
     let Some(git) = self.git.as_ref() else { return };
-    if git.branch == name {
+    if git.branch == name || self.switching_branch.is_some() {
       return;
     }
     if git.changes.is_empty() {
@@ -64,6 +64,8 @@ impl Workspace {
 
   fn run_switch(&mut self, name: String, changes: Option<Changes>, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
+    self.switching_branch = Some(name.clone());
+    cx.notify();
     let work = cx.background_executor().spawn({
       let (root, name) = (root.clone(), name.clone());
       async move {
@@ -78,9 +80,16 @@ impl Workspace {
     cx.spawn_in(window, async move |this, cx| {
       let (result, stashed) = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
+        this.switching_branch = None;
         let here = this.settle_job(&root, cx);
         match result {
           Ok(()) => {
+            // The commits of the old branch are not the ones of this one: they are read again, with the loader, when History is open
+            // (otherwise the next time it is opened, which finds them out of date).
+            this.history_loaded = None;
+            if here && this.git_view == GitView::History {
+              this.load_history(cx);
+            }
             let message = this.say_where(&root, format!("Switched to {name}."));
             window.push_notification(Notification::info(message), cx);
             // The question acts on the open project's stash: it is asked only while the open project is the one that switched.

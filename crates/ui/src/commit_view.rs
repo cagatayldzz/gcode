@@ -383,6 +383,7 @@ impl Render for CommitView {
     let diff = match &self.diff {
       Load::Loading => spinner(),
       Load::Failed(error) => message(error.clone(), false),
+      Load::Ready(state) if !state.is_ready() => crate::components::skeleton_lines(16),
       Load::Ready(state) => div()
         .size_full()
         .cursor_text()

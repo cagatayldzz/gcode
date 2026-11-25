@@ -57,6 +57,8 @@ impl Workspace {
     let workspace = cx.entity();
     let theme = cx.theme().clone();
     let palette = colors(cx);
+    // While a switch runs the branch icon is a loader, as the icon of the Fetch button is while it fetches.
+    let switching = self.switching_branch.is_some();
     let current = SharedString::from(current.to_string());
     let open = self.branch_menu_open;
     Button::new("branch-trigger")
@@ -72,7 +74,11 @@ impl Workspace {
           .w_full()
           .gap_2()
           .items_center()
-          .child(Icon::empty().path("icons/git-branch.svg").size_5().text_color(theme.muted_foreground))
+          .child(if switching {
+            Spinner::new().small().into_any_element()
+          } else {
+            Icon::empty().path("icons/git-branch.svg").size_5().text_color(theme.muted_foreground).into_any_element()
+          })
           .child(
             v_flex()
               .flex_1()

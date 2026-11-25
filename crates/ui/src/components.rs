@@ -10,7 +10,8 @@ use gpui_kit::{
     button::ButtonCustomVariant,
     h_flex,
     input::{Input, InputState, Textarea, TextareaState},
-    ActiveTheme as _,
+    skeleton::Skeleton,
+    v_flex, ActiveTheme as _,
   },
   *,
 };
@@ -99,4 +100,44 @@ pub(crate) fn strip_tab(id: SharedString, label: impl IntoElement, shown: bool, 
 pub(crate) fn strip(cx: &App) -> Div {
   let c = colors(cx);
   h_flex().h_9().flex_none().bg(c.surface).border_b_1().border_color(c.border)
+}
+
+/// A bar of a skeleton: a quiet placeholder for text that is being read. `width` is a share of the line, in percent.
+fn skeleton_bar(width: f32, height: Pixels) -> impl IntoElement {
+  Skeleton::new().w(relative(width / 100.)).h(height).rounded_md()
+}
+
+/// Placeholder rows for a list of two-line entries (commits, files), shown while what the list holds is being read.
+pub(crate) fn skeleton_list(rows: usize) -> AnyElement {
+  v_flex()
+    .size_full()
+    .gap_3()
+    .px_3()
+    .py_2()
+    .children((0..rows).map(|row| {
+      // The widths vary a little, as text does.
+      let (first, second) = [(86., 48.), (72., 38.), (92., 52.), (64., 44.)][row % 4];
+      v_flex().gap_1p5().child(skeleton_bar(first, px(12.))).child(skeleton_bar(second, px(10.)))
+    }))
+    .into_any_element()
+}
+
+/// A placeholder for the main area of a commit or a change: its title, its files and a body of lines.
+pub(crate) fn skeleton_page() -> AnyElement {
+  v_flex()
+    .size_full()
+    .child(v_flex().gap_2().p_4().child(skeleton_bar(55., px(16.))).child(skeleton_bar(30., px(12.))))
+    .child(h_flex().flex_1().min_h_0().child(div().w_64().flex_none().h_full().child(skeleton_list(10))).child(skeleton_lines(16)))
+    .into_any_element()
+}
+
+/// Placeholder lines for the body of a diff or a file that is being read.
+pub(crate) fn skeleton_lines(count: usize) -> AnyElement {
+  v_flex()
+    .flex_1()
+    .min_w_0()
+    .gap_2()
+    .p_4()
+    .children((0..count).map(|line| skeleton_bar([90., 70., 80., 45., 60., 85.][line % 6], px(12.))))
+    .into_any_element()
 }

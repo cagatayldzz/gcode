@@ -15,12 +15,14 @@ use gpui_kit::{
   *,
 };
 use std::{
-  cell::RefCell,
+  cell::{Cell, RefCell},
   collections::{hash_map::DefaultHasher, HashMap},
   hash::{Hash, Hasher},
   ops::Range,
   path::Path,
+  rc::Rc,
   sync::{Arc, Mutex, MutexGuard},
+  time::Duration,
 };
 use ws_index::highlight::{Highlights, Language};
 
@@ -168,23 +170,56 @@ struct ChangedRange {
   end: usize,
 }
 
+/// The longest a new diff is held back for its colors; past this it is shown as it is.
+const COLORS_WAIT: Duration = Duration::from_millis(500);
+
 /// A parsed patch with the lines it changes.
 pub(crate) struct ShownDiff {
   state: Entity<DiffState>,
   changed: Vec<ChangedRange>,
+  /// Files whose colors (syntax, changed words) the Kit is still preparing; the diff is not shown before they are in, so that it
+  /// does not paint as plain text first and change under the eyes.
+  waiting: Rc<Cell<usize>>,
   _theme_subscription: Subscription,
+  _prepared: Subscription,
+  _give_up: Task<()>,
 }
 
 impl ShownDiff {
-  /// Shows `files`, which were parsed from `patch`.
-  pub fn new(files: Vec<DiffFile>, patch: &str, cx: &mut App) -> Self {
+  /// Shows `files`, which were parsed from `patch`. The owner is redrawn as the colors come in; until then [`Self::is_ready`] is false.
+  pub fn new<T: 'static>(files: Vec<DiffFile>, patch: &str, cx: &mut Context<T>) -> Self {
     let changed = changed_ranges(patch, &files);
+    let waiting = Rc::new(Cell::new(files.len()));
     let state = cx.new(|cx| DiffState::new(files, cx).with_mode(DiffMode::Unified));
     let theme_subscription = state.update(cx, |state, cx| {
       state.set_syntax_highlighter(diff_highlighter(cx), cx);
       cx.observe_global::<Theme>(|state, cx| state.set_syntax_highlighter(diff_highlighter(cx), cx))
     });
-    Self { state, changed, _theme_subscription: theme_subscription }
+    // The Kit tells its observers once for each file it has prepared (and when other things change, which only makes this early).
+    let prepared = cx.observe(&state, {
+      let waiting = waiting.clone();
+      move |_, _, cx| {
+        if waiting.get() > 0 {
+          waiting.set(waiting.get() - 1);
+          cx.notify();
+        }
+      }
+    });
+    let give_up = cx.spawn({
+      let waiting = waiting.clone();
+      async move |this, cx| {
+        cx.background_executor().timer(COLORS_WAIT).await;
+        if waiting.replace(0) > 0 {
+          let _ = this.update(cx, |_, cx| cx.notify());
+        }
+      }
+    });
+    Self { state, changed, waiting, _theme_subscription: theme_subscription, _prepared: prepared, _give_up: give_up }
+  }
+
+  /// Whether the colors are in, so that the diff can be shown. A diff whose files were replaced ([`Self::set_files`]) stays shown.
+  pub fn is_ready(&self) -> bool {
+    self.waiting.get() == 0
   }
 
   pub fn set_files(&mut self, files: Vec<DiffFile>, patch: &str, cx: &mut App) {

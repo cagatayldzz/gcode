@@ -258,6 +258,7 @@ impl Render for ChangeView {
         Some(Load::Failed(message)) => failed(message),
         _ => loading(),
       },
+      Load::Ready(ChangeDiff::Text(state)) if !state.is_ready() => crate::components::skeleton_lines(16),
       Load::Ready(ChangeDiff::Text(state)) =>
       // The path is in the header above: the diff does not repeat it.
       {

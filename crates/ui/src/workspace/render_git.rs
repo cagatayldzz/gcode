@@ -560,17 +560,22 @@ impl Workspace {
               }
             }),
         )
-        .child(div().relative().flex_1().min_h_0().when(git.changed() > 0, |list| {
-          list.child(changes_list).child(
-            div().absolute().inset_0().child(
-              Scrollbar::new(&self.changes_scroll)
-                .id("changes-scrollbar")
-                .axis(ScrollbarAxis::Vertical)
-                .mode(ScrollbarMode::Always)
-                .viewport_from_layout(),
-            ),
-          )
-        }))
+        .child(
+          div().relative().flex_1().min_h_0().when(self.switching_branch.is_some(), |area| area.child(crate::components::skeleton_list(8))).when(
+            git.changed() > 0 && self.switching_branch.is_none(),
+            |list| {
+              list.child(changes_list).child(
+                div().absolute().inset_0().child(
+                  Scrollbar::new(&self.changes_scroll)
+                    .id("changes-scrollbar")
+                    .axis(ScrollbarAxis::Vertical)
+                    .mode(ScrollbarMode::Always)
+                    .viewport_from_layout(),
+                ),
+              )
+            },
+          ),
+        )
         .child(commit_box)
         .into_any_element(),
       GitView::History => v_flex().flex_1().min_h_0().pt_2().child(self.render_history(cx)).into_any_element(),
@@ -585,6 +590,9 @@ impl Workspace {
       self.render_compare_choices(cx)
     } else if let Some(view) = &self.compare {
       self.render_compare(view, cx)
+    } else if self.switching_branch.is_some() {
+      // What the list holds belongs to the branch that is being left: a skeleton stands in until the new branch's commits are read.
+      crate::components::skeleton_list(10)
     } else if self.history_loading {
       let muted = cx.theme().muted_foreground;
       h_flex()

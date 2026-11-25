@@ -255,6 +255,9 @@ impl Render for AllChanges {
     let Some(diff) = &self.diff else {
       return h_flex().gap_2().p_4().child(Spinner::new().small()).child(Label::new("Loading changes…").text_color(muted)).into_any_element();
     };
+    if !diff.is_ready() {
+      return crate::components::skeleton_lines(16);
+    }
     let state = diff.state().clone();
     let view = cx.entity().downgrade();
     let layout = Rc::new(RefCell::new(FileHeaderLayout::default()));

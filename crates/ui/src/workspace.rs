@@ -417,6 +417,8 @@ pub struct Workspace {
   history_loaded: Option<(PathBuf, usize, String)>,
   /// Whether the commits are being read, so that the History list shows a loader.
   history_loading: bool,
+  /// The branch being switched to, while the switch runs: the branch button, the changes and the commits show a loader until it is done.
+  switching_branch: Option<String>,
   /// How many commits the History view asks for now, and its scroll position (to load more near the end).
   history_limit: usize,
   history_scroll: ScrollHandle,
@@ -594,6 +596,7 @@ impl Workspace {
       history_stamp: None,
       history_loaded: None,
       history_loading: false,
+      switching_branch: None,
       history_limit: HISTORY_PAGE,
       history_scroll: ScrollHandle::new(),
       changes_scroll: VirtualListScrollHandle::new(),
@@ -871,7 +874,13 @@ impl Render for Workspace {
     let palette = colors(cx);
     let commit_shown = self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::History && self.selected_commit.is_some();
     let change_shown = self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::Changes && self.selected_change.is_some();
-    let editor_area: AnyElement = if commit_shown {
+    let switching = self.switching_branch.is_some()
+      && self.sidebar_tab == SidebarTab::Git
+      && (commit_shown || change_shown || (self.git_view == GitView::Changes && self.all_changes_open));
+    let editor_area: AnyElement = if switching {
+      // The commit or change on screen belongs to the branch being left.
+      crate::components::skeleton_page()
+    } else if commit_shown {
       self.commit_view.clone().into_any_element()
     } else if self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::Changes && self.all_changes_open {
       self.all_changes.clone().into_any_element()
