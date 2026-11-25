@@ -10,6 +10,13 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Select Xcode 26
+      shell: bash
+      run: |
+        xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)"
+        if [[ -n "$xcode" ]]; then sudo xcode-select -s "$xcode"; fi
+        xcodebuild -version
+        xcrun --sdk macosx --show-sdk-version
     - name: Install stable Rust
       shell: bash
       run: |

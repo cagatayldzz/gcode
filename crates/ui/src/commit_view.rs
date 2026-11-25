@@ -119,14 +119,20 @@ impl CommitView {
     self.epoch += 1;
     let (epoch, root, id) = (self.epoch, self.root.clone(), self.id.clone());
     cx.notify();
-    let work = cx.background_executor().spawn(async move { ws_git::commit_file_diff(&root, &id, &file) });
+    let theme = crate::diff_view::highlight_theme(cx);
+    let work = cx.background_executor().spawn(async move {
+      let patch = ws_git::commit_file_diff(&root, &id, &file)?;
+      let files = crate::diff_view::parse_patch(&patch)?;
+      crate::diff_view::warm(&theme, &patch);
+      Ok::<_, String>((files, patch))
+    });
     cx.spawn(async move |this, cx| {
       let result = work.await;
       let _ = this.update(cx, |this, cx| {
         if this.epoch != epoch {
           return;
         }
-        this.diff = match result.and_then(|patch| crate::diff_view::parse_patch(&patch).map(|files| (files, patch))) {
+        this.diff = match result {
           Ok((files, _)) if files.is_empty() => Load::Failed("This file has no text changes to show.".into()),
           Ok((files, patch)) => Load::Ready(ShownDiff::new(files, &patch, cx)),
           Err(message) => Load::Failed(message.into()),

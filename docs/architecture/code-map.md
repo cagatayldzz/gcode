@@ -67,7 +67,7 @@ repository/
 | `change_view.rs` | `ChangeView`: the diff of the chosen file in the Changes view |
 | `commit_view.rs` | `CommitView`: a commit of History (message, files, diff) |
 | `all_changes.rs` | `AllChanges`: one virtualized diff of the whole working tree |
-| `diff_view.rs` | `ShownDiff`: the Kit `Diff` with theme-colored lines, and `parse_patch` (language-aware) |
+| `diff_view.rs` | `ShownDiff`: the Kit `Diff` with theme-colored lines, `parse_patch` (language-aware), and `warm`: hunks are colored in the background when a patch is read (and for files that just got changes) and kept in a cache by language and text, so a diff paints with its colors from the first frame |
 | `merge_dialog.rs` | the merge conflict resolver |
 | `explorer.rs` | folder tree rows |
 | `project_search.rs` | search/replace engine (runs on the background executor) |

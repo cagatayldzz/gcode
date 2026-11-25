@@ -104,6 +104,11 @@ bundle() {
   mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
   cp "$project_dir/target/$configuration/ws-desktop" "$app_dir/Contents/MacOS/$product_name"
   if [[ "$(uname -m)" == arm64 ]]; then
+    # Apple Intelligence needs the macOS 26 SDK; a release without it would lose the feature, so it is refused.
+    if [[ "$configuration" == release && "$(xcrun --sdk macosx --show-sdk-version | cut -d. -f1)" -lt 26 ]]; then
+      echo "A release needs the macOS 26 SDK (Xcode 26) for Apple Intelligence." >&2
+      exit 1
+    fi
     xcrun --sdk macosx swiftc -parse-as-library -O -target arm64-apple-macosx15.0 \
       "$project_dir/crates/commitgen/AppleIntelligence.swift" -o "$app_dir/Contents/MacOS/$product_slug-apple-intelligence"
   fi

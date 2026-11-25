@@ -84,12 +84,14 @@ impl AllChanges {
       return;
     }
     let previous = self.patch.clone();
+    let theme = crate::diff_view::highlight_theme(cx);
     let work = cx.background_executor().spawn(async move {
       let patch = ws_git::all_changes_diff(&root)?;
       if previous.as_deref() == Some(patch.as_str()) {
         return Ok(None);
       }
       let files = crate::diff_view::parse_patch(&patch)?;
+      crate::diff_view::warm(&theme, &patch);
       let line_probes = line_probes(&patch, &files);
       let fingerprints = file_fingerprints(&patch, &files);
       Ok::<_, String>(Some((patch, files, line_probes, fingerprints)))

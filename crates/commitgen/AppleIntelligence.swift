@@ -1,6 +1,8 @@
 import Darwin
 import Foundation
+#if canImport(FoundationModels)
 import FoundationModels
+#endif
 
 private struct Request: Decodable {
   let instructions: String
@@ -9,6 +11,7 @@ private struct Request: Decodable {
 
 @main
 struct AppleIntelligence {
+#if canImport(FoundationModels)
   static func main() async {
     guard #available(macOS 26.0, *) else {
       fail("Apple Intelligence commit generation requires macOS 26 or later.")
@@ -42,6 +45,13 @@ struct AppleIntelligence {
       fail("Apple Intelligence could not generate a commit message. Try again or choose another provider.")
     }
   }
+
+#else
+  // Built with an SDK older than macOS 26: the model is not there, and the app says so.
+  static func main() async {
+    fail("This build was made without Apple Intelligence. Choose another provider in the commit message settings.")
+  }
+#endif
 
   private static func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))

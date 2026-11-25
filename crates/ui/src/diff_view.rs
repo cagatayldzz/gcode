@@ -8,13 +8,20 @@ use gpui_kit::{
     button::{Button, ButtonVariants as _},
     diff::{Diff, DiffDecoration, DiffFile, DiffHoverHighlight, DiffInlineUnit, DiffLineRange, DiffMode, DiffSide, DiffState},
     h_flex,
-    highlighter::SyntaxHighlighter,
+    highlighter::{HighlightTheme, SyntaxHighlighter},
     menu::{DropdownMenu as _, PopupMenuItem},
     v_flex, ActiveTheme as _, Icon, IconName, Sizable as _, Theme,
   },
   *,
 };
-use std::{ops::Range, path::Path};
+use std::{
+  cell::RefCell,
+  collections::{hash_map::DefaultHasher, HashMap},
+  hash::{Hash, Hasher},
+  ops::Range,
+  path::Path,
+  sync::{Arc, Mutex, MutexGuard},
+};
 use ws_index::highlight::{Highlights, Language};
 
 /// Parses a patch using the same file-to-language mapping as the editor.
@@ -32,17 +39,125 @@ fn with_editor_language(file: DiffFile) -> DiffFile {
   }
 }
 
+type Styles = Arc<Vec<(Range<usize>, HighlightStyle)>>;
+
+/// The colors of hunks that were already highlighted, so that showing a diff again (or showing it after [`warm`]) does not parse it again.
+/// Keyed by the language and the text of the hunk: a file that changed has other hunks, and those are the only ones parsed anew.
+struct Cache {
+  theme: Arc<HighlightTheme>,
+  styles: HashMap<u64, Styles>,
+}
+
+static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
+
+/// The most hunks kept; the cache starts again past this.
+const MAX_CACHED: usize = 2048;
+
+thread_local! {
+  /// One parser per language and thread: loading a grammar costs more than parsing a hunk with it.
+  static PARSERS: RefCell<HashMap<String, SyntaxHighlighter>> = RefCell::new(HashMap::new());
+}
+
+fn cache() -> MutexGuard<'static, Option<Cache>> {
+  CACHE.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+fn styles_of(theme: &Arc<HighlightTheme>, language: &str, text: &str) -> Styles {
+  let mut hasher = DefaultHasher::new();
+  (language, text).hash(&mut hasher);
+  let key = hasher.finish();
+  if let Some(cache) = cache().as_ref().filter(|cache| Arc::ptr_eq(&cache.theme, theme)) {
+    if let Some(styles) = cache.styles.get(&key) {
+      return styles.clone();
+    }
+  }
+  let range = 0..text.len();
+  let styles = Arc::new(if let Some(known) = Language::from_name(language) {
+    line_styles(known, &Highlights::compute(known, text), &range, &**theme)
+  } else {
+    PARSERS.with(|parsers| {
+      let mut parsers = parsers.borrow_mut();
+      let parser = parsers.entry(language.to_string()).or_insert_with(|| SyntaxHighlighter::new(language));
+      parser.update(None, &Rope::from(text), None);
+      parser.styles(&range, &**theme)
+    })
+  });
+  let mut guard = cache();
+  let cache = match &mut *guard {
+    Some(cache) if Arc::ptr_eq(&cache.theme, theme) && cache.styles.len() < MAX_CACHED => cache,
+    slot => slot.insert(Cache { theme: theme.clone(), styles: HashMap::new() }),
+  };
+  cache.styles.insert(key, styles.clone());
+  styles
+}
+
 fn diff_highlighter(cx: &App) -> impl Fn(&str, &str) -> Vec<(Range<usize>, HighlightStyle)> + Send + Sync + 'static {
   let theme = cx.theme().highlight_theme.clone();
-  move |language, text| {
-    let range = 0..text.len();
-    if let Some(language) = Language::from_name(language) {
-      return line_styles(language, &Highlights::compute(language, text), &range, &*theme);
+  move |language, text| styles_of(&theme, language, text).to_vec()
+}
+
+/// The theme the colors of diffs come from; take it on the interface thread and hand it to [`warm`].
+pub(crate) fn highlight_theme(cx: &App) -> Arc<HighlightTheme> {
+  cx.theme().highlight_theme.clone()
+}
+
+/// Colors every hunk of `patch` ahead of time, on the thread that calls it (the background one that read the patch), so that the first
+/// paint of the diff finds its colors ready instead of showing plain text until they arrive. The hunks are cut the way the Kit cuts them:
+/// one text per side, with its line endings, for each hunk.
+pub(crate) fn warm(theme: &Arc<HighlightTheme>, patch: &str) {
+  let mut language: Option<&'static str> = None;
+  // The text of the original and modified side of the hunk being read, and which sides the last line was on.
+  let mut sides = [String::new(), String::new()];
+  let mut last = [false, false];
+  let mut in_hunk = false;
+  let flush = |language: Option<&str>, sides: &mut [String; 2]| {
+    for text in sides.iter_mut() {
+      if let (Some(language), false) = (language, text.is_empty()) {
+        styles_of(theme, language, text);
+      }
+      text.clear();
     }
-    let mut highlighter = SyntaxHighlighter::new(language);
-    highlighter.update(None, &Rope::from(text), None);
-    highlighter.styles(&range, &*theme)
+  };
+  for line in patch.split('\n') {
+    if let Some(rest) = line.strip_prefix("diff --git ") {
+      flush(language, &mut sides);
+      in_hunk = false;
+      language = rest.rsplit_once(" b/").map(|(_, path)| language_for(Path::new(path))).filter(|language| *language != "text");
+    } else if line.starts_with("@@ ") {
+      flush(language, &mut sides);
+      in_hunk = true;
+    } else if in_hunk {
+      match line.as_bytes().first() {
+        Some(b' ') => {
+          sides[0].push_str(&line[1..]);
+          sides[0].push('\n');
+          sides[1].push_str(&line[1..]);
+          sides[1].push('\n');
+          last = [true, true];
+        }
+        Some(b'-') => {
+          sides[0].push_str(&line[1..]);
+          sides[0].push('\n');
+          last = [true, false];
+        }
+        Some(b'+') => {
+          sides[1].push_str(&line[1..]);
+          sides[1].push('\n');
+          last = [false, true];
+        }
+        // "\ No newline at end of file": the line before it has no line ending.
+        Some(b'\\') => {
+          for (text, on) in sides.iter_mut().zip(last) {
+            if on && text.ends_with('\n') {
+              text.pop();
+            }
+          }
+        }
+        _ => {}
+      }
+    }
   }
+  flush(language, &mut sides);
 }
 
 /// A run of lines the patch adds or removes.

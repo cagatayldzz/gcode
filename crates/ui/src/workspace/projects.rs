@@ -609,6 +609,29 @@ impl Workspace {
     self.refresh_with_explorer_reveal(None, cx);
   }
 
+  /// Colors the diffs of the files that just got changes (or whose change differs), in the background, so opening one finds its colors
+  /// ready. Files whose change is the same as before are not touched: their hunks are still in the cache.
+  fn warm_new_changes(&self, root: &Path, git: Option<&ws_git::Summary>, cx: &mut Context<Self>) {
+    const MOST_FILES: usize = 12;
+    let Some(git) = git else { return };
+    let known = self.git.as_ref().map(|git| git.changes.as_slice()).unwrap_or_default();
+    let files: Vec<PathBuf> =
+      git.changes.iter().filter(|change| !known.contains(change)).map(|change| change.path.clone()).take(MOST_FILES).collect();
+    if files.is_empty() {
+      return;
+    }
+    let (root, theme) = (root.to_path_buf(), crate::diff_view::highlight_theme(cx));
+    cx.background_executor()
+      .spawn(async move {
+        for file in files {
+          if let Ok(patch) = ws_git::file_diff(&root, &file) {
+            crate::diff_view::warm(&theme, &patch);
+          }
+        }
+      })
+      .detach();
+  }
+
   pub(super) fn refresh_with_explorer_reveal(&mut self, reveal: Option<(PathBuf, ScrollStrategy)>, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
     let expanded = self.expanded.clone();
@@ -633,6 +656,7 @@ impl Workspace {
       let _ = this.update(cx, |this, cx| {
         // The user may have switched projects or opened a folder while this was reading.
         if this.projects.active.as_ref() == Some(&root) && this.expanded == expanded && (this.git != git || this.rows != rows) {
+          this.warm_new_changes(&root, git.as_ref(), cx);
           this.git = git;
           this.rows = rows;
           cx.notify();

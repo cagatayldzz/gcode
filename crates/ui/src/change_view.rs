@@ -131,11 +131,13 @@ impl ChangeView {
     let (epoch, root, file) = (self.epoch, self.root.clone(), self.file.clone());
     let previous = matches!(self.diff, Load::Ready(_)).then(|| self.patch.clone());
     let renderer = cx.svg_renderer();
+    let theme = crate::diff_view::highlight_theme(cx);
     let work = cx.background_executor().spawn(async move {
       let patch = ws_git::file_diff(&root, &file)?;
       if previous.as_deref() == Some(patch.as_str()) {
         return Ok(None);
       }
+      crate::diff_view::warm(&theme, &patch);
       let image = ImageChanges::format(&file)
         .filter(|_| patch.lines().any(|line| line.starts_with("Binary files ")))
         .map(|format| {
