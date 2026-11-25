@@ -3,6 +3,7 @@
 use git2::{build::CheckoutBuilder, DiffFormat, DiffOptions, Repository, Status, StatusOptions};
 use std::path::{Path, PathBuf};
 
+pub mod conflict_markers;
 pub mod editor_diff;
 
 mod branch;

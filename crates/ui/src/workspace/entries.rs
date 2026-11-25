@@ -146,17 +146,30 @@ impl Workspace {
 
   pub(super) fn open_changed_file(&mut self, action: &OpenChangedFile, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
-    let Some(path) = ws_git::workdir_file(&root, Path::new(action.0.as_str())) else {
+    let Some(path) = Self::changed_file_path(&root, action.0.as_str()) else {
       window.push_notification(crate::failure("Could not locate the file in the working tree."), cx);
       return;
     };
+    self.reveal_file(root, path, window, cx);
+  }
+
+  /// Opens a conflicted file from the merge dialog and puts the cursor on its first conflict.
+  pub(super) fn open_conflicted_file(&mut self, relative: &str, window: &mut Window, cx: &mut Context<Self>) {
+    self.open_changed_file(&OpenChangedFile(relative.into()), window, cx);
+    if let Some(path) = self.projects.active.as_deref().and_then(|root| Self::changed_file_path(root, relative)) {
+      self.editor_panel.update(cx, |editor, cx| editor.reveal_first_conflict(&path, window, cx));
+    }
+  }
+
+  /// The working tree path of a repository file, spelled like the Explorer spells it.
+  pub(super) fn changed_file_path(root: &Path, relative: &str) -> Option<PathBuf> {
+    let path = ws_git::workdir_file(root, Path::new(relative))?;
     // Git may resolve the project directory through a symlink. Keep Explorer's path spelling.
-    let path = if path.starts_with(&root) {
+    Some(if path.starts_with(root) {
       path
     } else {
       root.canonicalize().ok().and_then(|canonical| path.strip_prefix(canonical).ok()).map(|relative| root.join(relative)).unwrap_or(path)
-    };
-    self.reveal_file(root, path, window, cx);
+    })
   }
 
   /// Opens a file in the editor and shows it in the Explorer: its folders open and the tree scrolls to it.

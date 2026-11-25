@@ -6,6 +6,9 @@ use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::ElementExt as _;
 
 /// The fixed height of a line in the Changes list: the virtualized list needs every row's height before it draws.
+/// How long a project tab takes to glide to its place after a swap.
+pub(super) const TAB_SLIDE: Duration = Duration::from_millis(180);
+
 const CHANGE_ROW_HEIGHT: Pixels = px(28.);
 
 impl Workspace {
@@ -20,6 +23,7 @@ impl Workspace {
 
   pub(super) fn render_favorite_projects(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
     let palette = colors(cx);
+    let theme = cx.theme().clone();
     let workspace = cx.entity();
     self
       .projects
@@ -38,6 +42,10 @@ impl Workspace {
         let swapper = workspace.clone();
         let menu_workspace = workspace.clone();
         let menu_path = path.clone();
+        let bounds_slot = self.tab_bounds.clone();
+        let slide = self.tab_slides.get(&path).copied();
+        let bounds_key = path.clone();
+        let outline = theme.primary;
         let button = project_bar_button(SharedString::from(format!("favorite-project-{}", path.display())), selected, cx)
           .child(
             h_flex()
@@ -75,15 +83,20 @@ impl Workspace {
             move |_, window, cx| workspace.update(cx, |this, cx| this.select_project(path.clone(), window, cx))
           });
         // Dragging a tab past the middle of its neighbor swaps them at once, like the tabs of a browser.
-        div()
+        let tab = div()
           .id(SharedString::from(format!("favorite-drag-{}", path.display())))
-          // The tab itself slides along the bar, so nothing follows the pointer up or down.
-          .when(held, |tab| tab.opacity(0.85).shadow_md())
+          .relative()
+          .on_prepaint(move |bounds, _, _| {
+            bounds_slot.borrow_mut().insert(bounds_key.clone(), bounds);
+          })
+          // The tab itself slides along the bar, so nothing follows the pointer up or down. The tab that is held gets an outline.
+          .when(held, |tab| tab.child(div().absolute().inset_0().rounded_md().border_1().border_color(outline)))
           .on_drag(DraggedProjectTab(path.clone()), move |_, _, _, cx| {
             picked_up.update(cx, |this, _| this.dragged_tab = Some(picked.clone()));
             cx.new(|_| NoDragPreview)
           })
-          .on_drag_move::<DraggedProjectTab>(move |event, _, cx| {
+          .on_drag_move::<DraggedProjectTab>(move |event, window, cx| {
+            let gap = window.rem_size() * 0.5;
             let center = event.bounds.center().x;
             let dragged = event.drag(cx).0.clone();
             if dragged == target || !event.bounds.contains(&event.event.position) {
@@ -98,7 +111,7 @@ impl Workspace {
               if let (Some(from), Some(to)) = (position(&dragged), position(&target)) {
                 let crossed = if from < to { pointer > center } else { pointer < center };
                 if crossed {
-                  this.swap_projects(&dragged, &target, cx);
+                  this.swap_projects(&dragged, &target, gap, cx);
                 }
               }
             });
@@ -111,8 +124,18 @@ impl Workspace {
                 .icon(Icon::empty().path("icons/star.svg"))
                 .on_click(move |_, _, cx| workspace.update(cx, |this, cx| this.toggle_favorite(&path, cx))),
             )
-          })
-          .into_any_element()
+          });
+        // After a swap the tab starts where it was and glides to its place.
+        match slide {
+          Some((shift, swap)) => tab
+            .with_animation(
+              SharedString::from(format!("favorite-slide-{}-{swap}", path.display())),
+              Animation::new(TAB_SLIDE).with_easing(ease_out_quint()),
+              move |tab, delta| tab.left(px(shift * (1. - delta))),
+            )
+            .into_any_element(),
+          None => tab.into_any_element(),
+        }
       })
       .collect()
   }
@@ -890,7 +913,10 @@ impl Workspace {
             .children(more),
         ),
       )
-      .child(crate::components::scrollbar_strip(&self.history_scroll, "history-scrollbar", cx))
+      // The strip is shown only while the rows are taller than the list.
+      .when(self.history_scroll.max_offset().y > px(0.), |row| {
+        row.child(crate::components::scrollbar_strip(&self.history_scroll, "history-scrollbar", cx))
+      })
       .into_any_element()
   }
 

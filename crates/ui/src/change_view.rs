@@ -3,7 +3,7 @@
 
 use crate::{
   commit_view::Load,
-  diff_table::{prepare, table_controls, DiffTable},
+  diff_table::{prepare, table_controls, DiffTable, OpenLine},
   settings::SettingsModel,
   theme::colors,
 };
@@ -96,7 +96,17 @@ pub(crate) struct ChangeView {
   patch: String,
   /// Which read the answer being awaited belongs to.
   epoch: u64,
+  _table_subscription: Option<Subscription>,
 }
+
+/// A double click on a line of the diff: open the file in the editor at that line.
+pub(crate) struct OpenInEditor {
+  pub file: PathBuf,
+  /// The line in the new version of the file, counted from 1.
+  pub line: u32,
+}
+
+impl EventEmitter<OpenInEditor> for ChangeView {}
 
 impl ChangeView {
   pub fn new(settings: Entity<SettingsModel>) -> Self {
@@ -113,6 +123,7 @@ impl ChangeView {
       preview_task: None,
       patch: String::new(),
       epoch: 0,
+      _table_subscription: None,
     }
   }
 
@@ -176,7 +187,11 @@ impl ChangeView {
               _ => match prepared {
                 Ok(prepared) => {
                   let settings = this.settings.clone();
-                  Load::Ready(ChangeDiff::Text(cx.new(|cx| DiffTable::new(prepared, settings, cx))))
+                  let table = cx.new(|cx| DiffTable::new(prepared, settings, cx));
+                  this._table_subscription = Some(cx.subscribe(&table, |this, _, event: &OpenLine, cx| {
+                    cx.emit(OpenInEditor { file: this.file.clone(), line: event.0 });
+                  }));
+                  Load::Ready(ChangeDiff::Text(table))
                 }
                 Err(message) => Load::Failed(message.into()),
               },

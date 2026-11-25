@@ -446,7 +446,7 @@ impl Workspace {
             let subscription = cx.subscribe_in(&dialog, window, |this, dialog, event, window, cx| {
               if let MergeEvent::OpenFile(path) = event {
                 window.close_dialog(cx);
-                this.open_changed_file(&OpenChangedFile(path.clone()), window, cx);
+                this.open_conflicted_file(path.as_str(), window, cx);
                 return;
               }
               let source = dialog.read(cx).source().clone();

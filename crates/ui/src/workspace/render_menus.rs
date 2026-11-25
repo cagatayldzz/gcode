@@ -43,9 +43,9 @@ impl Workspace {
             h_flex()
               .gap_1()
               .items_center()
-              .child(Icon::empty().path("icons/circle-x.svg").size_4())
+              .child(Icon::empty().path("icons/circle-x.svg").size_3())
               .child(errors.to_string())
-              .child(Icon::empty().path("icons/triangle-alert.svg").size_4())
+              .child(Icon::empty().path("icons/triangle-alert.svg").size_3())
               .child(warnings.to_string()),
           )
           .tooltip("Problems")

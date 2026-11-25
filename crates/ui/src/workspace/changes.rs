@@ -50,6 +50,14 @@ impl Workspace {
     }
   }
 
+  /// Opens a changed file in the editor with the cursor on `line` (counted from 1), and scrolls there.
+  pub(super) fn open_change_line_in_editor(&mut self, file: &Path, line: u32, window: &mut Window, cx: &mut Context<Self>) {
+    self.open_change_in_editor(file, window, cx);
+    let Some(path) = self.projects.active.as_deref().and_then(|root| Self::changed_file_path(root, &file.to_string_lossy())) else { return };
+    self.editor_panel.update(cx, |editor, cx| editor.reveal_position(&path, line.saturating_sub(1) as usize, 0, window, cx));
+    window.focus(&self.editor_panel.focus_handle(cx), cx);
+  }
+
   pub(super) fn show_change_in_finder(root: PathBuf, file: PathBuf, window: &mut Window, cx: &mut App) {
     let work = cx.background_executor().spawn(async move {
       let path = ws_git::workdir_file(&root, &file).ok_or("The repository's working folder is unavailable.")?;

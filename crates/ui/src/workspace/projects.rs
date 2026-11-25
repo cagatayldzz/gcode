@@ -109,8 +109,37 @@ impl Workspace {
   }
 
   /// Swaps two projects in the project bar while one is dragged over the other.
-  pub(crate) fn swap_projects(&mut self, first: &Path, second: &Path, cx: &mut Context<Self>) {
+  /// Swaps two project tabs, and has every tab that moved slide from where it was to its new place.
+  pub(crate) fn swap_projects(&mut self, first: &Path, second: &Path, gap: Pixels, cx: &mut Context<Self>) {
+    let favorites = |this: &Self| this.projects.favorites().map(|project| project.path.clone()).collect::<Vec<_>>();
+    if self.tab_swapped_at.is_some_and(|at| at.elapsed() < render_git::TAB_SLIDE) {
+      return;
+    }
+    let before = favorites(self);
     if self.projects.swap_projects(first, second) {
+      self.tab_swapped_at = Some(Instant::now());
+      let after = favorites(self);
+      let bounds = self.tab_bounds.borrow();
+      if let Some(origin) = before.first().and_then(|path| bounds.get(path)).map(|bounds| bounds.left()) {
+        // Lay the new order out from the same starting point, one tab after the other.
+        let mut left = origin;
+        let mut arrived = HashMap::new();
+        for path in &after {
+          let Some(tab) = bounds.get(path) else { break };
+          arrived.insert(path.clone(), left);
+          left += tab.size.width + gap;
+        }
+        self.tab_swaps += 1;
+        for (path, to) in arrived {
+          if let Some(from) = bounds.get(&path).map(|bounds| bounds.left()) {
+            let shift = f32::from(from - to);
+            if shift.abs() > 0.5 {
+              self.tab_slides.insert(path, (shift, self.tab_swaps));
+            }
+          }
+        }
+      }
+      drop(bounds);
       self.persist_projects();
       cx.notify();
     }

@@ -452,6 +452,13 @@ pub struct Workspace {
   agent_open: bool,
   /// The project tab that was last picked up; it counts as held while the pointer still drags something.
   dragged_tab: Option<PathBuf>,
+  /// Where each project tab was last drawn, to slide the tabs along the bar when two of them swap.
+  tab_bounds: Rc<RefCell<HashMap<PathBuf, Bounds<Pixels>>>>,
+  /// How far each tab has to travel back to where it was before a swap (in pixels), and the swap's number, which restarts its animation.
+  tab_slides: HashMap<PathBuf, (f32, u64)>,
+  tab_swaps: u64,
+  /// When the tabs last swapped: they do not swap again while they glide, which would send them back and forth.
+  tab_swapped_at: Option<Instant>,
   /// The agent sessions of each project; the sessions keep running while another project or view is shown.
   agent_tabs: HashMap<PathBuf, AgentTabs<Entity<Terminal>>>,
   /// A commit message is being generated.
@@ -528,6 +535,10 @@ impl Workspace {
     dock.update(cx, |area, cx| {
       area.set_center(DockLayout::h_split().child(DockLayout::tabs().panel_view(panel_handle(editor_panel.clone()), cx), None), window, cx);
     });
+    let change_view = cx.new({
+      let settings = settings.clone();
+      |_| ChangeView::new(settings)
+    });
     let commit_summary = cx.new(|cx| InputState::new(window, cx).placeholder("Summary (required)"));
     let commit_description = cx.new(|cx| TextareaState::new(window, cx).placeholder("Description"));
     let branch_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find or create a branch"));
@@ -600,10 +611,7 @@ impl Workspace {
         let settings = settings.clone();
         |_| CommitView::new(settings)
       }),
-      change_view: cx.new({
-        let settings = settings.clone();
-        |_| ChangeView::new(settings)
-      }),
+      change_view: change_view.clone(),
       all_changes: cx.new({
         let settings = settings.clone();
         |_| AllChanges::new(settings)
@@ -630,6 +638,10 @@ impl Workspace {
       terminal_open: false,
       agent_open: false,
       dragged_tab: None,
+      tab_bounds: Rc::default(),
+      tab_slides: HashMap::new(),
+      tab_swaps: 0,
+      tab_swapped_at: None,
       agent_tabs: HashMap::new(),
       generating: false,
       project_status: HashMap::new(),
@@ -661,6 +673,10 @@ impl Workspace {
         })
       },
       _commit_subscriptions: vec![
+        // A double click on a line of a diff opens the file at that line.
+        cx.subscribe_in(&change_view, window, |this, _, event: &crate::change_view::OpenInEditor, window, cx| {
+          this.open_change_line_in_editor(&event.file, event.line, window, cx);
+        }),
         // The commit button is enabled once there is a summary.
         cx.subscribe(&commit_summary, |_, _, _: &InputEvent, cx| cx.notify()),
         // The menus list what the filter field matches.

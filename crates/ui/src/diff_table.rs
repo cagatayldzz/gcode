@@ -142,6 +142,9 @@ type Spot = (usize, usize);
 pub(crate) struct DiffTable {
   settings: Entity<SettingsModel>,
   patch: Patch,
+  /// Whether any line has a number in the old file, and in the new one. A file that was added or deleted whole has one column only.
+  has_old: bool,
+  has_new: bool,
   styles: LineStyles,
   /// How much of each fold was brought back with the expand arrows.
   expansion: Expansion,
@@ -168,16 +171,34 @@ pub(crate) struct DiffTable {
   selecting_text: bool,
 }
 
+/// A double click on a line: its line number in the new version of the file, to open the file there.
+pub(crate) struct OpenLine(pub u32);
+
+impl EventEmitter<OpenLine> for DiffTable {}
+
 impl DiffTable {
+  /// Asks to open the file at the line `ix` is on. A removed line has none of its own: the next line that is still there stands for it.
+  fn open_line(&mut self, ix: usize, cx: &mut Context<Self>) {
+    let lines = &self.patch.lines;
+    let line = lines[ix..].iter().find_map(|line| line.new).or_else(|| lines[..ix].iter().rev().find_map(|line| line.new));
+    if let Some(line) = line {
+      cx.emit(OpenLine(line));
+    }
+  }
+
   pub fn new(prepared: PreparedDiff, settings: Entity<SettingsModel>, cx: &mut Context<Self>) -> Self {
     let PreparedDiff { patch, language, styles } = prepared;
     let expansion = Expansion::new();
     let layout = diff_model::layout(&patch, &expansion, false);
     let list = ListState::new(layout.rows.len(), ListAlignment::Top, px(600.));
     let widest = patch.lines.iter().map(|line| line.text.chars().count()).max().unwrap_or(0);
+    let has_old = patch.lines.iter().any(|line| line.old.is_some());
+    let has_new = patch.lines.iter().any(|line| line.new.is_some());
     Self {
       settings,
       patch,
+      has_old,
+      has_new,
       styles,
       expansion,
       layout,
@@ -376,7 +397,7 @@ impl DiffTable {
     if self.split {
       (numbers + code) * 2. + px(1.)
     } else {
-      numbers * 2. + code
+      numbers * (usize::from(self.has_old) + usize::from(self.has_new)).max(1) as f32 + code
     }
   }
 
@@ -410,7 +431,12 @@ impl DiffTable {
         .child(value.map(|value| value.to_string()).unwrap_or_default())
         .on_mouse_down(
           MouseButton::Left,
-          cx.listener(move |this, event: &MouseDownEvent, window, cx| this.select(ix, event.modifiers.shift, window, cx)),
+          cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+            if event.click_count >= 2 {
+              this.open_line(ix, cx);
+            }
+            this.select(ix, event.modifiers.shift, window, cx)
+          }),
         )
     };
     let sign = match line.kind {
@@ -445,8 +471,8 @@ impl DiffTable {
       .font_family(theme.mono_font_family.clone())
       .text_size(size)
       .line_height(size * LINE_HEIGHT)
-      .when(numbers != Numbers::New, |cell| cell.child(number(line.old, "old-number")))
-      .when(numbers != Numbers::Old, |cell| cell.child(number(line.new, "new-number")))
+      .when(numbers != Numbers::New && (numbers == Numbers::Old || self.has_old), |cell| cell.child(number(line.old, "old-number")))
+      .when(numbers != Numbers::Old && (numbers == Numbers::New || self.has_new), |cell| cell.child(number(line.new, "new-number")))
       .child(div().w(SIGN_WIDTH).flex_none().text_center().text_color(palette.text_secondary).child(sign))
       .child(
         div()
@@ -460,7 +486,12 @@ impl DiffTable {
           .child(styled)
           .on_mouse_down(MouseButton::Left, {
             let layout = layout.clone();
-            cx.listener(move |this, event: &MouseDownEvent, window, cx| this.begin_text(ix, at(&layout, event.position), window, cx))
+            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+              if event.click_count >= 2 {
+                this.open_line(ix, cx);
+              }
+              this.begin_text(ix, at(&layout, event.position), window, cx)
+            })
           }),
       )
       .on_mouse_move({

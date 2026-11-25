@@ -142,6 +142,10 @@ impl CommitView {
   }
 
   fn select_file(&mut self, file: PathBuf, cx: &mut Context<Self>) {
+    // Choosing the file already shown leaves its diff (and scroll position) alone, unless that diff failed to load.
+    if self.selected.as_ref() == Some(&file) && !matches!(self.diff, Load::Failed(_)) {
+      return;
+    }
     self.selected = Some(file.clone());
     self.diff = Load::Loading;
     self.epoch += 1;

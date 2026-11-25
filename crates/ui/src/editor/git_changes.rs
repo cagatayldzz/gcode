@@ -5,7 +5,8 @@ use crate::{diff_view, theme::colors};
 use gpui_kit::base::input::{GutterDecoration, GutterDecorationCollection, RopeExt as _};
 use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::diff::{DiffLinePosition, DiffSide};
-use gpui_kit::component::{h_flex, Disableable as _};
+use gpui_kit::component::{h_flex, label::Label, Disableable as _};
+use ws_git::conflict_markers::{conflict_regions, ConflictRegion};
 use ws_git::editor_diff::{apply_editor_hunk, editor_diff, EditorChange, EditorDiff, HunkAction};
 
 pub(super) struct GitPreview {
@@ -17,11 +18,33 @@ pub(super) struct GitPreview {
 pub(super) struct GitChanges {
   gutter: GutterDecorationCollection,
   diff: EditorDiff,
+  conflict_gutter: GutterDecorationCollection,
+  conflicts: Vec<ConflictRegion>,
 }
 
 impl GitChanges {
   pub(super) fn new(state: &mut EditorState, cx: &mut Context<EditorState>) -> Self {
-    Self { gutter: state.create_gutter_decorations_collection(Vec::new(), cx), diff: EditorDiff::default() }
+    Self {
+      gutter: state.create_gutter_decorations_collection(Vec::new(), cx),
+      diff: EditorDiff::default(),
+      conflict_gutter: state.create_gutter_decorations_collection(Vec::new(), cx),
+      conflicts: Vec::new(),
+    }
+  }
+
+  /// Marks the lines between the conflict markers, so the conflicts of a file left by a merge can be told apart.
+  pub(super) fn update_conflicts(&mut self, conflicts: Vec<ConflictRegion>, state: &Entity<EditorState>, cx: &mut App) {
+    if self.conflicts == conflicts {
+      return;
+    }
+    let text = state.read(cx).text();
+    let offset = |line| if line < text.lines_len() { text.line_start_offset(line) } else { text.len() };
+    let color = colors(cx).conflicted;
+    self.conflict_gutter.set(
+      conflicts.iter().map(|region| GutterDecoration::new(offset(region.lines.start)..offset(region.lines.end)).with_color(color)).collect(),
+      cx,
+    );
+    self.conflicts = conflicts;
   }
 
   pub(super) fn update(&mut self, diff: EditorDiff, state: &Entity<EditorState>, cx: &mut App) {
@@ -62,11 +85,19 @@ impl EditorPanel {
       let Some((path, id, text)) = snapshot else { continue };
       let target = path.clone();
       let buffer = text.clone();
-      let diff = cx.background_executor().spawn(async move { editor_diff(&target, &buffer).unwrap_or_default() }).await;
+      let (diff, conflicts) =
+        cx.background_executor().spawn(async move { (editor_diff(&target, &buffer).unwrap_or_default(), conflict_regions(&buffer)) }).await;
       if this
         .update(cx, |this, cx| {
           let Some(file) = this.files.get_mut(&path) else { return };
-          if file.state.entity_id() == id && file.state.read(cx).value() == text && file.git.diff != diff {
+          if file.state.entity_id() != id || file.state.read(cx).value() != text {
+            return;
+          }
+          if file.git.conflicts != conflicts {
+            file.git.update_conflicts(conflicts, &file.state, cx);
+            cx.notify();
+          }
+          if file.git.diff != diff {
             file.git.update(diff, &file.state, cx);
             file.minimap.update(cx, |map, cx| map.set_git_changes(&file.git.diff.changes, cx));
             cx.notify();
@@ -80,11 +111,34 @@ impl EditorPanel {
   }
 
   pub(super) fn git_controls(&self, path: &Path, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-    let git = &self.files.get(path)?.git.diff;
-    if git.changes.is_empty() && git.staged.is_empty() && git.unstaged.is_empty() {
+    let file = self.files.get(path)?;
+    let git = &file.git.diff;
+    let conflicts = file.git.conflicts.len();
+    if conflicts == 0 && git.changes.is_empty() && git.staged.is_empty() && git.unstaged.is_empty() {
       return None;
     }
     let mut controls = h_flex().gap_1().flex_none();
+    if conflicts > 0 {
+      let color = colors(cx).conflicted;
+      controls = controls.child(
+        Label::new(format!("{conflicts} conflict{}", if conflicts == 1 { "" } else { "s" })).text_color(color).font_weight(FontWeight::SEMIBOLD),
+      );
+      for (id, label, icon, forward) in [
+        ("previous-editor-conflict", "Previous conflict", IconName::ChevronUp, false),
+        ("next-editor-conflict", "Next conflict", IconName::ChevronDown, true),
+      ] {
+        let path = path.to_owned();
+        controls = controls.child(
+          Button::new(id)
+            .ghost()
+            .xsmall()
+            .icon(Icon::new(icon))
+            .tooltip(label)
+            .accessibility_label(label)
+            .on_click(cx.listener(move |this, _, window, cx| this.jump_conflict(&path, forward, window, cx))),
+        );
+      }
+    }
     for (id, label, icon, forward) in
       [("previous-editor-change", "Previous change", IconName::ChevronUp, false), ("next-editor-change", "Next change", IconName::ChevronDown, true)]
     {
@@ -133,6 +187,30 @@ impl EditorPanel {
     self.open_buffer_diff(path, kind, window, cx);
   }
 
+  /// Moves the cursor to the first conflict marker of a file, if it has one. Reads the buffer itself, since a file that was
+  /// just opened has not been scanned yet.
+  pub fn reveal_first_conflict(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(file) = self.files.get(path) else { return };
+    let text = file.state.read(cx).value().to_string();
+    if let Some(region) = conflict_regions(&text).first() {
+      self.reveal_position(path, region.lines.start, 0, window, cx);
+    }
+  }
+
+  fn jump_conflict(&mut self, path: &Path, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(file) = self.files.get(path) else { return };
+    let line = file.state.read(cx).cursor_position().line as usize;
+    let starts = || file.git.conflicts.iter().map(|region| region.lines.start);
+    let target = if forward {
+      starts().find(|start| *start > line).or_else(|| starts().next())
+    } else {
+      starts().rfind(|start| *start < line).or_else(|| starts().next_back())
+    };
+    if let Some(target) = target {
+      self.reveal_position(path, target, 0, window, cx);
+    }
+  }
+
   fn jump_git_change(&mut self, path: &Path, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
     let Some(file) = self.files.get(path) else { return };
     let state = file.state.read(cx);
@@ -141,7 +219,7 @@ impl EditorPanel {
     let target = if forward {
       starts().find(|start| *start > line).or_else(|| starts().next())
     } else {
-      starts().rfind(|start| *start < line).or_else(|| starts().last())
+      starts().rfind(|start| *start < line).or_else(|| starts().next_back())
     };
     if let Some(target) = target {
       self.reveal_position(path, target, 0, window, cx);
