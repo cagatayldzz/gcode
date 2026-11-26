@@ -604,7 +604,7 @@ fn credential_options(command: &mut std::process::Command, credentials: Option<&
 
 /// Runs the `git` program in `path` with `--progress` and hands each line it reports (git redraws progress lines with a carriage
 /// return) to `on_progress` while it runs. It never asks for input, so the user's own credentials apply and a login prompt becomes
-/// git's error message. Returns whether it succeeded and everything it wrote to stderr.
+/// git's error message. Returns whether it succeeded and the combined output from git and its hooks.
 fn run_git(path: &Path, arguments: &[&str], credentials: Option<&Credentials>, on_progress: impl FnMut(&str)) -> Result<(bool, String), String> {
   ws_activity::timed(
     "git",
@@ -612,7 +612,7 @@ fn run_git(path: &Path, arguments: &[&str], credentials: Option<&Credentials>, o
     || run_git_untimed(path, arguments, credentials, on_progress),
     |result| match result {
       Ok((true, _)) => "ok".into(),
-      Ok((false, stderr)) => format!("failed: {}", last_line(stderr)),
+      Ok((false, output)) => format!("failed: {}", last_line(output)),
       Err(error) => format!("not run: {error}"),
     },
   )
@@ -629,19 +629,22 @@ fn run_git_untimed(
   shell_path::apply(&mut command);
   command.arg("-C").arg(path);
   credential_options(&mut command, credentials);
+  // Some hooks print their diagnostics to stdout. A shared pipe streams both channels without blocking either one.
+  let (mut output, writer) = std::io::pipe().map_err(|error| format!("Could not capture git's output: {error}"))?;
+  let stdout = writer.try_clone().map_err(|error| format!("Could not capture git's output: {error}"))?;
   let mut child = command
     .args(arguments)
     .arg("--progress")
     .env("GIT_TERMINAL_PROMPT", "0")
     .stdin(std::process::Stdio::null())
-    .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::piped())
+    .stdout(stdout)
+    .stderr(writer)
     .spawn()
     .map_err(|error| format!("Could not run git: {error}"))?;
-  let mut stderr = child.stderr.take().ok_or("Could not read git's output.")?;
+  drop(command);
   let (mut all, mut line, mut buffer) = (Vec::new(), Vec::new(), [0u8; 512]);
   loop {
-    let read = stderr.read(&mut buffer).map_err(|error| format!("Could not read git's output: {error}"))?;
+    let read = output.read(&mut buffer).map_err(|error| format!("Could not read git's output: {error}"))?;
     if read == 0 {
       break;
     }
@@ -657,6 +660,10 @@ fn run_git_untimed(
         line.push(*byte);
       }
     }
+  }
+  let rest = String::from_utf8_lossy(&line);
+  if !rest.trim().is_empty() {
+    on_progress(rest.trim());
   }
   let status = child.wait().map_err(|error| format!("Could not run git: {error}"))?;
   Ok((status.success(), String::from_utf8_lossy(&all).to_string()))
@@ -747,11 +754,11 @@ fn failure_reason(stderr: &str, failure: &str) -> String {
 }
 
 fn finish(result: (bool, String), failure: &str) -> Result<String, String> {
-  let (success, stderr) = result;
+  let (success, output) = result;
   if success {
-    return Ok(last_line(&stderr));
+    return Ok(last_line(&output));
   }
-  Err(failure_reason(&stderr, failure))
+  Err(failure_reason(&output, failure))
 }
 
 /// What the message of a failed push, fetch or pull says when the server turned down the connected account's token (and the user's own

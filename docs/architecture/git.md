@@ -117,9 +117,9 @@ pub struct MergeFile { path: String, conflicts: usize, ours: bool, theirs: bool,
 
 `fetch`, `pull` and `push` go through `with_login`: run with the connected account's token; if the output looks like a refusal (403/401,
 "Authentication failed", "denied", …) run again with the user's own login; if both are refused, return one message naming both. The token
-reaches Git through environment variables read by a one-command credential helper — see [Hosting](./hosting.md). Progress lines from git
-(`Writing objects: 45% …`) are forwarded to the interface while the command runs, and failure messages are reduced to the reason (the
-rejected branch line, or what the remote said) instead of git's generic last line.
+reaches Git through environment variables read by a one-command credential helper — see [Hosting](./hosting.md). Remote commands stream
+standard output and standard error to the interface. Git runs the repository's configured pre-push hook with the user's login-shell PATH.
+A failing hook stops the push, and its diagnostics can appear in the failure notification alongside Git or remote errors.
 
 ## Diffs in the interface
 

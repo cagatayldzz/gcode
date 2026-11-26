@@ -306,3 +306,30 @@ fn a_hook_that_cannot_find_its_program_is_explained() {
   assert!(error.contains("pre-push hook could not run `definitely-missing-program-xyz`"), "{error}");
   assert!(error.contains("PATH"));
 }
+
+#[cfg(unix)]
+#[test]
+fn a_configured_pre_push_hook_reports_stdout_and_can_block_the_push() {
+  use std::os::unix::fs::PermissionsExt as _;
+
+  let remote = Remote::new("hook-output");
+  commit_file(&remote.mine, "f.txt", "f", "work");
+  let hooks = remote.mine.join(".custom-hooks");
+  fs::create_dir(&hooks).unwrap();
+  git(&remote.mine, &["config", "core.hooksPath", ".custom-hooks"]);
+  let hook = hooks.join("pre-push");
+  fs::write(
+    &hook,
+    "#!/bin/sh\nread -r local_ref local_oid remote_ref remote_oid || exit 2\nprintf 'Check failed for %s\\n' \"$local_ref\"\nexit 1\n",
+  )
+  .unwrap();
+  fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+
+  let mut progress = Vec::new();
+  let error = ws_git::push(&remote.mine, None, |line| progress.push(line.to_string())).unwrap_err();
+
+  let diagnostic = "Check failed for refs/heads/main";
+  assert!(progress.iter().any(|line| line == diagnostic), "{progress:?}");
+  assert!(error.contains(diagnostic), "{error}");
+  assert_eq!(ws_git::summary(&remote.mine).unwrap().sync.unwrap().ahead, 1);
+}

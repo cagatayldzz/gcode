@@ -21,7 +21,8 @@ impl Workspace {
     } else {
       format!("Fetching {remote}")
     };
-    let progress = Arc::new(Mutex::new(String::from("Connecting…")));
+    let pushing = sync.behind == 0 && (sync.ahead > 0 || !sync.upstream);
+    let progress = Arc::new(Mutex::new(String::from(if pushing { "Preparing push…" } else { "Connecting…" })));
     let fetching_after_push = Arc::new(AtomicBool::new(false));
     let fraction = Arc::new(AtomicU32::new(0));
     self.remote_work = Some(RemoteWork {
