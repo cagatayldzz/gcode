@@ -857,7 +857,11 @@ impl Workspace {
     } else {
       self.commit_list(&self.history, true, cx)
     };
-    v_flex().flex_1().min_h_0().gap_2().child(div().px_3().child(self.render_compare_field(cx))).child(v_flex().flex_1().min_h_0().child(body))
+    v_flex()
+      .flex_1()
+      .min_h_0()
+      .child(div().flex_none().px_3().pb_2().border_b_1().border_color(colors(cx).border).child(self.render_compare_field(cx)))
+      .child(v_flex().flex_1().min_h_0().child(body))
   }
 
   /// A list of commits: the subject, who made it and when, the tags on it, and an arrow while the remote does not have it yet.

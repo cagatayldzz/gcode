@@ -16,6 +16,7 @@ use gpui_kit::{
     label::Label,
     menu::{DropdownMenu as _, PopupMenuItem},
     progress::ProgressCircle,
+    scroll::Scrollbar,
     spinner::Spinner,
     v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
   },
@@ -367,17 +368,20 @@ impl Render for AllChanges {
         let path = file.path().clone();
         let collapsed = state.read(cx).is_file_collapsed(&path);
         let draw_separator = !collapsed_with_next.contains(&path) || below.is_none();
+        // Keep both the thumb and its track outside the deferred header's paint and mouse bounds.
+        let header_width = (viewport.size.width - Scrollbar::width()).max(Pixels::ZERO);
+        let header_viewport = Bounds::new(viewport.origin, size(header_width, viewport.size.height));
         let mut header = v_flex()
           .id(SharedString::from(format!("sticky-diff-header-{path}")))
           .block_mouse_except_scroll()
           .relative()
-          .w(viewport.size.width)
+          .w(header_width)
           .bg(cx.theme().background)
           .child(
             h_flex()
               .gap_1()
               .pl_1()
-              .pr_3()
+              .pr_0p5()
               .py_1()
               .child(
                 Button::new("collapse-sticky-file")
@@ -395,10 +399,10 @@ impl Render for AllChanges {
           // The deferred header paints over the sidebar splitter at the left edge.
           .child(div().absolute().top_0().bottom_0().left_0().w_px().bg(cx.theme().border))
           .into_any_element();
-        let size = header.layout_as_root(size(viewport.size.width.into(), AvailableSpace::MinContent), window, cx);
+        let size = header.layout_as_root(size(header_width.into(), AvailableSpace::MinContent), window, cx);
         let offset = below.map_or(Pixels::ZERO, |(_, top)| (top - size.height).min(Pixels::ZERO));
         // Keep the pinned header above the covers that hide duplicate separators in the list.
-        window.defer_draw(header, viewport.origin + point(Pixels::ZERO, offset), 1, Some(ContentMask { bounds: viewport }));
+        window.defer_draw(header, viewport.origin + point(Pixels::ZERO, offset), 1, Some(ContentMask { bounds: header_viewport }));
       },
       |_, _, _, _| {},
     )

@@ -291,10 +291,18 @@ impl Workspace {
               .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.new_branch(suggestion.clone(), window, cx)))
           };
           v_flex()
-            .gap_1()
             .min_h_0()
             .child(
-              h_flex().gap_2().items_center().p_3().pb_0().child(div().flex_1().child(crate::components::soft_input(&filter, cx))).child(new_branch),
+              h_flex()
+                .flex_none()
+                .gap_2()
+                .items_center()
+                .p_3()
+                .pb_1()
+                .border_b_1()
+                .border_color(palette.border)
+                .child(div().flex_1().child(crate::components::soft_input(&filter, cx)))
+                .child(new_branch),
             )
             .child(
               self.scrolling_list(

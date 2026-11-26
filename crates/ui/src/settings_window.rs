@@ -241,7 +241,7 @@ impl SettingsWindow {
       .bg(cx.theme().sidebar)
       .border_r_1()
       .border_color(palette.border)
-      .child(v_flex().gap_3().p_4().child(soft_input(&self.search, cx).small().prefix(Icon::empty().path("icons/search.svg").size_4())))
+      .child(v_flex().gap_3().p_4().child(soft_input(&self.search, cx).prefix(Icon::empty().path("icons/search.svg").size_4())))
       .child(
         div()
           .id("settings-pages")

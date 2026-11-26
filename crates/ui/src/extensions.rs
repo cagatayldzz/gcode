@@ -387,7 +387,7 @@ impl Render for ExtensionsPanel {
             .on_click(cx.listener(|this, _, _, cx| this.reload(cx))),
         ),
       )
-      .child(div().px_3().pb_1().child(soft_input(&self.search, cx).bg(palette.background)))
+      .child(div().flex_none().px_3().pb_1().border_b_1().border_color(palette.border).child(soft_input(&self.search, cx).bg(palette.background)))
       // The scrollbar has a strip of its own beside the list, as in History, shown only while the rows are taller than the list.
       .child(
         h_flex()
