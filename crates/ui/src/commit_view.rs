@@ -209,7 +209,7 @@ impl CommitView {
       .border_color(row_divider(&palette))
       .cursor_pointer()
       .when(selected, |row| row.bg(palette.selected))
-      .hover(|row| row.bg(palette.hover))
+      .hover(|row| row.bg(if selected { palette.selected_hover } else { palette.hover }))
       .child(Label::new(change.kind.mark()).text_size(FILE_FONT_SIZE).w_4().flex_none().text_color(mark))
       // One path: the folder dimmed, then the file name right after it with no gap. The middle of the folder gives way when the row is narrow.
       .child(

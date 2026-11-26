@@ -188,7 +188,9 @@ impl ProfileManager {
       }
       cx.notify();
     });
-    let seen = (profile_list(cx).profiles, workspace.read(cx).project_list().projects.len());
+    // The page is made while the workspace is being updated (Settings opens from it), so the workspace cannot be read here: the project count
+    // is filled in by the first change the workspace reports.
+    let seen = (profile_list(cx).profiles, 0);
     let mut manager = Self { workspace, stats: HashMap::new(), seen, _stats_task: Task::ready(()), _observer: observer };
     manager.reload_stats(cx);
     manager

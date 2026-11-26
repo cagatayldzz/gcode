@@ -38,3 +38,17 @@ pub fn parse_manifest(json: &str) -> Result<Manifest, ExtensionError> {
     agents,
   })
 }
+
+/// Whether `candidate` is a higher semantic version (`major.minor.patch`) than `current`. A version that is not of that form is never
+/// newer, so a malformed index cannot offer an "update".
+pub fn is_newer(candidate: &str, current: &str) -> bool {
+  fn parts(version: &str) -> Option<[u64; 3]> {
+    let mut numbers = version.trim().trim_start_matches('v').split('.').map(|part| part.parse::<u64>().ok());
+    let found = [numbers.next()??, numbers.next()??, numbers.next()??];
+    numbers.next().is_none().then_some(found)
+  }
+  match (parts(candidate), parts(current)) {
+    (Some(candidate), Some(current)) => candidate > current,
+    _ => false,
+  }
+}

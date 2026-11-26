@@ -33,6 +33,8 @@ pub(crate) struct Colors {
   pub control_border: Hsla,
   /// The row that is chosen.
   pub selected: Hsla,
+  /// A selected row while the pointer is on it: a little deeper than `selected`, so that the pointer still shows.
+  pub selected_hover: Hsla,
   pub explorer_selected: Hsla,
   pub explorer_selected_text: Hsla,
   pub plist_icon: Hsla,
@@ -120,6 +122,7 @@ impl Colors {
       border: hex(0x30363d),
       control_border: hex(0x30363d),
       selected: hex(0x172b45),
+      selected_hover: hex(0x1f3a5c),
       explorer_selected: hex(0x6e7681).opacity(0.4),
       explorer_selected_text: hex(0xe6edf3),
       plist_icon: hex(0xf0883e),
@@ -168,6 +171,7 @@ impl Colors {
       border: hex(0xd0d7de),
       control_border: hex(0xd0d7de),
       selected: hex(0xddf4ff),
+      selected_hover: hex(0xc4e7fb),
       explorer_selected: hex(0xafb8c1).opacity(0.2),
       explorer_selected_text: text,
       plist_icon: hex(0xbc4c00),

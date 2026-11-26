@@ -14,6 +14,10 @@ view with a note instead of starting a session.
 commit box is only its two text fields, and generating a message says to install the extension. The model and the instructions stay in the
 commit settings, which open from the right-click menu of the generate button (**Settings**, **Disable**, **Remove**; the last two ask first).
 
+The Extensions view lists each extension as one compact row (icon, name, a line about it, publisher and version, and a mark for disabled,
+update or soon). Choosing a row shows the extension's page in the main area (`ExtensionPage`): the larger header with **Install**, **Update**,
+**Enable** / **Disable** and **Uninstall**, what it is and contributes, and a table of its identifier, version, publisher and status.
+
 An installed extension can be **disabled**: an empty `disabled` file in its folder (`set_enabled`). It stays installed and does nothing; the Extensions
 view shows it as disabled with an **Enable** button, and installing or updating it switches it on again.
 

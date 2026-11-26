@@ -1,7 +1,7 @@
 # Keyboard shortcuts
 
 All shortcuts are bound in one place (`crates/app/src/lib.rs`), and the menus, buttons and the command palette use the same actions.
-The terminal info bar and the command palette read the live keymap, so what they show is always accurate.
+The Keyboard shortcuts dialog (the keyboard button of the status bar) and the command palette read the live keymap, so what they show is always accurate.
 
 ## Everywhere
 
@@ -35,6 +35,12 @@ The terminal info bar and the command palette read the live keymap, so what they
 
 The marker follows the language: `//` (Rust, JavaScript, TypeScript, Go, Swift, Kotlin), `#` (Python, shell, YAML, TOML, `.env`, Dockerfile,
 `.gitignore`), `<!-- -->` (HTML, Markdown) and `/* */` (CSS). A language without comments, such as JSON, says so in a notification.
+
+## Git lists
+
+| Shortcut | Action |
+| --- | --- |
+| `↑` / `↓` | In the **Changes** list: show the diff of the file above / below the chosen one. In **History**: the commit above / below. Click a row first so the list has the keyboard; with none chosen `↓` takes the first row and `↑` the last. The list scrolls only when the row is out of view |
 
 ## Search results
 

@@ -1,6 +1,7 @@
 //! Status bar, branch picker and repository switcher.
 
 use super::*;
+use crate::ShowShortcuts;
 
 impl Workspace {
   /// A scrolling list of the branch menu with the scrollbar strip beside it, shown only while the list is taller than its room.
@@ -58,7 +59,14 @@ impl Workspace {
     for item in file {
       bar = bar.right(item);
     }
-    bar
+    bar.right(
+      Button::new("status-shortcuts")
+        .ghost()
+        .xsmall()
+        .icon(Icon::empty().path("icons/keyboard.svg"))
+        .tooltip("Keyboard shortcuts")
+        .on_click(|_, window, cx| window.dispatch_action(Box::new(ShowShortcuts), cx)),
+    )
   }
 
   /// The button that shows the current branch and opens the branch menu (see `render_branch_menu`).
@@ -200,7 +208,7 @@ impl Workspace {
               .items_center()
               .cursor_pointer()
               .when(selected, |row| row.bg(palette.selected))
-              .hover(|row| row.bg(palette.hover))
+              .hover(|row| row.bg(if selected { palette.selected_hover } else { palette.hover }))
               // The star, at the left: filled for a starred branch, an outline otherwise. The default branch is always on top, so
               // it has none and its name starts at the row's edge.
               .when(!default, |row| {

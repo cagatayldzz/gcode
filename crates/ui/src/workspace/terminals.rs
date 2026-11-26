@@ -1,6 +1,7 @@
 //! Terminal tabs, AI agent tabs and pane layout.
 
 use super::*;
+use crate::{CopySelection, GoToFile, OpenCommandPalette, PasteClipboard, SaveFile, SearchProject, ShowShortcuts};
 
 impl Workspace {
   /// The tabs of the open project's shells.
@@ -284,6 +285,42 @@ impl Workspace {
     if let Some(terminal) = target {
       self.pick_projects_to_mention(terminal, window, cx);
     }
+  }
+
+  /// The status bar's keyboard button: the shortcuts as the keymap has them now, in a dialog.
+  pub(super) fn show_shortcuts(&mut self, _: &ShowShortcuts, window: &mut Window, cx: &mut Context<Self>) {
+    window.open_dialog(cx, move |dialog, window, cx| {
+      let palette = colors(cx);
+      let terminal: [(&'static str, &dyn Action); 8] = [
+        ("New tab", &NewTerminal),
+        ("Split right", &SplitRight),
+        ("Split down", &SplitDown),
+        ("Clear", &ClearBuffer),
+        ("Copy selection", &CopySelection),
+        ("Paste", &PasteClipboard),
+        ("Mention projects", &MentionProjects),
+        ("Hide the terminal", &ToggleTerminal),
+      ];
+      let general: [(&'static str, &dyn Action); 8] = [
+        ("Go to file", &GoToFile),
+        ("Command palette", &OpenCommandPalette),
+        ("Search in project", &SearchProject),
+        ("Save file", &SaveFile),
+        ("Close tab", &CloseTab),
+        ("Show or hide the terminal", &ToggleTerminal),
+        ("Show or hide the AI view", &ToggleAgents),
+        ("Settings", &OpenSettings),
+      ];
+      dialog.title("Keyboard shortcuts").width(px(440.)).p_5().child(
+        v_flex().gap_4().child(shortcut_section("In the terminal", &terminal, Some("Terminal"), &palette, window)).child(shortcut_section(
+          "Everywhere",
+          &general,
+          None,
+          &palette,
+          window,
+        )),
+      )
+    });
   }
 
   /// Opens the project list: the ones ticked are written into the prompt of the agent as paths.

@@ -3,12 +3,14 @@
 use gpui_kit::*;
 use ws_ui::{
   AddLineComment, Assets, ClearBuffer, CloseTab, CopySelection, FindInFile, GoToFile, MentionProjects, NewTerminal, OpenCommandPalette,
-  OpenSearchResults, OpenSettings, PasteClipboard, Quit, RemoveLineComment, ReplaceInFile, SaveFile, SearchProject, SelectNextOccurrence, SplitDown,
-  SplitRight, ToggleAgents, ToggleLineComment, ToggleTerminal, ViewOnHost,
+  OpenSearchResults, OpenSettings, PasteClipboard, Quit, RemoveLineComment, ReplaceInFile, SaveFile, SearchProject, SelectNextOccurrence,
+  SelectNextRow, SelectPreviousRow, SplitDown, SplitRight, ToggleAgents, ToggleLineComment, ToggleTerminal, ViewOnHost,
 };
 
 /// Starts the application and runs it until it quits.
 pub fn run() {
+  // A crash is written to the logs folder of the data directory before the process ends.
+  ws_storage::install_panic_hook();
   let app = gpui_kit::application().with_assets(Assets);
   app.on_reopen(|cx| {
     if cx.windows().is_empty() {
@@ -34,6 +36,11 @@ pub fn run() {
       KeyBinding::new("cmd-d", SelectNextOccurrence, Some("Input && mode == editor")),
       KeyBinding::new("cmd-/", ToggleLineComment, Some("Input && mode == editor")),
       KeyBinding::new("cmd-w", CloseTab, None),
+      // The Changes and History lists of the Git view, while one has the keyboard.
+      KeyBinding::new("up", SelectPreviousRow, Some("ChangesList")),
+      KeyBinding::new("down", SelectNextRow, Some("ChangesList")),
+      KeyBinding::new("up", SelectPreviousRow, Some("HistoryList")),
+      KeyBinding::new("down", SelectNextRow, Some("HistoryList")),
       KeyBinding::new("cmd-j", ToggleTerminal, None),
       KeyBinding::new("cmd-shift-a", ToggleAgents, None),
       KeyBinding::new("cmd-shift-g", ViewOnHost, None),

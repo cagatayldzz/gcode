@@ -83,6 +83,11 @@ actions!(
     // In a terminal: close the pane that has the keyboard. Only from menus: ⌘W never closes a terminal.
     ClosePane,
     MentionProjects,
+    // In the Changes and History lists: ↑ and ↓ choose the row above or below the chosen one.
+    SelectPreviousRow,
+    SelectNextRow,
+    // The status bar's keyboard button: the shortcuts, in a dialog.
+    ShowShortcuts,
     ToggleTerminal,
     ToggleAgents,
     // The activity bar's project settings button: the settings of the open project take the main area, or give it back.

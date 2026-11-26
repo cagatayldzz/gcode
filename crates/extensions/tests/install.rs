@@ -1,7 +1,7 @@
 use sha2::{Digest, Sha256};
 use ws_extensions::{install_from, installed_in, parse_index, parse_manifest, set_enabled_in, uninstall_in, Available};
 
-const MANIFEST: &str = r#"{"id":"ai-agent","name":"AI Agent","version":"1.0.0","description":"Codex and Claude sessions","publisher":"gcode","contributes":{"agents":["codex","claude"]}}"#;
+const MANIFEST: &str = r#"{"id":"ai-agent","name":"AI Agent","version":"0.1.0","description":"Codex and Claude sessions","publisher":"gcode","contributes":{"agents":["codex","claude"]}}"#;
 
 fn sha256(text: &str) -> String {
   Sha256::digest(text.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect()
@@ -13,7 +13,7 @@ fn available(text: &str) -> Available {
     name: "AI Agent".into(),
     description: String::new(),
     publisher: "gcode".into(),
-    version: "1.0.0".into(),
+    version: "0.1.0".into(),
     icon: "icons/bot-message-square.svg".into(),
     package_url: "https://raw.githubusercontent.com/o/r/main/extensions/ai-agent/manifest.json".into(),
     sha256: sha256(text),
@@ -25,7 +25,7 @@ fn available(text: &str) -> Available {
 fn the_index_lists_extensions_with_urls_inside_the_repository() {
   let index = format!(
     r#"{{"extensions":[
-      {{"id":"ai-agent","name":"AI Agent","description":"d","publisher":"gcode","version":"1.0.0","icon":"icons/bot.svg","package":"ai-agent/manifest.json","sha256":"{}"}}
+      {{"id":"ai-agent","name":"AI Agent","description":"d","publisher":"gcode","version":"0.1.0","icon":"icons/bot.svg","package":"ai-agent/manifest.json","sha256":"{}"}}
     ]}}"#,
     sha256(MANIFEST)
   );
@@ -59,7 +59,7 @@ fn an_index_entry_that_could_point_elsewhere_is_left_out() {
 #[test]
 fn a_manifest_names_the_agents_it_switches_on() {
   let manifest = parse_manifest(MANIFEST).unwrap();
-  assert_eq!((manifest.id.as_str(), manifest.version.as_str()), ("ai-agent", "1.0.0"));
+  assert_eq!((manifest.id.as_str(), manifest.version.as_str()), ("ai-agent", "0.1.0"));
   assert_eq!(manifest.agents, ["codex", "claude"]);
   assert!(parse_manifest(r#"{"id":"../x"}"#).is_err());
   assert!(parse_manifest("[]").is_err());
@@ -148,4 +148,27 @@ fn a_disabled_extension_stays_installed_and_is_enabled_again_by_the_switch_or_an
   install_from(dir.path(), &available(MANIFEST), MANIFEST).unwrap();
   assert!(installed_in(dir.path())[0].enabled);
   assert!(set_enabled_in(dir.path(), "../x", false).is_err());
+}
+
+#[test]
+fn versions_are_compared_as_semantic_versions() {
+  use ws_extensions::is_newer;
+  assert!(is_newer("0.2.0", "0.1.0") && is_newer("0.10.0", "0.9.0") && is_newer("1.0.0", "0.99.99"));
+  assert!(!is_newer("0.1.0", "0.1.0") && !is_newer("0.1.0", "0.2.0"), "same or older is no update");
+  assert!(!is_newer("latest", "0.1.0") && !is_newer("0.2", "0.1.0") && !is_newer("0.2.0", "oops"), "a malformed version is never newer");
+}
+
+#[test]
+fn every_published_version_is_major_minor_patch_and_the_index_agrees_with_the_manifest() {
+  let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions");
+  let index = std::fs::read_to_string(root.join("index.json")).unwrap();
+  for available in parse_index(&index, ws_extensions::repository_slug().expect("the repository is configured")).unwrap() {
+    assert!(!available.version.is_empty() && !ws_extensions::is_newer(&available.version, &available.version));
+    assert_eq!(available.version.split('.').count(), 3, "{} has a version that is not major.minor.patch", available.id);
+    if available.draft {
+      continue;
+    }
+    let manifest = ws_extensions::parse_manifest(&std::fs::read_to_string(root.join(&available.id).join("manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest.version, available.version, "{}: the index and the manifest say different versions", available.id);
+  }
 }

@@ -1,6 +1,7 @@
 //! Favorite projects, Git toolbar, history and compare views.
 
 use super::*;
+use crate::{SelectNextRow, SelectPreviousRow};
 use gpui_kit::component::avatar::Avatar;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::ElementExt as _;
@@ -270,6 +271,55 @@ impl Workspace {
     git.changes.iter().filter(|change| query.is_empty() || change.path.to_string_lossy().to_lowercase().contains(query)).collect()
   }
 
+  /// ↑ in the Changes or History list: the row above the chosen one.
+  pub(super) fn select_previous_row(&mut self, _: &SelectPreviousRow, _: &mut Window, cx: &mut Context<Self>) {
+    self.select_adjacent_row(-1, cx);
+  }
+
+  /// ↓ in the Changes or History list: the row below the chosen one.
+  pub(super) fn select_next_row(&mut self, _: &SelectNextRow, _: &mut Window, cx: &mut Context<Self>) {
+    self.select_adjacent_row(1, cx);
+  }
+
+  /// Chooses the row `step` places from the chosen one in the list that is shown, and brings it into view. With none chosen, ↓ takes the
+  /// first row and ↑ the last. Stops at the ends.
+  fn select_adjacent_row(&mut self, step: isize, cx: &mut Context<Self>) {
+    let next = |current: Option<usize>, len: usize| -> Option<usize> {
+      match current {
+        _ if len == 0 => None,
+        None if step > 0 => Some(0),
+        None => Some(len - 1),
+        Some(index) => Some(index.saturating_add_signed(step).min(len - 1)),
+      }
+    };
+    match self.git_view {
+      GitView::Changes => {
+        let query = self.changes_filter.read(cx).value().trim().to_lowercase();
+        let paths: Vec<PathBuf> = self.visible_changes(&query).into_iter().map(|change| change.path.clone()).collect();
+        let current = self.selected_change.as_ref().and_then(|selected| paths.iter().position(|path| path == selected));
+        let Some(index) = next(current, paths.len()) else { return };
+        self.chosen_changes.clear();
+        self.choice_anchor = Some(paths[index].clone());
+        self.open_change(paths[index].clone(), cx);
+        // Scrolls only when the row is out of view, so that the list does not jump on every key.
+        let (viewport, offset) = (self.changes_scroll.bounds().size.height, -self.changes_scroll.base_handle().offset().y);
+        let (top, bottom) = (CHANGE_ROW_HEIGHT * index as f32, CHANGE_ROW_HEIGHT * (index + 1) as f32);
+        if top < offset {
+          self.changes_scroll.scroll_to_item(index, ScrollStrategy::Top);
+        } else if bottom > offset + viewport {
+          self.changes_scroll.scroll_to_item(index, ScrollStrategy::Bottom);
+        }
+      }
+      GitView::History if self.compare.is_none() && !self.compare_open => {
+        let current = self.selected_commit.as_ref().and_then(|selected| self.history.iter().position(|commit| commit.id == *selected));
+        let Some(index) = next(current, self.history.len()) else { return };
+        self.select_commit(self.history[index].id.clone(), cx);
+        self.history_scroll.scroll_to_item(index);
+      }
+      GitView::History => {}
+    }
+  }
+
   /// ⌘-click: adds a file to the chosen ones, or takes it out. The file that is open starts the choice.
   fn toggle_change_choice(&mut self, file: PathBuf, cx: &mut Context<Self>) {
     if self.chosen_changes.is_empty() {
@@ -396,9 +446,9 @@ impl Workspace {
       .when(!last, |row| row.border_b_1())
       .border_color(crate::theme::row_divider(&palette))
       .items_center()
-      // A chosen row has the blue of the band in a diff, and keeps it under the pointer.
-      .when(selected, |row| row.bg(palette.diff_band))
-      .hover(|row| row.bg(if selected { palette.diff_band } else { palette.hover }))
+      // A chosen row is blue, and a little deeper under the pointer.
+      .when(selected, |row| row.bg(palette.selected))
+      .hover(|row| row.bg(if selected { palette.selected_hover } else { palette.hover }))
       .child(Checkbox::new(SharedString::from(format!("include-{}", change.path.display()))).checked(included).on_click(cx.listener({
         let file = file.clone();
         move |this, checked: &bool, _, cx| {
@@ -734,9 +784,14 @@ impl Workspace {
             }),
         )
         .child(
-          div().relative().flex_1().min_h_0().when(self.switching_branch.is_some(), |area| area.child(crate::components::skeleton_list(8))).when(
-            git.changed() > 0 && self.switching_branch.is_none(),
-            |list| {
+          div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .key_context("ChangesList")
+            .track_focus(&self.changes_focus)
+            .when(self.switching_branch.is_some(), |area| area.child(crate::components::skeleton_list(8)))
+            .when(git.changed() > 0 && self.switching_branch.is_none(), |list| {
               // The scrollbar has a column of its own beside the list, so that it never covers the status icons of the rows.
               list.child(
                 h_flex()
@@ -745,8 +800,7 @@ impl Workspace {
                   .child(div().relative().flex_1().min_w_0().h_full().child(changes_list))
                   .when(overflows, |row| row.child(crate::components::scrollbar_strip(&self.changes_scroll, "changes-scrollbar", cx))),
               )
-            },
-          ),
+            }),
         )
         .child(commit_box)
         .into_any_element(),
@@ -811,7 +865,7 @@ impl Workspace {
         .border_color(crate::theme::row_divider(&palette))
         .cursor_pointer()
         .when(selected, |row| row.bg(palette.selected))
-        .hover(|row| row.bg(palette.hover))
+        .hover(|row| row.bg(if selected { palette.selected_hover } else { palette.hover }))
         .child(
           v_flex()
             .flex_1()
@@ -909,7 +963,7 @@ impl Workspace {
       .min_h_0()
       .bg(colors(cx).background)
       .child(
-        div().relative().flex_1().min_w_0().h_full().child(
+        div().relative().flex_1().min_w_0().h_full().key_context("HistoryList").track_focus(&self.history_focus).child(
           v_flex()
             .id("history-list")
             .size_full()

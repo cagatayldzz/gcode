@@ -99,7 +99,7 @@ change the display name to something other than the repository's name, **General
 If the service refuses, nothing is changed and the message names what the token lacks: renaming needs permission to administer the repository (GitHub: **Administration: Read and write** on a fine-grained token, or the `repo` scope on a classic one). Change the token's permissions, or connect the account again in **Settings → Accounts**, then save again. The option
 is hidden while you are editing the remote address by hand.
 
-**Save** is available once something changed; **Discard** leaves without saving. Enter in the name field also saves.
+**Save changes** sits under the fields of the General and Appearance pages and is available once something changed. Enter in the name field also saves. There is no bar at the bottom of the view; leave it with the project settings button of the activity bar.
 
 ## Profiles
 

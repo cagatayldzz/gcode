@@ -300,10 +300,6 @@ impl Workspace {
           this.sync_renamed_remote(path.clone(), window, cx);
           return;
         }
-        ProjectSettingsEvent::Close => {
-          this.hide_terminal(window, cx);
-          return;
-        }
         ProjectSettingsEvent::Save(chosen) => chosen.clone(),
       };
       if chosen.rename_repository {
@@ -314,6 +310,8 @@ impl Workspace {
     }));
     self.terminal_open = false;
     self.agent_open = false;
+    // Only one settings view shows at a time: the app's Settings give way, and their button stops looking chosen.
+    self.app_settings = None;
     self.project_settings = Some(settings);
     self.check_remote_rename(cx);
     cx.notify();

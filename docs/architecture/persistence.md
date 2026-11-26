@@ -7,6 +7,7 @@ Everything gCode owns lives in one data directory:
 ├── profiles.json            list of profiles, the one used last
 ├── commit.json              commit message generation settings (mode 0600, holds the API key)
 ├── activity.log             only when `ws_activity::start` is called; the bug button's panel reads the log from memory instead
+├── logs/crash-<date>-<time>-<pid>.log   one report per crash (a panic), the newest 20 stay; see Crash reports
 ├── window.json              window placement, shared by all profiles
 ├── recent.json              files edited and projects opened last (with their profile), shared by all profiles; feeds the Dock menu
 ├── index/<hash>.idx         per-project file index (binary; a cache)
@@ -16,6 +17,14 @@ Everything gCode owns lives in one data directory:
 ├── preferences.json         ┘
 └── profiles/<id>/           another profile: its own projects.json, accounts.json, preferences.json
 ```
+
+## Crash reports
+
+`ws_app::run` calls `ws_storage::install_panic_hook` first. A panic anywhere (a click handler, a background task) writes a report to
+`logs/crash-<UTC date>-<UTC time>-<pid>.log` before the process ends, then reaches the usual error output. A panic inside a GPUI event handler
+aborts the app, so the file is the only trace left. A report holds the time, app version, thread, source location, panic message and a
+backtrace. The home folder is written as `~`; read a report before sharing it, since a message can still contain project names or file paths.
+Only the newest 20 reports are kept (`KEPT_REPORTS`). Open the folder with `open "$HOME/Library/Application Support/gCode/logs"`.
 
 ## Safe writing
 

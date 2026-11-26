@@ -282,6 +282,26 @@ pub(super) fn shortcut_hint(label: &'static str, action: &dyn Action, window: &W
     .into_any_element()
 }
 
+/// A heading and the commands under it, each with the keys that run it as the keymap has them now; a command with no keys shows none.
+pub(super) fn shortcut_section(
+  title: &'static str,
+  commands: &[(&'static str, &dyn Action)],
+  context: Option<&str>,
+  palette: &crate::theme::Colors,
+  window: &Window,
+) -> impl IntoElement {
+  v_flex().gap_1().child(Label::new(title).text_size(FONT_SIZE_SM).font_weight(FontWeight::SEMIBOLD).text_color(palette.text_secondary)).children(
+    commands.iter().map(|(label, action)| {
+      h_flex()
+        .justify_between()
+        .items_center()
+        .py_0p5()
+        .child(Label::new(*label).text_size(FONT_SIZE_SM))
+        .children(Kbd::binding_for_action(*action, context, window).map(|key| key.appearance(true)))
+    }),
+  )
+}
+
 /// The info bar under the terminals and the AI view: the shortcuts that work there.
 pub(super) fn shortcut_bar(hints: Vec<AnyElement>, cx: &App) -> StatusBar {
   let palette = colors(cx);

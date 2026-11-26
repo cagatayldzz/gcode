@@ -438,6 +438,9 @@ pub struct Workspace {
   /// How many commits the History view asks for now, and its scroll position (to load more near the end).
   history_limit: usize,
   history_scroll: ScrollHandle,
+  /// The keyboard goes to the Changes or the History list when it is clicked, so that ↑ and ↓ choose a row.
+  changes_focus: FocusHandle,
+  history_focus: FocusHandle,
   /// The scroll position of the list in the branch menu, which has a scrollbar strip of its own.
   branch_scroll: ScrollHandle,
   /// The scroll position of the branches under the compare field, which have a scrollbar strip of their own.
@@ -492,6 +495,8 @@ pub struct Workspace {
   changes_filter: Entity<InputState>,
   /// The Extensions view of the sidebar.
   extensions_panel: Entity<extensions::ExtensionsPanel>,
+  /// The page of the extension chosen in the Extensions view.
+  extension_page: Entity<extensions::ExtensionPage>,
   /// The repository menu of the title bar is open.
   projects_menu_open: bool,
   project_filter: Entity<InputState>,
@@ -558,6 +563,7 @@ impl Workspace {
     let branch_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find or create a branch"));
     let changes_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Filter"));
     let extensions_panel = cx.new(|cx| extensions::ExtensionsPanel::new(window, cx));
+    let extension_page = cx.new(|cx| extensions::ExtensionPage::new(extensions_panel.clone(), cx));
     let project_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find a project"));
     let compare_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Select Branch to Compare…"));
     let mut this = Self {
@@ -638,6 +644,8 @@ impl Workspace {
       switching_branch: None,
       history_limit: HISTORY_PAGE,
       history_scroll: ScrollHandle::new(),
+      changes_focus: cx.focus_handle(),
+      history_focus: cx.focus_handle(),
       branch_scroll: ScrollHandle::new(),
       compare_scroll: ScrollHandle::new(),
       changes_scroll: VirtualListScrollHandle::new(),
@@ -668,6 +676,7 @@ impl Workspace {
       branch_filter: branch_filter.clone(),
       changes_filter: changes_filter.clone(),
       extensions_panel: extensions_panel.clone(),
+      extension_page,
       projects_menu_open: false,
       project_filter: project_filter.clone(),
       window_save: Task::ready(()),
@@ -706,6 +715,8 @@ impl Workspace {
           }
           cx.notify();
         }),
+        // Choosing an extension shows its page in the main area.
+        cx.subscribe(&extensions_panel, |_, _, _: &extensions::ExtensionSelected, cx| cx.notify()),
         cx.subscribe(&project_filter, |_, _, _: &InputEvent, cx| cx.notify()),
         // Choosing the field lists the branches; typing narrows them; Enter takes the first one.
         cx.subscribe_in(&compare_filter, window, |this, _, event: &InputEvent, window, cx| match event {
@@ -924,6 +935,8 @@ impl Render for Workspace {
       crate::components::skeleton_page()
     } else if commit_shown {
       self.commit_view.clone().into_any_element()
+    } else if self.sidebar_tab == SidebarTab::Extensions && self.extensions_panel.read(cx).has_selection() {
+      self.extension_page.clone().into_any_element()
     } else if self.sidebar_tab == SidebarTab::Git && self.git_view == GitView::Changes && self.all_changes_open {
       self.all_changes.clone().into_any_element()
     } else if change_shown {
@@ -963,19 +976,27 @@ impl Render for Workspace {
     } else if let Some(settings) = &self.app_settings {
       settings.clone().into_any_element()
     } else if self.terminal_open {
-      self.render_terminal_area(window, cx).into_any_element()
+      self.render_terminal_area(cx).into_any_element()
     } else if self.agent_open && !extensions::enabled_agents(cx).is_empty() {
       self.render_agent_area(window, cx)
     } else {
       editor_area
     };
+    let terminal_shown = self.project_settings.is_none() && self.app_settings.is_none() && self.terminal_open;
     let content = h_flex()
       .flex_1()
       .min_h_0()
       .child(self.render_activity_bar(cx))
       .child(if self.full_area_open() {
         // The terminals take everything right of the activity bar: no sidebar and no status bar, like a terminal window.
-        div().flex_1().min_w_0().h_full().child(main_area).into_any_element()
+        // The status bar stays under the terminals; the other full-width views have none.
+        v_flex()
+          .flex_1()
+          .min_w_0()
+          .h_full()
+          .child(div().flex_1().min_h_0().w_full().child(main_area))
+          .when(terminal_shown, |column| column.child(self.render_status_bar(cx)))
+          .into_any_element()
       } else {
         // The group's content (the all-changes toolbar, for one) has a minimum width; `min_w_0` keeps it from pushing the group past
         // the window edge when the window is made narrow.
@@ -1050,6 +1071,9 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::close_tab))
       .on_action(cx.listener(Self::close_focused_pane))
       .on_action(cx.listener(Self::mention_projects))
+      .on_action(cx.listener(Self::show_shortcuts))
+      .on_action(cx.listener(Self::select_previous_row))
+      .on_action(cx.listener(Self::select_next_row))
       .size_full()
       .bg(theme.background)
       .text_color(theme.foreground)

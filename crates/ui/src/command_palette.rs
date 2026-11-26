@@ -5,7 +5,7 @@
 use crate::{
   components::display_path, theme::FONT_SIZE_SM, AddLineComment, AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, FindInFile,
   GoToFile, NewClaude, NewCodex, NewTerminal, OpenSettings, RemoveLineComment, ReplaceInFile, SaveFile, SearchProject, SelectNextOccurrence,
-  SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleLineComment, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
+  ShowShortcuts, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleLineComment, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{
   component::{
@@ -76,6 +76,7 @@ fn commands() -> Vec<Entry> {
     entry("Close Tab", &["close file"], CloseTab),
     entry("New Terminal", &["shell", "console"], NewTerminal),
     entry("Toggle Terminal", &["shell", "console", "show", "hide"], ToggleTerminal),
+    entry("Keyboard Shortcuts", &["keys", "keymap", "hotkeys", "help"], ShowShortcuts),
     entry("Split Terminal Right", &["pane", "side by side"], SplitRight),
     entry("Split Terminal Down", &["pane", "below"], SplitDown),
     entry("Toggle AI Agents", &["codex", "claude", "show", "hide"], ToggleAgents),

@@ -425,7 +425,7 @@ impl Workspace {
 
   /// The terminals, filling the main area like a terminal window: a tab strip when there are several tabs, and the panes of the
   /// shown tab, split side by side or one above the other, each with a small header when there is more than one.
-  pub(super) fn render_terminal_area(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+  pub(super) fn render_terminal_area(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let (Some(root), Some(arrangement)) = (self.projects.active.clone(), self.arrangement()) else {
       return Label::new("No project is open.").text_color(theme.muted_foreground).p_3().into_any_element();
@@ -462,25 +462,9 @@ impl Workspace {
       )
     });
     let headers = node.panes().len() > 1;
-    // The shortcuts sit above the panes (and their headers), under the tab strip.
     v_flex()
       .size_full()
       .children(strip)
-      .child(
-        shortcut_bar(
-          vec![
-            shortcut_hint("New tab", &NewTerminal, window),
-            shortcut_hint("Split right", &SplitRight, window),
-            shortcut_hint("Split down", &SplitDown, window),
-            shortcut_hint("Clear", &ClearBuffer, window),
-            shortcut_hint("Mention projects", &MentionProjects, window),
-            shortcut_hint("Hide", &ToggleTerminal, window),
-          ],
-          cx,
-        )
-        .border_t_0()
-        .border_b_1(),
-      )
       .child(div().flex_1().min_h_0().child(self.render_pane_node(&node, headers, &root.to_string_lossy(), cx)))
       .into_any_element()
   }

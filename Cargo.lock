@@ -9168,6 +9168,7 @@ name = "ws-storage"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "tempfile",
  "ws-product",
 ]
 

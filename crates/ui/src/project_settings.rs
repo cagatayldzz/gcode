@@ -98,8 +98,6 @@ pub(crate) enum ProjectSettingsEvent {
   RemoveRequested(PathBuf),
   /// Bring the remote address and the display name in line with the repository's new name.
   SyncRenamed(PathBuf),
-  /// Leave the view without saving.
-  Close,
 }
 
 /// A change to the saved index, with what to say while it runs: it gets the cache folder and the project folder.
@@ -644,9 +642,11 @@ impl Render for ProjectSettings {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let dirty = self.is_dirty(cx);
+    // What the General and Appearance pages change is kept with a button under them.
+    let save = Button::new("settings-save").label("Save changes").primary().disabled(!dirty).on_click(cx.listener(|this, _, _, cx| this.save(cx)));
     let content = match self.page {
-      Page::General => self.general(cx).into_any_element(),
-      Page::Appearance => self.appearance(cx).into_any_element(),
+      Page::General => v_flex().gap_6().child(self.general(cx)).child(h_flex().child(save)).into_any_element(),
+      Page::Appearance => v_flex().gap_6().child(self.appearance(cx)).child(h_flex().child(save)).into_any_element(),
       Page::Index => self.index_page(cx).into_any_element(),
       Page::Remove => self.danger(cx).into_any_element(),
     };
@@ -681,29 +681,6 @@ impl Render for ProjectSettings {
             .viewport_from_layout(),
         ),
       );
-    let footer = h_flex()
-      .items_center()
-      .gap_3()
-      .px_8()
-      .py_3()
-      .border_t_1()
-      .border_color(palette.border)
-      .bg(palette.background)
-      .child(
-        Label::new(if dirty { "You have unsaved changes" } else { "All changes saved" })
-          .text_size(FONT_SIZE_SM)
-          .text_color(palette.text_secondary)
-          .flex_1(),
-      )
-      .child(Button::new("settings-cancel").ghost().label(if dirty { "Discard" } else { "Close" }).on_click(cx.listener(|_, _, _, cx| {
-        cx.emit(ProjectSettingsEvent::Close);
-      })))
-      .child(Button::new("settings-save").label("Save changes").primary().disabled(!dirty).on_click(cx.listener(|this, _, _, cx| this.save(cx))));
-    h_flex()
-      .size_full()
-      .bg(palette.background)
-      .text_size(FONT_SIZE)
-      .child(sidebar)
-      .child(v_flex().flex_1().min_w_0().h_full().child(body).child(footer))
+    h_flex().size_full().bg(palette.background).text_size(FONT_SIZE).child(sidebar).child(body)
   }
 }

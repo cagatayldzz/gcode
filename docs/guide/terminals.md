@@ -55,4 +55,4 @@ Right-click in a terminal for New Tab, Split Pane Vertically/Horizontally, Copy,
 - Copying joins lines that only wrapped at the screen edge.
 - Dropping files on a terminal pastes their shell-escaped paths, each followed by a space, without running anything.
 
-An info bar at the bottom of the terminals lists their shortcuts, read from the keymap, so it always matches your bindings.
+The status bar stays under the terminals (branch, sync, problems). Its **keyboard** button on the right opens the shortcuts in a dialog, read from the keymap, so it always matches your bindings. The command palette has the same as **Keyboard Shortcuts**.

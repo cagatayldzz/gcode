@@ -47,12 +47,12 @@ The terminals and the AI view are **not** dock panels. They *replace* everything
 ```text
  sidebar_tab: Explorer | Search | Git
  terminal_open: bool          ┐
- agent_open: bool             ├─ full_area_open  →  sidebar + dock + status bar are NOT drawn
+ agent_open: bool             ├─ full_area_open  →  sidebar + dock are NOT drawn (the status bar stays under the terminals)
  project settings open        ┘
 ```
 
 - `ToggleTerminal` (`⌘J`) sets `terminal_open`; `render_terminal_area` draws a tab strip when there are several tabs and the shown tab as a
-  tree of panes.
+  tree of panes, with the status bar below it. The status bar's keyboard button (`ShowShortcuts`) opens the shortcuts in a dialog.
 - `ToggleAgents` (`⇧⌘A`) sets `agent_open`. The two never show together.
 - The project settings view (`Workspace.project_settings`) fills the same area, and `full_area_open` counts it.
 - Showing the editor again keeps every shell running: the entities stay alive in the workspace.
