@@ -19,6 +19,47 @@ fn an_atomic_write_replaces_the_file_and_leaves_no_temporary_file() {
 }
 
 #[test]
+fn an_atomic_write_leaves_an_existing_temporary_sibling_untouched() {
+  let dir = tempfile::tempdir().unwrap();
+  let file = dir.path().join("data.txt");
+  let sibling = dir.path().join("data.txt.tmp");
+  let other = dir.path().join("other.txt");
+  std::fs::write(&other, b"unrelated").unwrap();
+  std::os::unix::fs::symlink(&other, &sibling).unwrap();
+
+  write_atomic(&file, b"saved").unwrap();
+
+  assert_eq!(std::fs::read(&file).unwrap(), b"saved");
+  assert_eq!(std::fs::read_link(&sibling).unwrap(), other);
+  assert_eq!(std::fs::read(&other).unwrap(), b"unrelated");
+}
+
+#[test]
+fn concurrent_atomic_writes_leave_one_complete_file() {
+  let dir = tempfile::tempdir().unwrap();
+  let file = dir.path().join("data.txt");
+  let barrier = std::sync::Barrier::new(8);
+
+  std::thread::scope(|scope| {
+    for byte in 0..8 {
+      let file = &file;
+      let barrier = &barrier;
+      scope.spawn(move || {
+        let contents = vec![byte; 65536];
+        barrier.wait();
+        write_atomic(file, &contents).unwrap();
+      });
+    }
+  });
+
+  let contents = std::fs::read(&file).unwrap();
+  assert_eq!(contents.len(), 65536);
+  assert!(contents[0] < 8);
+  assert!(contents.iter().all(|byte| *byte == contents[0]));
+  assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+#[test]
 fn an_atomic_write_keeps_the_permissions_of_the_file() {
   use std::os::unix::fs::PermissionsExt;
   let dir = temp_dir("mode");
