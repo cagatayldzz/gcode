@@ -534,6 +534,10 @@ impl Workspace {
     dock.update(cx, |area, cx| {
       area.set_center(DockLayout::h_split().child(DockLayout::tabs().panel_view(panel_handle(editor_panel.clone()), cx), None), window, cx);
     });
+    let commit_view = cx.new({
+      let settings = settings.clone();
+      |_| CommitView::new(settings)
+    });
     let change_view = cx.new({
       let settings = settings.clone();
       |_| ChangeView::new(settings)
@@ -607,10 +611,7 @@ impl Workspace {
       merge_task: None,
       merge_dialog: None,
       selected_commit: None,
-      commit_view: cx.new({
-        let settings = settings.clone();
-        |_| CommitView::new(settings)
-      }),
+      commit_view: commit_view.clone(),
       change_view: change_view.clone(),
       all_changes: cx.new({
         let settings = settings.clone();
@@ -673,6 +674,10 @@ impl Workspace {
         })
       },
       _commit_subscriptions: vec![
+        // A double click on a file of a commit opens the file in the editor with the Explorer.
+        cx.subscribe_in(&commit_view, window, |this, _, event: &crate::commit_view::OpenFileRequested, window, cx| {
+          this.open_change_in_editor(&event.0, window, cx);
+        }),
         // A double click on a line of a diff opens the file at that line.
         cx.subscribe_in(&change_view, window, |this, _, event: &crate::change_view::OpenInEditor, window, cx| {
           this.open_change_line_in_editor(&event.file, event.line, window, cx);

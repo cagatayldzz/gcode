@@ -22,7 +22,8 @@ Choosing a commit shows it in place of the editor:
 - its **subject**, and its **message** in a fixed-width scrolling box (the button beside the subject unfolds it to most of the window and
   writes out the author's e-mail, the full id and the added and removed lines);
 - the author, the short id and the `+` / `-` totals;
-- the **files it changed** on the left and the **diff** of the chosen one on the right.
+- the **files it changed** on the left and the **diff** of the chosen one on the right. **Double-click** a file to open the file itself
+  in the editor, with the Explorer (the file as it is on the disk now; a file that no longer exists shows a notification).
 
 The first commit is shown when you open the tab. The editor tabs come back when you return to Changes or another sidebar tab.
 

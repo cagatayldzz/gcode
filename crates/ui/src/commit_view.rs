@@ -84,6 +84,11 @@ pub(crate) struct CommitView {
   file_sizes: Rc<Vec<Size<Pixels>>>,
 }
 
+/// Sent when a changed file of the commit is double-clicked: open the file itself in the editor, as it is on the disk now.
+pub struct OpenFileRequested(pub PathBuf);
+
+impl EventEmitter<OpenFileRequested> for CommitView {}
+
 impl CommitView {
   pub fn new(settings: Entity<SettingsModel>) -> Self {
     Self {
@@ -220,7 +225,12 @@ impl CommitView {
           )
           .child(Label::new(name).text_size(FILE_FONT_SIZE).min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis()),
       )
-      .on_click(cx.listener(move |this, _, _, cx| this.select_file(file.clone(), cx)))
+      .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+        this.select_file(file.clone(), cx);
+        if event.click_count() >= 2 {
+          cx.emit(OpenFileRequested(file.clone()));
+        }
+      }))
   }
 }
 
