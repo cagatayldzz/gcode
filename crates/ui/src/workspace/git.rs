@@ -644,6 +644,7 @@ impl Workspace {
     self.projects_menu_open = open;
     if open {
       self.load_project_status(true, cx);
+      self.projects_menu_scroll.set_offset(point(Pixels::ZERO, Pixels::ZERO));
       self.project_filter.update(cx, |input, cx| input.set_value("", window, cx));
       let focus = self.project_filter.read(cx).focus_handle(cx);
       window.defer(cx, move |window, cx| focus.focus(window, cx));

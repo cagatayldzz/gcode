@@ -500,6 +500,7 @@ pub struct Workspace {
   /// The repository menu of the title bar is open.
   projects_menu_open: bool,
   project_filter: Entity<InputState>,
+  projects_menu_scroll: ScrollHandle,
   /// Writes where the window is once it has stopped moving or resizing; a newer change replaces (cancels) the pending write.
   window_save: Task<()>,
   /// The latest placement, written at once when the window closes or the app quits, so that a move right before a restart is not lost.
@@ -679,6 +680,7 @@ impl Workspace {
       extension_page,
       projects_menu_open: false,
       project_filter: project_filter.clone(),
+      projects_menu_scroll: ScrollHandle::new(),
       window_save: Task::ready(()),
       placement: placement.clone(),
       _window_bounds: cx.observe_window_bounds(window, |this, window, cx| this.remember_window(window, cx)),

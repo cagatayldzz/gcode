@@ -4,13 +4,22 @@ use super::*;
 use crate::ShowShortcuts;
 
 impl Workspace {
-  /// A scrolling list of the branch menu with the scrollbar strip beside it, shown only while the list is taller than its room.
-  fn scrolling_list(&self, list: Stateful<Div>, cx: &App) -> Div {
-    let overflows = self.branch_scroll.max_offset().y > px(0.);
+  /// Give a menu list a scrollbar strip only when its content exceeds the viewport.
+  fn scrolling_list(list: Stateful<Div>, scroll: &ScrollHandle, id: &'static str, workspace: &Entity<Self>, cx: &App) -> Div {
+    let overflows = scroll.max_offset().y > Pixels::ZERO;
+    let (scroll, workspace) = (scroll.clone(), workspace.clone());
     h_flex()
       .items_stretch()
-      .child(div().flex_1().min_w_0().bg(colors(cx).background).child(list))
-      .when(overflows, |row| row.child(crate::components::scrollbar_strip(&self.branch_scroll, "branch-scrollbar", cx)))
+      .child(div().flex_1().min_w_0().bg(colors(cx).background).child(list).on_children_prepainted({
+        let scroll = scroll.clone();
+        move |_, window, cx| {
+          if overflows != (scroll.max_offset().y > Pixels::ZERO) {
+            let workspace = workspace.clone();
+            window.defer(cx, move |_, cx| workspace.update(cx, |_, cx| cx.notify()));
+          }
+        }
+      }))
+      .when(overflows, |row| row.child(crate::components::scrollbar_strip(&scroll, id, cx)))
   }
 
   /// Shows the branch, the sync button and the problem counts on the left, and the open file status on the right.
@@ -304,18 +313,19 @@ impl Workspace {
                 .child(div().flex_1().child(crate::components::soft_input(&filter, cx)))
                 .child(new_branch),
             )
-            .child(
-              self.scrolling_list(
-                div().id("branch-list").max_h(list_height).overflow_y_scroll().track_scroll(&self.branch_scroll).child(
-                  v_flex()
-                    .pb_3()
-                    .when(starts_with_row, |list| list.pt_3())
-                    .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground)))
-                    .children(rows),
-                ),
-                cx,
+            .child(Self::scrolling_list(
+              div().id("branch-list").max_h(list_height).overflow_y_scroll().track_scroll(&self.branch_scroll).child(
+                v_flex()
+                  .pb_3()
+                  .when(starts_with_row, |list| list.pt_3())
+                  .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground)))
+                  .children(rows),
               ),
-            )
+              &self.branch_scroll,
+              "branch-scrollbar",
+              &workspace,
+              cx,
+            ))
             .into_any_element()
         }
         BranchTab::PullRequests => {
@@ -353,37 +363,39 @@ impl Workspace {
               } else if shown.is_empty() {
                 Label::new("No matching pull requests").px_2().py_1().text_color(theme.muted_foreground).into_any_element()
               } else {
-                self
-                  .scrolling_list(
-                    div().id("pull-request-list").max_h(menu_height).overflow_y_scroll().track_scroll(&self.branch_scroll).child(v_flex().children(
-                      shown.into_iter().map(|request| {
-                        let url = request.url.clone();
-                        v_flex()
-                          .id(SharedString::from(format!("pull-request-{}", request.url)))
-                          .px_3()
-                          .py_1()
-                          .cursor_pointer()
-                          .hover(|row| row.bg(palette.hover))
-                          .child(
-                            Label::new(if request.draft { format!("{} (draft)", request.title) } else { request.title.clone() })
-                              .overflow_hidden()
-                              .whitespace_nowrap()
-                              .text_ellipsis(),
-                          )
-                          .child(
-                            Label::new(format!("#{} · {} · {} → {}", request.number, request.author, request.source, request.target))
-                              .text_size(FONT_SIZE_SM)
-                              .text_color(theme.muted_foreground)
-                              .overflow_hidden()
-                              .whitespace_nowrap()
-                              .text_ellipsis(),
-                          )
-                          .on_click(move |_, _, cx| cx.open_url(&url))
-                      }),
-                    )),
-                    cx,
-                  )
-                  .into_any_element()
+                Self::scrolling_list(
+                  div().id("pull-request-list").max_h(menu_height).overflow_y_scroll().track_scroll(&self.branch_scroll).child(v_flex().children(
+                    shown.into_iter().map(|request| {
+                      let url = request.url.clone();
+                      v_flex()
+                        .id(SharedString::from(format!("pull-request-{}", request.url)))
+                        .px_3()
+                        .py_1()
+                        .cursor_pointer()
+                        .hover(|row| row.bg(palette.hover))
+                        .child(
+                          Label::new(if request.draft { format!("{} (draft)", request.title) } else { request.title.clone() })
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis(),
+                        )
+                        .child(
+                          Label::new(format!("#{} · {} · {} → {}", request.number, request.author, request.source, request.target))
+                            .text_size(FONT_SIZE_SM)
+                            .text_color(theme.muted_foreground)
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis(),
+                        )
+                        .on_click(move |_, _, cx| cx.open_url(&url))
+                    }),
+                  )),
+                  &self.branch_scroll,
+                  "branch-scrollbar",
+                  &workspace,
+                  cx,
+                )
+                .into_any_element()
               }
             }
           };
@@ -451,10 +463,9 @@ impl Workspace {
         Icon::new(if self.projects_menu_open { IconName::ChevronUp } else { IconName::ChevronDown }).size_4().text_color(theme.muted_foreground),
       ),
     );
-    // The popover has no padding of its own: the list's scrollbar then runs along the menu's right edge, and the padding sits
-    // inside the header and inside the list.
     Popover::new("repository-menu")
       .p_0()
+      .overflow_hidden()
       .anchor(Anchor::TopLeft)
       .open(self.projects_menu_open)
       .on_open_change({
@@ -464,9 +475,15 @@ impl Workspace {
       .trigger(trigger)
       .content(move |_, _, cx| {
         let theme = cx.theme().clone();
-        let (filter, query, list, statuses) = {
+        let (filter, query, list, statuses, scroll) = {
           let this = workspace.read(cx);
-          (this.project_filter.clone(), this.project_filter.read(cx).value().to_lowercase(), this.projects.clone(), this.project_status.clone())
+          (
+            this.project_filter.clone(),
+            this.project_filter.read(cx).value().to_lowercase(),
+            this.projects.clone(),
+            this.project_status.clone(),
+            this.projects_menu_scroll.clone(),
+          )
         };
         let active = list.active.clone();
         let matches = |project: &&Project| query.is_empty() || project.name().to_lowercase().contains(&query);
@@ -486,7 +503,7 @@ impl Workspace {
           if named {
             rows.push(
               Label::new(label)
-                .px_2()
+                .px_3()
                 .pt_2()
                 .text_size(FONT_SIZE_SM)
                 .font_weight(FontWeight::SEMIBOLD)
@@ -526,27 +543,32 @@ impl Workspace {
         };
         v_flex()
           .w(PROJECT_MENU_WIDTH)
-          .gap_1()
           .child(
             h_flex()
+              .flex_none()
               .gap_2()
               .items_center()
               .p_3()
-              .pb_0()
+              .pb_1()
+              .border_b_1()
+              .border_color(colors(cx).border)
               .child(div().flex_1().child(crate::components::soft_input(&filter, cx)))
               .child(add)
               .child(sort),
           )
-          .child(
-            div().id("repository-list").max_h(MENU_LIST_MAX_HEIGHT).overflow_y_scrollbar().child(
+          .child(Self::scrolling_list(
+            div().id("repository-list").max_h(MENU_LIST_MAX_HEIGHT).overflow_y_scroll().track_scroll(&scroll).child(
               v_flex()
-                .gap_0p5()
-                .px_3()
                 .pb_3()
-                .when(rows.is_empty(), |list| list.child(Label::new("No matching projects").px_2().py_1().text_color(theme.muted_foreground)))
+                .when(!named, |list| list.pt_3())
+                .when(rows.is_empty(), |list| list.child(Label::new("No matching projects").px_3().py_1().text_color(theme.muted_foreground)))
                 .children(rows),
             ),
-          )
+            &scroll,
+            "repository-scrollbar",
+            &workspace,
+            cx,
+          ))
       })
   }
 }
