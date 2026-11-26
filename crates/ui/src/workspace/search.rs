@@ -249,7 +249,7 @@ impl Workspace {
 
   fn open_search_result(&mut self, result: &project_search::Match, window: &mut Window, cx: &mut Context<Self>) {
     self.open_file(result.path.clone(), window, cx);
-    self.editor_panel.update(cx, |editor, cx| editor.reveal_position(&result.path, result.line, result.column, window, cx));
+    self.editor_panel.update(cx, |editor, cx| editor.reveal_search_match(&result.path, result.line, result.column, window, cx));
   }
 
   fn search_status(&self) -> String {

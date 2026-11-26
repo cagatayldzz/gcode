@@ -298,6 +298,7 @@ pub(crate) struct EditorPanel {
   preview_epoch: u64,
   focus_handle: FocusHandle,
   search_report: Option<(SharedString, Entity<EditorState>)>,
+  search_reveal: Option<(EntityId, usize)>,
   report_active: bool,
   replacement_files: std::collections::HashSet<PathBuf>,
   /// The run of "Add Next Occurrence" in progress: the file, the selection it started from and where the last occurrence ended.
@@ -406,6 +407,7 @@ impl EditorPanel {
       preview_epoch: 0,
       focus_handle: cx.focus_handle(),
       search_report: None,
+      search_reveal: None,
       report_active: false,
       replacement_files: Default::default(),
       occurrences: None,
@@ -685,6 +687,18 @@ impl EditorPanel {
       file.state.update(cx, |state, cx| {
         state.set_cursor_position(gpui_kit::component::input::Position { line: line as u32, character: column as u32 }, window, cx);
       });
+    }
+  }
+
+  pub fn reveal_search_match(&mut self, path: &Path, line: usize, column: usize, window: &mut Window, cx: &mut Context<Self>) {
+    self.search_reveal = None;
+    if self.active_file() != Some(path) {
+      return;
+    }
+    self.reveal_position(path, line, column, window, cx);
+    if let Some(file) = self.files.get(path) {
+      self.search_reveal = Some((file.state.entity_id(), file.state.read(cx).cursor()));
+      cx.notify();
     }
   }
 
@@ -1283,6 +1297,32 @@ impl Render for EditorPanel {
                           .bordered(false)
                           .size_full(),
                       )
+                      .when_some(self.search_reveal.filter(|(id, _)| *id == file.state.entity_id()), |container, request| {
+                        let state = file.state.clone();
+                        let panel = cx.entity().downgrade();
+                        container.on_children_prepainted(move |_, window, cx| {
+                          // Use the freshly laid-out caret so newly opened files, folds and wrapped rows use the actual viewport.
+                          let Some(caret) = state.read(cx).prepaint_caret_geometry() else { return };
+                          let delta = f64::from(f32::from(caret.input_bounds().center().y - caret.cursor_bounds().center().y));
+                          let (state, panel) = (state.clone(), panel.clone());
+                          window.defer(cx, move |_, cx| {
+                            let _ = panel.update(cx, |panel, cx| {
+                              if panel.search_reveal != Some(request) {
+                                return;
+                              }
+                              panel.search_reveal = None;
+                              if panel.active_file().and_then(|path| panel.files.get(path)).is_some_and(|file| file.state == state) {
+                                state.update(cx, |state, cx| {
+                                  if state.cursor() == request.1 {
+                                    state.set_scroll_y_f64(state.scroll_y_f64() + delta, cx);
+                                  }
+                                });
+                              }
+                              cx.notify();
+                            });
+                          });
+                        })
+                      })
                       .children(file.find.as_ref().map(|(bar, _)| bar.clone())),
                   )
                   .child(file.minimap.clone())
