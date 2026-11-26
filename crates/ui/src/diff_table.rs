@@ -17,7 +17,7 @@ use gpui_kit::{
     h_flex,
     highlighter::HighlightTheme,
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
-    scroll::{ScrollableMask, Scrollbar, ScrollbarMode},
+    scroll::{ScrollableMask, Scrollbar, ScrollbarHandle, ScrollbarMode},
     tooltip::Tooltip,
     ActiveTheme as _, Icon, IconName, Sizable as _, Theme,
   },
@@ -190,7 +190,7 @@ impl DiffTable {
     let PreparedDiff { patch, language, styles } = prepared;
     let expansion = Expansion::new();
     let layout = diff_model::layout(&patch, &expansion, false);
-    let list = ListState::new(layout.rows.len(), ListAlignment::Top, px(600.));
+    let list = ListState::new(layout.rows.len(), ListAlignment::Top, px(600.)).with_uniform_item_height(code_font_size(&settings, cx) * LINE_HEIGHT);
     let widest = patch.lines.iter().map(|line| line.text.chars().count()).max().unwrap_or(0);
     let has_old = patch.lines.iter().any(|line| line.old.is_some());
     let has_new = patch.lines.iter().any(|line| line.new.is_some());
@@ -234,16 +234,16 @@ impl DiffTable {
   }
 
   /// Lays the rows out again after a fold was expanded, keeping the place in the list.
-  fn relayout(&mut self) {
+  fn relayout(&mut self, cx: &App) {
     let top = self.list.logical_scroll_top();
     self.layout = diff_model::layout(&self.patch, &self.expansion, self.split);
-    self.list.reset(self.layout.rows.len());
+    self.list.reset_with_uniform_height(self.layout.rows.len(), code_font_size(&self.settings, cx) * LINE_HEIGHT);
     self.list.scroll_to(ListOffset { item_ix: top.item_ix.min(self.layout.rows.len().saturating_sub(1)), offset_in_item: top.offset_in_item });
   }
 
   fn expand(&mut self, base: usize, hidden: &Range<usize>, up: bool, cx: &mut Context<Self>) {
     diff_model::expand(&mut self.expansion, base, hidden, up);
-    self.relayout();
+    self.relayout(cx);
     cx.notify();
   }
 
@@ -344,7 +344,7 @@ impl DiffTable {
   fn set_split(&mut self, split: bool, cx: &mut Context<Self>) {
     if self.split != split {
       self.split = split;
-      self.relayout();
+      self.relayout(cx);
       cx.notify();
     }
   }
@@ -572,6 +572,41 @@ enum Numbers {
   New = 2,
 }
 
+#[derive(Clone)]
+struct DiffScrollbar(ListState);
+
+impl ScrollbarHandle for DiffScrollbar {
+  fn viewport_bounds(&self) -> Bounds<Pixels> {
+    self.0.viewport_bounds()
+  }
+
+  fn offset(&self) -> Point<Pixels> {
+    self.0.scroll_px_offset_for_scrollbar()
+  }
+
+  fn set_offset(&self, offset: Point<Pixels>) {
+    let end = self.0.max_offset_for_scrollbar().y;
+    // During a drag the range is frozen. At its end, anchor to the last row so newly measured rows cannot move the thumb back up.
+    if end > Pixels::ZERO && -offset.y >= end {
+      self.0.scroll_to_end();
+    } else {
+      self.0.set_offset_from_scrollbar(offset);
+    }
+  }
+
+  fn content_size(&self) -> Size<Pixels> {
+    self.0.content_size()
+  }
+
+  fn start_drag(&self) {
+    self.0.scrollbar_drag_started();
+  }
+
+  fn end_drag(&self) {
+    self.0.scrollbar_drag_ended();
+  }
+}
+
 impl Render for DiffTable {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
@@ -581,7 +616,7 @@ impl Render for DiffTable {
     if wrap != self.wrap {
       cx.defer_in(window, move |this, _, cx| {
         this.wrap = wrap;
-        this.relayout();
+        this.relayout(cx);
         cx.notify();
       });
     }
@@ -615,7 +650,12 @@ impl Render for DiffTable {
           .when(scrolls_sideways, |table| table.child(div().absolute().inset_0().child(Scrollbar::horizontal(&self.scroll_x)))),
       )
       // Let the scrollbar measure overflow after the list has laid out its rows.
-      .child(div().absolute().inset_0().child(crate::components::slim_scrollbar(&self.list, "diff-scrollbar", cx).mode(ScrollbarMode::Always)))
+      .child(
+        div()
+          .absolute()
+          .inset_0()
+          .child(crate::components::slim_scrollbar(&DiffScrollbar(self.list.clone()), "diff-scrollbar", cx).mode(ScrollbarMode::Always)),
+      )
       // A drag over the numbers or the text may end anywhere.
       .on_mouse_up(
         MouseButton::Left,

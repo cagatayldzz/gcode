@@ -316,8 +316,10 @@ impl Render for AllChanges {
               let top_border = if has_top_border { FILE_HEADER_SEPARATOR } else { Pixels::ZERO };
               let offset = bounds.top() - padding - top_border - mask.bounds.top();
               if show_transition {
-                // Tint the top padding after a diff body without moving the header or its controls.
-                let mut band = div().w_full().h_0p5().bg(cx.theme().border.opacity(0.4)).into_any_element();
+                // Add a second, softer horizontal rule below the Kit's separator.
+                let border = cx.theme().border;
+                let mut band =
+                  v_flex().w_full().h_1().pt_px().bg(border.opacity(0.32)).child(div().w_full().h_px().bg(border.opacity(0.75))).into_any_element();
                 band.layout_as_root(size(mask.bounds.size.width.into(), AvailableSpace::MinContent), window, cx);
                 window.defer_draw(band, point(mask.bounds.left(), bounds.top() - padding), 0, Some(mask));
               }
@@ -368,6 +370,7 @@ impl Render for AllChanges {
         let mut header = v_flex()
           .id(SharedString::from(format!("sticky-diff-header-{path}")))
           .block_mouse_except_scroll()
+          .relative()
           .w(viewport.size.width)
           .bg(cx.theme().background)
           .child(
@@ -389,6 +392,8 @@ impl Render for AllChanges {
               .child(div().flex_1().min_w_0().child(file_header(file, &view, cx))),
           )
           .when(draw_separator, |header| header.child(div().flex_none().w_full().h_px().bg(cx.theme().border)))
+          // The deferred header paints over the sidebar splitter at the left edge.
+          .child(div().absolute().top_0().bottom_0().left_0().w_px().bg(cx.theme().border))
           .into_any_element();
         let size = header.layout_as_root(size(viewport.size.width.into(), AvailableSpace::MinContent), window, cx);
         let offset = below.map_or(Pixels::ZERO, |(_, top)| (top - size.height).min(Pixels::ZERO));
