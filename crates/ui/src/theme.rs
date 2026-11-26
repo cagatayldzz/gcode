@@ -99,6 +99,10 @@ pub(crate) const PROJECT_COLORS: [(&str, &str); 8] = [
   ("Teal", "#2fb5c9"),
 ];
 
+/// The base colors of added and removed lines in a diff; the backgrounds are these at different strengths.
+const DIFF_GREEN: u32 = 0x03a66d;
+const DIFF_RED: u32 = 0xc90950;
+
 /// A stored `#rrggbb` color.
 pub(crate) fn project_color(value: &str) -> Option<Hsla> {
   let digits = value.strip_prefix('#')?;
@@ -140,12 +144,12 @@ impl Colors {
       gutter_modified: hex(0xd29922),
       renamed: hex(0x4493f8),
       conflicted: hex(0xdb6d28),
-      diff_added: hex(0x238636).opacity(0.15),
-      diff_removed: hex(0xda3633).opacity(0.15),
-      diff_added_gutter: hex(0x238636).opacity(0.3),
-      diff_removed_gutter: hex(0xda3633).opacity(0.3),
-      diff_added_word: hex(0x2ea043).opacity(0.4),
-      diff_removed_word: hex(0xf85149).opacity(0.4),
+      diff_added: hex(DIFF_GREEN).opacity(0.14),
+      diff_removed: hex(DIFF_RED).opacity(0.14),
+      diff_added_gutter: hex(DIFF_GREEN).opacity(0.28),
+      diff_removed_gutter: hex(DIFF_RED).opacity(0.28),
+      diff_added_word: hex(DIFF_GREEN).opacity(0.4),
+      diff_removed_word: hex(DIFF_RED).opacity(0.4),
       diff_band: hex(0x388bfd).opacity(0.15),
       diff_band_button: hex(0x388bfd).opacity(0.3),
       diff_band_text: hex(0x9ecbff),
@@ -188,12 +192,12 @@ impl Colors {
       gutter_modified: hex(0xe3c15b),
       renamed: hex(0x0969da),
       conflicted: hex(0xbc4c00),
-      diff_added: hex(0xe6ffec),
-      diff_removed: hex(0xffebe9),
-      diff_added_gutter: hex(0xccffd8),
-      diff_removed_gutter: hex(0xffd7d5),
-      diff_added_word: hex(0xabf2bc),
-      diff_removed_word: hex(0xff8182).opacity(0.4),
+      diff_added: hex(DIFF_GREEN).opacity(0.07),
+      diff_removed: hex(DIFF_RED).opacity(0.07),
+      diff_added_gutter: hex(DIFF_GREEN).opacity(0.15),
+      diff_removed_gutter: hex(DIFF_RED).opacity(0.15),
+      diff_added_word: hex(DIFF_GREEN).opacity(0.22),
+      diff_removed_word: hex(DIFF_RED).opacity(0.22),
       diff_band: hex(0xddf4ff),
       diff_band_button: hex(0xb6e3ff),
       diff_band_text: hex(0x0550ae),

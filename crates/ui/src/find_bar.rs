@@ -156,7 +156,7 @@ impl Render for FindBar {
         box_style(h_flex().w(rems(15.)).items_center()).child(div().flex_1().min_w_0().child(self.field(&self.query, cx))).child(
           Button::new("find-case")
             .xsmall()
-            .when(self.case_sensitive, |button| button.custom(selected_style(cx)))
+            .when(self.case_sensitive, |button| button.custom(selected_style(cx)).bg(cx.theme().primary))
             .when(!self.case_sensitive, |button| button.ghost())
             .label("Aa")
             .tooltip("Match Case")

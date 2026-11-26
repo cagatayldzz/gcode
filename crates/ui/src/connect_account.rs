@@ -144,7 +144,7 @@ impl ConnectAccount {
     let chosen = self.provider == provider;
     Button::new(provider.id())
       .small()
-      .when(chosen, |button| button.custom(selected_style(cx)))
+      .when(chosen, |button| button.custom(selected_style(cx)).bg(cx.theme().primary))
       .when(!chosen, |button| button.outline())
       .label(provider.label())
       .on_click(cx.listener(move |this, _, window, cx| this.choose(provider, window, cx)))

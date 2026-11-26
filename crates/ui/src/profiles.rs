@@ -8,6 +8,7 @@ use crate::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
+    avatar::Avatar,
     button::{Button, ButtonVariants as _},
     h_flex,
     label::Label,
@@ -15,7 +16,7 @@ use gpui_kit::{
   },
   *,
 };
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 use ws_storage::{Profile, ProfileList, WindowMode, WindowPlacement};
 
 /// The profiles, loaded when first needed. Every change is written to `profiles.json` at once.
@@ -159,17 +160,70 @@ pub(crate) fn init(cx: &mut App) {
   });
 }
 
-/// The Profiles page of Settings: every profile with its actions.
+/// How many projects and connected accounts a profile has.
+#[derive(Clone, Copy, Default)]
+struct ProfileStats {
+  projects: usize,
+  accounts: usize,
+}
+
+/// The Profiles page of Settings: every profile as a card with what it holds, whether it is open, and its actions.
 pub(crate) struct ProfileManager {
   workspace: Entity<Workspace>,
+  /// What each profile holds, read off the interface thread; shown as soon as it arrives.
+  stats: HashMap<String, ProfileStats>,
+  /// What the stats were read for: the profiles and this window's project count, so that a change reads them again.
+  seen: (Vec<Profile>, usize),
+  _stats_task: Task<()>,
   _observer: Subscription,
 }
 
 impl ProfileManager {
   pub fn new(workspace: Entity<Workspace>, cx: &mut Context<Self>) -> Self {
-    let observer = cx.observe(&workspace, |_, _, cx| cx.notify());
-    Self { workspace, _observer: observer }
+    let observer = cx.observe(&workspace, |this, workspace, cx| {
+      let seen = (profile_list(cx).profiles, workspace.read(cx).project_list().projects.len());
+      if seen != this.seen {
+        this.seen = seen;
+        this.reload_stats(cx);
+      }
+      cx.notify();
+    });
+    let seen = (profile_list(cx).profiles, workspace.read(cx).project_list().projects.len());
+    let mut manager = Self { workspace, stats: HashMap::new(), seen, _stats_task: Task::ready(()), _observer: observer };
+    manager.reload_stats(cx);
+    manager
   }
+
+  /// Reads the projects and accounts of every profile in the background.
+  fn reload_stats(&mut self, cx: &mut Context<Self>) {
+    let profiles = profile_list(cx).profiles;
+    let work = cx.background_executor().spawn(async move {
+      profiles
+        .iter()
+        .map(|profile| {
+          let projects = ws_storage::ProjectList::load(&profile.projects_path()).projects.len();
+          let accounts = ws_hosting::Accounts::load_in(&profile.accounts_path(), profile.keychain_namespace()).items.len();
+          (profile.id.clone(), ProfileStats { projects, accounts })
+        })
+        .collect::<HashMap<_, _>>()
+    });
+    self._stats_task = cx.spawn(async move |this, cx| {
+      let stats = work.await;
+      let _ = this.update(cx, |this, cx| {
+        this.stats = stats;
+        cx.notify();
+      });
+    });
+  }
+}
+
+fn count(number: usize, noun: &str) -> String {
+  format!("{number} {noun}{}", if number == 1 { "" } else { "s" })
+}
+
+/// A small label after a profile's name: `tint` is its color.
+fn chip(text: &'static str, tint: Hsla) -> Div {
+  h_flex().px_1p5().rounded_md().bg(tint.opacity(0.14)).text_size(FONT_SIZE_SM).font_weight(FontWeight::MEDIUM).text_color(tint).child(text)
 }
 
 impl Render for ProfileManager {
@@ -178,44 +232,60 @@ impl Render for ProfileManager {
     let palette = colors(cx);
     let list = profile_list(cx);
     let current = self.workspace.read(cx).profile().id.clone();
-    let rows = list.profiles.iter().map(|profile| {
+    let open_elsewhere = other_open_profiles(cx);
+    let cards = list.profiles.iter().map(|profile| {
       let id = profile.id.clone();
       let is_current = id == current;
+      let is_open = is_current || open_elsewhere.contains(&id);
       let (open, rename, delete) = (id.clone(), id.clone(), id.clone());
+      let initial: SharedString = profile.name.trim().chars().take(1).flat_map(char::to_uppercase).collect::<String>().into();
+      let summary = match self.stats.get(&id) {
+        Some(stats) => format!("{} · {}", count(stats.projects, "project"), count(stats.accounts, "connected account")),
+        None => String::new(),
+      };
       h_flex()
         .id(SharedString::from(format!("profile-{id}")))
         .gap_3()
         .px_3()
-        .py_2()
+        .py_2p5()
         .items_center()
-        .rounded_md()
+        .rounded_lg()
+        .border_1()
+        .border_color(if is_current { theme.primary } else { palette.border })
         .bg(palette.surface_alt)
-        .child(Icon::empty().path("icons/user.svg").size_5().text_color(theme.muted_foreground))
+        .child(Avatar::new().name(initial).small().size(PROFILE_CARD_AVATAR))
         .child(
-          v_flex().flex_1().min_w_0().child(Label::new(profile.name.clone()).font_weight(FontWeight::SEMIBOLD)).child(
-            Label::new(if is_current {
-              "Used by this window"
-            } else if profile.is_default() {
-              "Default"
-            } else {
-              ""
-            })
-            .text_size(FONT_SIZE_SM)
-            .text_color(theme.muted_foreground),
-          ),
+          v_flex()
+            .flex_1()
+            .min_w_0()
+            .gap_0p5()
+            .child(
+              h_flex()
+                .gap_2()
+                .items_center()
+                .child(Label::new(profile.name.clone()).font_weight(FontWeight::SEMIBOLD).overflow_hidden().whitespace_nowrap().text_ellipsis())
+                .when(is_current, |row| row.child(chip("This window", theme.primary)))
+                .when(is_open && !is_current, |row| row.child(chip("Open", palette.new)))
+                .when(profile.is_default(), |row| row.child(chip("Default", theme.muted_foreground))),
+            )
+            .child(Label::new(summary).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground)),
         )
         .when(!is_current, |row| {
-          row.child(Button::new(SharedString::from(format!("profile-open-{id}"))).label("Open").small().outline().on_click(cx.listener(
-            move |_, _, _, cx| {
-              let id = open.clone();
-              cx.defer(move |cx| show_profile(id, cx));
-            },
-          )))
+          row.child(
+            Button::new(SharedString::from(format!("profile-open-{id}")))
+              .label(if is_open { "Switch to" } else { "Open" })
+              .small()
+              .outline()
+              .on_click(cx.listener(move |_, _, _, cx| {
+                let id = open.clone();
+                cx.defer(move |cx| show_profile(id, cx));
+              })),
+          )
         })
         .child(
           Button::new(SharedString::from(format!("profile-rename-{id}")))
             .ghost()
-            .xsmall()
+            .small()
             .icon(Icon::empty().path("icons/pencil.svg"))
             .tooltip("Rename")
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -226,7 +296,7 @@ impl Render for ProfileManager {
           row.child(
             Button::new(SharedString::from(format!("profile-delete-{id}")))
               .ghost()
-              .xsmall()
+              .small()
               .icon(Icon::empty().path("icons/trash.svg"))
               .tooltip("Delete this profile and its data")
               .on_click(cx.listener(move |this, _, window, cx| {
@@ -235,8 +305,8 @@ impl Render for ProfileManager {
           )
         })
     });
-    v_flex().gap_2().children(rows).child(
-      h_flex().child(
+    v_flex().gap_2().children(cards).child(
+      h_flex().pt_1().child(
         Button::new("profile-add")
           .label("Add profile…")
           .icon(Icon::empty().path("icons/plus.svg"))
@@ -247,3 +317,6 @@ impl Render for ProfileManager {
     )
   }
 }
+
+/// The avatar of a profile card: the Kit's small avatar (24 px) stretched, as in the activity bar, to sit beside two lines of text.
+const PROFILE_CARD_AVATAR: Pixels = px(32.);

@@ -109,6 +109,8 @@ windows of the same profile share their settings, windows of different profiles 
 - The **Profiles** menu lists every profile with a check beside the one the window in front shows. Choosing one brings its window
   forward or opens one. A profile can have only one window.
 - The Dock menu lists the profiles too.
+- **Settings → Profiles** shows each profile as a card: its avatar, how many projects and connected accounts it holds, and a mark for
+  **This window**, **Open** (a window of it is open) and **Default**. **Open** or **Switch to** brings its window forward.
 - **Add Profile…** and **Settings → Profiles** create, rename and delete profiles. A profile with an open window cannot be deleted.
 - Tokens of a non-default profile live in their own Keychain entries, so accounts are never shared between profiles.
 

@@ -263,9 +263,16 @@ impl SettingsWindow {
         .label(label)
         .small()
         .when(current == choice, |button| {
-          button.custom(
-            ButtonCustomVariant::new(cx).color(palette.accent).foreground(palette.on_accent).hover(palette.accent_hover).active(palette.accent_hover),
-          )
+          // The kit paints a custom button's own background at a fifth of its strength, so the fill is set apart.
+          button
+            .custom(
+              ButtonCustomVariant::new(cx)
+                .color(palette.accent)
+                .foreground(palette.on_accent)
+                .hover(palette.accent_hover)
+                .active(palette.accent_hover),
+            )
+            .bg(palette.accent)
         })
         .when(current != choice, |button| button.outline())
         .on_click(move |_, _, cx| store.update(cx, |preferences| preferences.theme = choice))
@@ -282,9 +289,16 @@ impl SettingsWindow {
         .label(label)
         .small()
         .when(current == choice, |button| {
-          button.custom(
-            ButtonCustomVariant::new(cx).color(palette.accent).foreground(palette.on_accent).hover(palette.accent_hover).active(palette.accent_hover),
-          )
+          // The kit paints a custom button's own background at a fifth of its strength, so the fill is set apart.
+          button
+            .custom(
+              ButtonCustomVariant::new(cx)
+                .color(palette.accent)
+                .foreground(palette.on_accent)
+                .hover(palette.accent_hover)
+                .active(palette.accent_hover),
+            )
+            .bg(palette.accent)
         })
         .when(current != choice, |button| button.outline())
         .on_click(move |_, _, cx| store.update(cx, |preferences| preferences.font = choice))

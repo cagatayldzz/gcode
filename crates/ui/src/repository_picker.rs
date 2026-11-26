@@ -101,7 +101,7 @@ impl Render for RepositoryPicker {
       let chosen = index == self.selected;
       Button::new(SharedString::from(format!("picker-account-{}", account.key())))
         .small()
-        .when(chosen, |button| button.custom(selected_style(cx)))
+        .when(chosen, |button| button.custom(selected_style(cx)).bg(cx.theme().primary))
         .when(!chosen, |button| button.ghost())
         .icon(Icon::empty().path(provider_icon(account.provider)))
         .label(account.label())
