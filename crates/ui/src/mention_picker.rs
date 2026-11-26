@@ -9,7 +9,7 @@ use gpui_kit::{
     h_flex,
     input::{InputEvent, InputState, MoveDown, MoveUp},
     label::Label,
-    scroll::ScrollableElement as _,
+    scroll::{Scrollbar, ScrollbarAxis},
     v_flex, ActiveTheme as _, Sizable as _,
   },
   *,
@@ -159,14 +159,16 @@ impl Render for MentionPicker {
       .child(if rows.is_empty() {
         Label::new("No project matches.").text_color(theme.muted_foreground).p_2().into_any_element()
       } else {
-        v_flex()
-          .id("mention-list")
-          .max_h(LIST_MAX_HEIGHT)
-          .overflow_y_scroll()
-          .track_scroll(&self.scroll)
-          .vertical_scrollbar(&self.scroll)
-          .gap_0p5()
-          .children(rows)
+        // The scrollbar sits over a frame that does not scroll, so it stays at the edge of the list instead of moving with the rows.
+        div()
+          .relative()
+          .child(v_flex().id("mention-list").max_h(LIST_MAX_HEIGHT).overflow_y_scroll().track_scroll(&self.scroll).gap_0p5().pr_3().children(rows))
+          .child(
+            div()
+              .absolute()
+              .inset_0()
+              .child(Scrollbar::new(&self.scroll).id("mention-scrollbar").axis(ScrollbarAxis::Vertical).viewport_from_layout()),
+          )
           .into_any_element()
       })
       .child(
