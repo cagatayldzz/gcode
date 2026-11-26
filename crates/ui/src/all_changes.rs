@@ -264,10 +264,18 @@ impl Render for AllChanges {
       return crate::components::skeleton_lines(16);
     }
     let state = diff.state().clone();
-    let files = state.read(cx).files();
+    let diff_state = state.read(cx);
+    let files = diff_state.files();
     let first_file = files.first().map(|file| file.path().clone());
-    let collapsed_with_next: HashSet<_> =
-      files.windows(2).map(|pair| pair[0].path()).filter(|path| state.read(cx).is_file_collapsed(path)).cloned().collect();
+    let mut collapsed_with_next = HashSet::new();
+    let mut after_expanded_file = HashSet::new();
+    for pair in files.windows(2) {
+      if diff_state.is_file_collapsed(pair[0].path()) {
+        collapsed_with_next.insert(pair[0].path().clone());
+      } else {
+        after_expanded_file.insert(pair[1].path().clone());
+      }
+    }
     let collapsed_headers = collapsed_with_next.clone();
     let view = cx.entity().downgrade();
     let layout = Rc::new(RefCell::new(FileHeaderLayout::default()));
@@ -299,6 +307,7 @@ impl Render for AllChanges {
         let path = file.path().clone();
         let has_top_border = first_file.as_ref() != Some(&path);
         let hide_bottom_border = collapsed_headers.contains(&path);
+        let show_transition = after_expanded_file.contains(&path);
         file_header(file, &header_view, cx).relative().child(
           canvas(
             move |bounds, window, cx| {
@@ -306,6 +315,12 @@ impl Render for AllChanges {
               let padding = window.rem_size() / 4.;
               let top_border = if has_top_border { FILE_HEADER_SEPARATOR } else { Pixels::ZERO };
               let offset = bounds.top() - padding - top_border - mask.bounds.top();
+              if show_transition {
+                // Tint the top padding after a diff body without moving the header or its controls.
+                let mut band = div().w_full().h_0p5().bg(cx.theme().border.opacity(0.4)).into_any_element();
+                band.layout_as_root(size(mask.bounds.size.width.into(), AvailableSpace::MinContent), window, cx);
+                window.defer_draw(band, point(mask.bounds.left(), bounds.top() - padding), 0, Some(mask));
+              }
               if hide_bottom_border {
                 // The following header already draws the separator. Paint over this row's bottom rule after the Kit draws it.
                 let mut cover = div().w_full().h_px().bg(cx.theme().background).into_any_element();

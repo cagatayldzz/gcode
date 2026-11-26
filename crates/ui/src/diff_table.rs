@@ -17,7 +17,7 @@ use gpui_kit::{
     h_flex,
     highlighter::HighlightTheme,
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
-    scroll::{ScrollableMask, Scrollbar},
+    scroll::{ScrollableMask, Scrollbar, ScrollbarMode},
     tooltip::Tooltip,
     ActiveTheme as _, Icon, IconName, Sizable as _, Theme,
   },
@@ -587,14 +587,13 @@ impl Render for DiffTable {
     }
     let rows = list(self.list.clone(), cx.processor(|this, ix: usize, _, cx| this.row(ix, cx)));
     let scrolls_sideways = !self.wrap;
-    // The strip is shown only while the rows are taller than the table.
-    let overflows = self.list.max_offset_for_scrollbar().y > px(0.);
     h_flex()
       .id("diff-table")
       .key_context("DiffTable")
       .track_focus(&self.focus)
       .on_action(cx.listener(|this, _: &CopySelection, _, cx| this.copy(cx)))
       .size_full()
+      .relative()
       .overflow_hidden()
       .bg(palette.background)
       .child(
@@ -615,7 +614,8 @@ impl Render for DiffTable {
           .when(scrolls_sideways, |table| table.child(ScrollableMask::new(Axis::Horizontal, &self.scroll_x).id("diff-horizontal-wheel")))
           .when(scrolls_sideways, |table| table.child(div().absolute().inset_0().child(Scrollbar::horizontal(&self.scroll_x)))),
       )
-      .when(overflows, |table| table.child(crate::components::scrollbar_strip(&self.list, "diff-scrollbar", cx)))
+      // Let the scrollbar measure overflow after the list has laid out its rows.
+      .child(div().absolute().inset_0().child(crate::components::slim_scrollbar(&self.list, "diff-scrollbar", cx).mode(ScrollbarMode::Always)))
       // A drag over the numbers or the text may end anywhere.
       .on_mouse_up(
         MouseButton::Left,
