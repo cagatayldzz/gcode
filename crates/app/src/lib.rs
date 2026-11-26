@@ -59,7 +59,7 @@ pub fn run() {
       KeyBinding::new("cmd-k", ClearBuffer, Some("Terminal")),
     ]);
     ws_ui::init(cx);
-    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_action(|_: &Quit, cx| cx.defer(ws_ui::quit));
     // The Profiles menu is handled by `ws_ui::init`.
     ws_ui::open_last_window(cx);
   });

@@ -129,6 +129,29 @@ pub fn open_last_window(cx: &mut App) {
   switch_profile(&id, cx);
 }
 
+/// Preserves unsaved text from every profile before closing the application.
+pub fn quit(cx: &mut App) {
+  let mut can_quit = true;
+  for handle in cx.windows() {
+    let Some(root) = handle.downcast::<gpui_kit::base::Root>() else { continue };
+    let result = root.update(cx, |root, window, cx| {
+      let Ok(workspace) = root.view().clone().downcast::<Workspace>() else { return true };
+      if let Err(error) = workspace.update(cx, |workspace, cx| workspace.flush_editor_recovery(cx)) {
+        use gpui_kit::component::WindowExt as _;
+
+        window.activate_window();
+        window.push_notification(crate::failure(format!("Could not preserve unsaved edits: {error}. Save your work before quitting.")), cx);
+        return false;
+      }
+      true
+    });
+    can_quit &= result.unwrap_or(false);
+  }
+  if can_quit {
+    cx.quit();
+  }
+}
+
 /// Brings forward a window that shows the profile, or opens one.
 fn switch_profile(id: &str, cx: &mut App) {
   let Some(profile) = profile_list(cx).get(id).cloned() else { return };

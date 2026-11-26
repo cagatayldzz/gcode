@@ -22,24 +22,30 @@ use gpui_kit::{
 };
 use std::{
   collections::{HashMap, HashSet},
-  fs, io,
+  fs,
+  io::{self, Read as _},
   ops::Range,
   path::Path,
   path::PathBuf,
   rc::Rc,
   sync::Arc,
-  time::{Duration, SystemTime},
+  time::Duration,
 };
 use ws_index::highlight::{Highlights, Language};
 
 mod definitions;
 pub(crate) mod git_changes;
 mod problems;
+mod recovery;
+mod save;
 
 pub(crate) use definitions::OpenLocation;
+pub(crate) use save::SaveOutcome;
 
 use problems::ProjectLanguage;
+use recovery::RecoveryWriter;
 use ws_language::{Problem, Server};
+use ws_storage::FileVersion;
 
 /// Files larger than this are not opened: the editor reads the whole text.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -91,11 +97,8 @@ struct ReadyFile {
   painted: bool,
   /// The text uses `\r\n` line endings.
   crlf: bool,
-  /// The modification time and size the file on disk had when its text was read; a save that finds other values knows
-  /// that something else wrote the file.
-  disk: Option<(SystemTime, u64)>,
-  /// A save was refused because the file changed on disk; the next save overwrites it.
-  overwrite_armed: bool,
+  /// Disk contents the buffer was based on, including the original version of a recovered draft.
+  disk: Option<FileVersion>,
   _changes: Subscription,
   /// Repaints the status bar when the cursor moves.
   _cursor: Subscription,
@@ -301,6 +304,9 @@ pub(crate) struct EditorPanel {
   search_reveal: Option<(EntityId, usize)>,
   report_active: bool,
   replacement_files: std::collections::HashSet<PathBuf>,
+  recovery: Option<Arc<RecoveryWriter>>,
+  recovery_pending: HashSet<PathBuf>,
+  _recovery_task: Option<Task<()>>,
   /// The run of "Add Next Occurrence" in progress: the file, the selection it started from and where the last occurrence ended.
   occurrences: Option<(PathBuf, Range<usize>, usize)>,
   /// The canonical root approved for language servers while this project is active.
@@ -330,6 +336,10 @@ impl EditorPanel {
 
   pub fn has_tabs(&self) -> bool {
     !self.tabs.items.is_empty()
+  }
+
+  pub(crate) fn has_unsaved_tabs(&self) -> bool {
+    self.tabs.items.iter().any(|path| self.is_dirty(path))
   }
 
   fn with_read_only(read_only: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -370,18 +380,18 @@ impl EditorPanel {
             if metadata.len() > MAX_FILE_BYTES {
               return None;
             }
-            let text = fs::read_to_string(&path).ok()?;
-            (text != original).then_some((path, id, original, text))
+            let (text, version) = read_editor_text(&path).ok()?;
+            (text != original).then_some((path, id, original, text, version))
           })
           .collect::<Vec<_>>()
       });
       let changes = work.await;
       if this
         .update_in(cx, |this, window, cx| {
-          for (path, id, original, text) in changes {
+          for (path, id, original, text, version) in changes {
             if this.files.get(&path).is_some_and(|file| !file.dirty && file.state.entity_id() == id && file.state.read(cx).value() == original) {
               let cursor = this.files[&path].state.read(cx).cursor_position();
-              this.install_text(&path, text, window, cx);
+              this.install_text(&path, text, Some(version), window, cx);
               this.files[&path].state.update(cx, |state, cx| state.set_cursor_position(cursor, window, cx));
               cx.notify();
             }
@@ -412,6 +422,9 @@ impl EditorPanel {
       search_reveal: None,
       report_active: false,
       replacement_files: Default::default(),
+      recovery: None,
+      recovery_pending: HashSet::new(),
+      _recovery_task: None,
       occurrences: None,
       trusted_language_root: None,
       languages: HashMap::new(),
@@ -746,12 +759,12 @@ impl EditorPanel {
     if metadata.len() > limit {
       return Err(format!("{} is too large to open here.", display_name(path)));
     }
-    let text = fs::read_to_string(path).map_err(|_| format!("{} is not a text file.", display_name(path)))?;
-    self.install_text(path, text, window, cx);
+    let (text, version) = read_editor_text(path).map_err(|error| format!("Could not read {}: {error}", display_name(path)))?;
+    self.install_text(path, text, Some(version), window, cx);
     Ok(())
   }
 
-  fn install_text(&mut self, path: &Path, text: String, window: &mut Window, cx: &mut Context<Self>) {
+  fn install_text(&mut self, path: &Path, text: String, disk: Option<FileVersion>, window: &mut Window, cx: &mut Context<Self>) {
     let language = language_for(path);
     let crlf = text.contains("\r\n");
     // The colors of a line-based language are worked out here, before the editor exists, and the editor only reads them.
@@ -778,6 +791,9 @@ impl EditorPanel {
         if let Some(file) = this.files.get_mut(&owner) {
           file.dirty = true;
           this.tabs.keep_open(&owner);
+          if this.recovery.is_some() {
+            this.recovery_pending.insert(owner.clone());
+          }
           this.schedule_problem_sync(&owner, window, cx);
           cx.notify();
         }
@@ -787,23 +803,10 @@ impl EditorPanel {
     let minimap = cx.new(|cx| Minimap::new(state.clone(), language, cx));
     self.files.insert(
       path.to_path_buf(),
-      ReadyFile {
-        state,
-        minimap,
-        git,
-        git_preview: None,
-        dirty: false,
-        painted: false,
-        crlf,
-        disk: disk_stamp(path),
-        overwrite_armed: false,
-        _changes: changes,
-        _cursor: cursor,
-        find: None,
-      },
+      ReadyFile { state, minimap, git, git_preview: None, dirty: false, painted: false, crlf, disk, _changes: changes, _cursor: cursor, find: None },
     );
     self.touch(path);
-    self.evict();
+    self.evict(path);
     self.sync_problems(path, window, cx);
     if let Some(state) = self.files.get(path).map(|file| file.state.clone()) {
       self.enable_definitions(path, &state, cx);
@@ -817,7 +820,8 @@ impl EditorPanel {
 
   pub fn update_replaced_text(&mut self, path: &Path, text: &str, window: &mut Window, cx: &mut Context<Self>) {
     if self.files.contains_key(path) && !self.is_dirty(path) {
-      self.install_text(path, text.to_owned(), window, cx);
+      let version = FileVersion::from_contents(path, text.as_bytes());
+      self.install_text(path, text.to_owned(), Some(version), window, cx);
       cx.notify();
     }
     if let Some(format) = PreviewFormat::for_path(path).filter(|_| self.images.contains_key(path)) {
@@ -846,14 +850,14 @@ impl EditorPanel {
   }
 
   /// Drops the least recently used editors beyond the limit, never the open file or one with unsaved changes.
-  fn evict(&mut self) {
+  fn evict(&mut self, installing: &Path) {
     // The files in tabs, in this project or another, stay.
     let tabs = std::iter::once(&self.tabs).chain(self.saved.values());
     let open: Vec<PathBuf> = tabs.flat_map(|tabs| tabs.items.iter()).cloned().collect();
     let mut index = 0;
     while self.files.len() > MAX_READY_FILES && index < self.recent.len() {
       let path = self.recent[index].clone();
-      let keep = open.contains(&path) || self.files.get(&path).is_some_and(|file| file.dirty);
+      let keep = path == installing || open.contains(&path) || self.files.get(&path).is_some_and(|file| file.dirty);
       if keep {
         index += 1;
       } else {
@@ -867,7 +871,9 @@ impl EditorPanel {
   /// Drops what the editor remembers about a file whose changes were thrown away: its text (also unsaved edits), and
   /// its tab.
   pub fn forget(&mut self, path: &Path, cx: &mut Context<Self>) {
-    self.files.remove(path);
+    if self.files.remove(path).is_some_and(|file| file.dirty) && self.recovery.is_some() {
+      self.recovery_pending.insert(path.to_path_buf());
+    }
     self.release_problems(path);
     self.images.remove(path);
     self.svg_source.remove(path);
@@ -963,30 +969,6 @@ impl EditorPanel {
     true
   }
 
-  /// Writes the open file to disk.
-  pub fn save(&mut self, cx: &mut Context<Self>) -> io::Result<bool> {
-    let Some(path) = self.tabs.current().filter(|_| !self.report_active).cloned() else { return Ok(false) };
-    let path = path.as_path();
-    // Saving is a decision to work on the file: a preview tab becomes a regular one even when nothing was typed.
-    self.tabs.keep_open(path);
-    cx.notify();
-    let Some(file) = self.files.get_mut(path) else { return Ok(false) };
-    if self.replacement_files.contains(path) {
-      return Err(io::Error::other("Wait for the project replacement to finish."));
-    }
-    let on_disk = disk_stamp(path);
-    if on_disk.is_some() && on_disk != file.disk && !file.overwrite_armed {
-      file.overwrite_armed = true;
-      return Err(io::Error::other("The file changed on disk since it was opened. Save again to overwrite it."));
-    }
-    ws_storage::write_atomic(path, file.state.read(cx).value().to_string().as_bytes())?;
-    file.disk = disk_stamp(path);
-    file.overwrite_armed = false;
-    file.dirty = false;
-    cx.notify();
-    Ok(true)
-  }
-
   pub fn is_dirty(&self, path: &Path) -> bool {
     self.files.get(path).is_some_and(|file| file.dirty)
   }
@@ -1036,10 +1018,18 @@ impl EditorPanel {
 /// How many spaces one indent is: the editor's default.
 const INDENT_WIDTH: usize = 2;
 
-/// The modification time and the size of a file, or `None` when it cannot be read.
-fn disk_stamp(path: &Path) -> Option<(SystemTime, u64)> {
-  let metadata = fs::metadata(path).ok()?;
-  Some((metadata.modified().ok()?, metadata.len()))
+pub(crate) fn read_editor_text(path: &Path) -> io::Result<(String, FileVersion)> {
+  let target = path.canonicalize()?;
+  if !fs::metadata(&target)?.is_file() {
+    return Err(io::Error::new(io::ErrorKind::InvalidInput, "The destination is not a regular file."));
+  }
+  let mut text = String::new();
+  fs::File::open(&target)?.take(MAX_DEFINITION_FILE_BYTES + 1).read_to_string(&mut text)?;
+  if text.len() as u64 > MAX_DEFINITION_FILE_BYTES {
+    return Err(io::Error::other("The disk file is too large to open in the editor."));
+  }
+  let version = FileVersion::from_contents(&target, text.as_bytes());
+  Ok((text, version))
 }
 
 fn display_name(path: &Path) -> String {

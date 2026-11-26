@@ -27,10 +27,12 @@ Click a file to open it in a tab. The tabs sit in a row on top, and the shown on
 
 - **Tabs** — click to show, **×** to close. A click on a file that is already open shows its tab. The Explorer selects the file of the
   shown tab.
-- **Saving** — `⌘S` writes the shown file; a `•` after the name means unsaved changes. If the file changed on disk after gCode read
-  it, the first save is refused and the next one overwrites.
-- **Closing keeps your text** — closing a tab keeps its unsaved text in memory; opening the file again brings it back. Text is only
-  written by saving. Each project keeps its own tabs.
+- **Saving** — `⌘S` writes the shown file. A `•` after the name means unsaved changes. If another process changes or deletes the file,
+  use **Compare Changes**, **Reload and Discard Edits**, **Save As…**, or explicitly choose **Overwrite** or **Recreate File**. Save As
+  creates a new file. A later disk change requires a fresh decision.
+- **Recovering edits** — closing a tab keeps its unsaved text. On restart, the profile reopens drafts in their project tabs, including
+  drafts for files deleted from disk. The app checkpoints edits in the background and flushes pending drafts on `⌘Q`. After a crash,
+  the most recent checkpoint is recovered.
 - **Limits** — other than images, files must be text and at most 2 MB, or they are refused with a notification.
 - `⌘W` closes the shown tab; pressed again, the remaining tabs from the last to the first. It never closes the window. The red close button minimizes the window instead, so terminals and agents keep running; `⌘Q` quits the app.
 

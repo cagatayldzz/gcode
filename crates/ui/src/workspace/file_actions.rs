@@ -207,7 +207,7 @@ impl Workspace {
       window.push_notification(Notification::info("Wait for the current file operation to finish."), cx);
       return;
     }
-    if paths.iter().any(|path| self.editor_panel.read(cx).is_dirty_under(path)) {
+    if paths.iter().any(|path| self.editor_panel.read(cx).is_dirty_under(path) || self.editor_saves.keys().any(|open| open.starts_with(path))) {
       window.push_notification(crate::failure("Save the files before deleting them."), cx);
       return;
     }
@@ -260,7 +260,7 @@ impl Workspace {
     }
     let moves_source = !matches!(edit, FileEdit::Copy { .. });
     if moves_source {
-      if self.editor_panel.read(cx).is_dirty_under(&path) {
+      if self.editor_panel.read(cx).is_dirty_under(&path) || self.editor_saves.keys().any(|open| open.starts_with(&path)) {
         window.push_notification(crate::failure("Save the file before moving or deleting it."), cx);
         return;
       }

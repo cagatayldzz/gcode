@@ -148,7 +148,11 @@ impl Workspace {
         let active = this.projects.active.as_ref() == Some(&root);
         for (path, file) in &discarded {
           if let Some(path) = path {
-            this.editor_panel.update(cx, |editor, cx| editor.forget(path, cx));
+            this.editor_panel.update(cx, |editor, cx| {
+              if !editor.is_dirty(path) {
+                editor.forget(path, cx);
+              }
+            });
           }
           if active {
             this.excluded.remove(file);
@@ -209,7 +213,11 @@ impl Workspace {
               this.selected_change.clone().filter(|open| files.contains(open) && job_scope::lands_here(this.projects.active.as_deref(), &root))
             {
               if let Some(path) = ws_git::workdir_file(&root, &open) {
-                this.editor_panel.update(cx, |editor, cx| editor.forget(&path, cx));
+                this.editor_panel.update(cx, |editor, cx| {
+                  if !editor.is_dirty(&path) {
+                    editor.forget(&path, cx);
+                  }
+                });
               }
             }
             this.clear_commit_draft(&root, window, cx);

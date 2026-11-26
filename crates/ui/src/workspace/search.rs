@@ -183,7 +183,7 @@ impl Workspace {
     if self.projects.active.as_ref() != Some(&root) || self.replacement_task.is_some() || self.file_mutation_pending() {
       return;
     }
-    if edits.iter().any(|edit| self.editor_panel.read(cx).is_dirty(&edit.path)) {
+    if edits.iter().any(|edit| self.editor_panel.read(cx).is_dirty(&edit.path) || self.editor_saves.contains_key(&edit.path)) {
       window.push_notification(crate::failure("Save the affected editor tabs and search again before replacing."), cx);
       return;
     }

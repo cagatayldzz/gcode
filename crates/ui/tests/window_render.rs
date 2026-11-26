@@ -171,3 +171,51 @@ fn the_command_palette_opens_and_draws_its_list(cx: &mut TestAppContext) {
   draw_every_window(cx);
   assert_eq!(cx.windows().len(), 1);
 }
+
+#[gpui_kit::test]
+fn recovered_edits_open_as_a_tab_and_require_approval_to_overwrite_a_changed_disk_file(cx: &mut TestAppContext) {
+  let data = scratch_data_dir();
+  let path = data.path().join("notes.txt");
+  fs::write(&path, "before").unwrap();
+  let base = ws_storage::FileVersion::read(&path).unwrap();
+  ws_storage::RecoveryJournal::new(data.path()).store(&ws_storage::Draft::new(&path, "recovered edit".into(), base)).unwrap();
+  fs::write(&path, "external edit").unwrap();
+  cx.update(|cx| {
+    gpui_kit::init(cx);
+    ws_ui::init(cx);
+    ws_ui::open_window(Profile::default_profile(), cx);
+  });
+  draw_every_window(cx);
+  let handle = cx.windows()[0];
+  cx.update_window(handle, |_, window, cx| {
+    window.render_frame(cx);
+    assert!(window.try_find(gpui_kit::SharedString::from(format!("close-tab:{}", path.display()))).is_some());
+  })
+  .unwrap();
+
+  cx.dispatch_action(handle, ws_ui::SaveFile);
+  draw_every_window(cx);
+  cx.update_window(handle, |_, window, cx| {
+    window.render_frame(cx);
+    assert!(window.try_find("overwrite").is_some());
+  })
+  .unwrap();
+  assert_eq!(fs::read_to_string(&path).unwrap(), "external edit");
+
+  fs::write(&path, "second external edit").unwrap();
+  cx.update_window(handle, |_, window, cx| window.click("overwrite", cx)).unwrap();
+  draw_every_window(cx);
+  cx.update_window(handle, |_, window, cx| {
+    window.render_frame(cx);
+    assert!(window.try_find("overwrite").is_some());
+  })
+  .unwrap();
+  assert_eq!(fs::read_to_string(&path).unwrap(), "second external edit");
+
+  cx.update_window(handle, |_, window, cx| window.click("overwrite", cx)).unwrap();
+  draw_every_window(cx);
+  assert_eq!(fs::read_to_string(&path).unwrap(), "recovered edit");
+  cx.executor().advance_clock(std::time::Duration::from_millis(500));
+  cx.run_until_parked();
+  assert!(ws_storage::RecoveryJournal::new(data.path()).load().unwrap().0.is_empty());
+}

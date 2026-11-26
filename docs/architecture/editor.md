@@ -59,9 +59,11 @@ Two systems cover all languages:
 ## Files and saving
 
 - Only text files up to 2 MB open (images are previewed). A refused file shows a notification.
-- The editor saves with `write_atomic` (a temporary file replaces the target in one step) and **refuses the first save when the file changed
-  on disk since it was read**; the next save overwrites.
-- Closing a tab keeps its text in the cache; only saving writes to disk.
+- A background save compares the current file's resolved path and content hash with the editor's base version, or with the disk version
+  approved in a conflict dialog. Storage stages the write atomically and rechecks the approved version before replacing the target.
+  Deleted files can be recreated only after confirmation and only while the path is vacant.
+- Closing a tab keeps its editor in memory. The owning panel checkpoints changed drafts in the profile's private recovery directory
+  and reopens them as dirty tabs with the original base version. A successful save or explicit discard removes its draft.
 
 ## Minimap
 

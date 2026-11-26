@@ -15,7 +15,8 @@ Everything gCode owns lives in one data directory:
 ├── projects.json            ┐
 ├── accounts.json            ├─ the "default" profile keeps these directly here
 ├── preferences.json         ┘
-└── profiles/<id>/           another profile: its own projects.json, accounts.json, preferences.json
+├── editor-recovery/         private unsaved editor snapshots for the default profile
+└── profiles/<id>/           another profile: its own projects.json, accounts.json, preferences.json, editor-recovery/
 ```
 
 ## Crash reports
@@ -35,7 +36,7 @@ Files gCode owns are written with `ws_storage::write_json`:
 3. the previous file stays as **`<name>.bak`**.
 
 A file that is not valid JSON is set aside as **`<name>.corrupt`** and the backup is read instead. A user's file in the editor is saved with
-`write_atomic` — and the first save is refused if the file changed on disk since it was read.
+`write_if_current`, which rechecks the approved disk version after preparing the temporary file.
 
 ## Profiles
 
@@ -67,6 +68,11 @@ file; `ProjectIndex::open` uses the saved one while nothing changed, else walks 
 | `projects.json` | `ProjectList` (project paths with name, icon, color and category; the categories and whether each is folded; favorites and each project's starred branches; the active project) | when a project is added or selected, or a category changes |
 | `accounts.json` | `Accounts` (service, host, organization and user name; **never a token**) | when an account is connected or disconnected, or an issue is set or cleared |
 | `preferences.json` | `Preferences` | on each settings change |
+| `editor-recovery/<path-hash>.json` | Unsaved text, file path and original disk version | background checkpoints about every 500 ms while changes are pending, and before normal quit |
+
+Recovery snapshots contain the draft text. They are written atomically with file mode 0600 in a directory created with mode 0700.
+Saving or explicitly discarding a draft queues its removal. Restarting a profile restores its drafts in the editor, without writing to
+their original files. Force quit or a crash restores only changes that reached a checkpoint.
 
 ### `preferences.json`
 

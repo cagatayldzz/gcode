@@ -27,7 +27,7 @@ use crate::{
   updates::{AppUpdate, UpdatePanel},
   AddLineComment, AddProfile, AddProject, CheckForUpdates, ClearBuffer, ClosePane, CloseTab, DisableProjectLanguageServers, EditProfiles,
   EnableProjectLanguageServers, FindInFile, MentionProjects, NewClaude, NewCodex, NewTerminal, OpenSettings, RemoveLineComment, ReplaceInFile,
-  SaveFile, SearchProject, SelectNextOccurrence, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleLineComment, ToggleProjectSettings,
+  SearchProject, SelectNextOccurrence, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleLineComment, ToggleProjectSettings,
   ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{base::Selectable as _, prelude::FluentBuilder as _};
@@ -76,6 +76,7 @@ mod branches;
 mod changes;
 mod command_palette;
 mod commit;
+mod editor_save;
 mod entries;
 mod file_actions;
 mod git;
@@ -531,6 +532,8 @@ pub struct Workspace {
   recovering: bool,
   dock: Entity<DockArea>,
   editor_panel: Entity<EditorPanel>,
+  editor_saves: HashMap<PathBuf, Task<()>>,
+  save_dialog_task: Option<Task<()>>,
   file_actions: FileActions,
   /// The shells of every project that has been opened, in tabs and split panes, kept alive while another project is shown.
   terminal_tabs: HashMap<PathBuf, Arrangement<Entity<Terminal>>>,
@@ -549,6 +552,8 @@ impl Workspace {
     let placement = Rc::new(Cell::new(None));
     let (dock, _skin) = DockSkin::dock_area("workspace-dock", Some(1), window, cx);
     let editor_panel = cx.new(|cx| EditorPanel::new(window, cx));
+    let projects = ProjectList::load(&profile.projects_path());
+    editor_panel.update(cx, |editor, cx| editor.start_recovery(&profile, &projects, window, cx));
     dock.update(cx, |area, cx| {
       area.set_center(DockLayout::h_split().child(DockLayout::tabs().panel_view(panel_handle(editor_panel.clone()), cx), None), window, cx);
     });
@@ -569,7 +574,7 @@ impl Workspace {
     let project_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Find a project"));
     let compare_filter = cx.new(|cx| InputState::new(window, cx).placeholder("Select Branch to Compare…"));
     let mut this = Self {
-      projects: ProjectList::load(&profile.projects_path()),
+      projects,
       profile,
       settings: settings.clone(),
       git: None,
@@ -685,8 +690,11 @@ impl Workspace {
       window_save: Task::ready(()),
       placement: placement.clone(),
       _window_bounds: cx.observe_window_bounds(window, |this, window, cx| this.remember_window(window, cx)),
-      _placement_on_quit: cx.on_app_quit(|this, _| {
+      _placement_on_quit: cx.on_app_quit(|this, cx| {
         this.save_placement_now();
+        if let Err(error) = this.editor_panel.update(cx, |editor, cx| editor.flush_recovery(cx)) {
+          eprintln!("Could not checkpoint unsaved edits: {error}");
+        }
         async {}
       }),
       _placement_on_close: {
@@ -743,6 +751,8 @@ impl Workspace {
       ],
       dock,
       editor_panel: editor_panel.clone(),
+      editor_saves: HashMap::new(),
+      save_dialog_task: None,
       file_actions: FileActions::default(),
       terminal_tabs: HashMap::new(),
       _terminal_subscriptions: Vec::new(),
@@ -905,23 +915,11 @@ impl Workspace {
     }
   }
 
-  /// Saves the file open in the editor.
-  pub fn save_file(&mut self, _: &SaveFile, window: &mut Window, cx: &mut Context<Self>) {
-    if self.file_actions.focused_side(window, cx).is_some() {
-      return;
+  pub(crate) fn flush_editor_recovery(&self, cx: &mut Context<Self>) -> std::io::Result<()> {
+    if !self.editor_saves.is_empty() {
+      return Err(std::io::Error::other("Wait for the current save to finish"));
     }
-    let file = self.editor_panel.read(cx).active_file().map(Path::to_path_buf);
-    match self.editor_panel.update(cx, |editor, cx| editor.save(cx)) {
-      Ok(saved) => {
-        if let (true, Some(file)) = (saved, file) {
-          crate::recent::record_file(&self.profile.id, &file, cx);
-        }
-        cx.notify();
-      }
-      Err(error) => window.push_notification(crate::failure(format!("Could not save: {error}")), cx),
-    }
-    // The file's own change shows up in the Git list without waiting for the next read.
-    self.refresh_in_background(cx);
+    self.editor_panel.update(cx, |editor, cx| editor.flush_recovery(cx))
   }
 }
 
@@ -973,7 +971,7 @@ impl Render for Workspace {
       self.dock.clone().into_any_element()
     };
     // The terminals take the whole main area, like a terminal window; the sidebar stays beside it.
-    let main_area = if self.active_project_missing() {
+    let main_area = if self.active_project_missing() && !self.editor_panel.read(cx).has_unsaved_tabs() {
       self.render_missing_project(cx)
     } else if let Some(settings) = &self.project_settings {
       settings.clone().into_any_element()

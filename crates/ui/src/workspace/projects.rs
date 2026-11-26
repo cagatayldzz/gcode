@@ -537,7 +537,7 @@ impl Workspace {
     if target.exists() {
       return Err(format!("{} already exists", display_path(&target)));
     }
-    if self.editor_panel.read(cx).has_unsaved_under(path) {
+    if self.editor_panel.read(cx).has_unsaved_under(path) || self.editor_saves.keys().any(|open| open.starts_with(path)) {
       return Err("save or discard the open files first".into());
     }
     std::fs::rename(path, &target).map_err(|error| error.to_string())?;

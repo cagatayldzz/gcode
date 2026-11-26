@@ -52,7 +52,7 @@ use gpui_kit::*;
 pub use assets::Assets;
 pub use mention_picker::{MentionChoice, MentionPicker, ProjectsChosen};
 pub use menus::menus;
-pub use profiles::{open_last_window, open_window};
+pub use profiles::{open_last_window, open_window, quit};
 pub use workspace::{Workspace, TOOLBAR_HEIGHT};
 
 actions!(
