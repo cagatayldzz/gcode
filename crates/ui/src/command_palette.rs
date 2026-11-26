@@ -3,9 +3,10 @@
 //! A command is an `Action`, the same one a button, a menu item or a key runs, so the palette adds no command of its own.
 
 use crate::{
-  components::display_path, theme::FONT_SIZE_SM, AddLineComment, AddProfile, AddProject, CheckForUpdates, CloseTab, EditProfiles, FindInFile,
-  GoToFile, NewClaude, NewCodex, NewTerminal, OpenSettings, RemoveLineComment, ReplaceInFile, SaveFile, SearchProject, SelectNextOccurrence,
-  ShowShortcuts, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleLineComment, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
+  components::display_path, theme::FONT_SIZE_SM, AddLineComment, AddProfile, AddProject, CheckForUpdates, CloseTab, DisableProjectLanguageServers,
+  EditProfiles, EnableProjectLanguageServers, FindInFile, GoToFile, NewClaude, NewCodex, NewTerminal, OpenSettings, RemoveLineComment, ReplaceInFile,
+  SaveFile, SearchProject, SelectNextOccurrence, ShowShortcuts, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleLineComment,
+  ToggleProjectSettings, ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{
   component::{
@@ -84,6 +85,8 @@ fn commands() -> Vec<Entry> {
     entry("New Claude Session", &["agent", "ai"], NewClaude),
     entry("Toggle All Changes", &["git", "diff", "review"], ToggleAllChanges),
     entry("Toggle Project Settings", &["index", "project"], ToggleProjectSettings),
+    entry("Enable Language Servers for This Project", &["trust", "lsp", "typescript"], EnableProjectLanguageServers),
+    entry("Disable Language Servers for This Project", &["revoke", "trust", "lsp"], DisableProjectLanguageServers),
     entry("View Repository on Host", &["github", "gitlab", "browser", "remote"], ViewOnHost),
     entry("Add Profile", &["account", "workspace"], AddProfile),
     entry("Edit Profiles", &["account", "workspace"], EditProfiles),

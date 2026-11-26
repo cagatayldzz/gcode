@@ -4,6 +4,42 @@ use super::*;
 use std::cell::Cell;
 
 impl Workspace {
+  pub(super) fn confirm_enable_language_servers(&mut self, _: &EnableProjectLanguageServers, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(project) = self.projects.active.clone() else {
+      window.push_notification(crate::failure("Open a project before enabling language servers."), cx);
+      return;
+    };
+    let Ok(root) = project.canonicalize() else {
+      window.push_notification(crate::failure("Could not locate the project folder. Reopen the project and try again."), cx);
+      return;
+    };
+    let description: SharedString = format!(
+      "Language servers can run code from {}. Enable them only if you trust this project. Approval ends when you switch projects or close this window.",
+      display_path(&root)
+    )
+    .into();
+    let workspace = cx.entity();
+    window.open_alert_dialog(cx, move |alert, _, _| {
+      let (workspace, project, root) = (workspace.clone(), project.clone(), root.clone());
+      alert.title("Enable language servers?").description(description.clone()).confirm().ok_text("Enable").on_ok(move |_, window, cx| {
+        workspace.update(cx, |this, cx| {
+          if this.projects.active.as_ref() == Some(&project) && project.canonicalize().ok().as_ref() == Some(&root) {
+            this.editor_panel.update(cx, |editor, cx| editor.enable_language_servers(project.clone(), root.clone(), window, cx));
+            window.push_notification(Notification::info("Language servers enabled for this project."), cx);
+          } else {
+            window.push_notification(crate::failure("The project folder changed. Enable language servers again for the current project."), cx);
+          }
+        });
+        true
+      })
+    });
+  }
+
+  pub(super) fn disable_language_servers(&mut self, _: &DisableProjectLanguageServers, window: &mut Window, cx: &mut Context<Self>) {
+    self.editor_panel.update(cx, |editor, cx| editor.disable_language_servers(cx));
+    window.push_notification(Notification::info("Project language servers disabled."), cx);
+  }
+
   /// Adds the repositories directly inside the projects folder that are not listed yet, and says how many.
   pub(crate) fn add_projects_from_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let folder = self.new_project_dir(cx);

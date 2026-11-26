@@ -46,6 +46,10 @@ Highlighting comes from tree-sitter grammars through GPUI Kit, plus a few line-b
 
 The status bar shows the language of the open file.
 
+To use JavaScript and TypeScript diagnostics and Go to Definition, open the Command Palette with ⇧⌘P and choose
+**Enable Language Servers for This Project**. Confirm only for a project whose code you trust. Approval lasts until you switch
+projects or close the window. **Disable Language Servers for This Project** ends it immediately.
+
 ### Images
 
 SVG and macOS ICNS files show an image preview. For an SVG, use **Source** to edit it and **Preview** to see the result.

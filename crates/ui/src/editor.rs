@@ -303,6 +303,8 @@ pub(crate) struct EditorPanel {
   replacement_files: std::collections::HashSet<PathBuf>,
   /// The run of "Add Next Occurrence" in progress: the file, the selection it started from and where the last occurrence ended.
   occurrences: Option<(PathBuf, Range<usize>, usize)>,
+  /// The canonical root approved for language servers while this project is active.
+  trusted_language_root: Option<PathBuf>,
   /// The language server of each project (by its root) that has one, or `None` when it would not start.
   languages: HashMap<PathBuf, Option<ProjectLanguage>>,
   /// The server each open file belongs to, or `None` when no server handles the file.
@@ -411,6 +413,7 @@ impl EditorPanel {
       report_active: false,
       replacement_files: Default::default(),
       occurrences: None,
+      trusted_language_root: None,
       languages: HashMap::new(),
       servers: HashMap::new(),
       problems: HashMap::new(),
@@ -423,7 +426,7 @@ impl EditorPanel {
   /// Switches to another project's editor area: the tabs of the project being left are put away and come back with
   /// it; a project not seen before starts with none.
   pub fn switch_project(&mut self, from: Option<PathBuf>, to: Option<PathBuf>, cx: &mut Context<Self>) {
-    self.root = to.clone();
+    self.set_root(to.clone(), cx);
     self.search_report = None;
     self.report_active = false;
     let current = std::mem::take(&mut self.tabs);
@@ -444,6 +447,7 @@ impl EditorPanel {
   /// Forgets every editor and tab of the project in `root`, which is moving: its paths are about to change.
   pub fn close_project(&mut self, root: &Path, active: bool, cx: &mut Context<Self>) {
     if active {
+      self.set_root(None, cx);
       self.tabs = Tabs::default();
       self.search_report = None;
       self.report_active = false;
@@ -472,7 +476,10 @@ impl EditorPanel {
   }
 
   /// Tells the panel which project is open, so the path above the text starts below the project's folder.
-  pub fn set_root(&mut self, root: Option<PathBuf>) {
+  pub fn set_root(&mut self, root: Option<PathBuf>, cx: &mut Context<Self>) {
+    if self.root != root {
+      self.disable_language_servers(cx);
+    }
     self.root = root;
   }
 

@@ -39,10 +39,14 @@ pub fn language_id(path: &Path) -> Option<&'static str> {
   }
 }
 
-/// Finds the language server for a file: the TypeScript the project itself installed (its native server, then a
-/// `typescript-language-server`), looking in the file's folders and above, then a `typescript-language-server` on the path.
-pub fn find_server(file: &Path) -> Option<Server> {
+/// Looks for the project's TypeScript server, then an installed server on PATH. Both can load project code, so
+/// discovery requires the canonical workspace root approved by the user and a file inside it.
+pub fn find_server(file: &Path, trusted_root: Option<&Path>) -> Option<Server> {
   language_id(file)?;
+  let root = trusted_root?;
+  let file = file.canonicalize().ok()?;
+  let parent = file.parent().filter(|parent| parent.starts_with(root))?;
+  let mut ancestors = parent.ancestors().take_while(|folder| folder.starts_with(root));
   let platform = format!(
     "typescript-{}-{}",
     match std::env::consts::OS {
@@ -57,7 +61,7 @@ pub fn find_server(file: &Path) -> Option<Server> {
     }
   );
   let executable = |name: &str| if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
-  for folder in file.ancestors().skip(1) {
+  for folder in ancestors.clone() {
     let native = folder.join("node_modules/@typescript").join(&platform).join("lib").join(executable("tsc"));
     if native.is_file() {
       return Some(Server { program: native, args: vec!["--lsp".into(), "--stdio".into()], root: folder.to_path_buf() });
@@ -67,19 +71,16 @@ pub fn find_server(file: &Path) -> Option<Server> {
       return Some(Server { program: local, args: vec!["--stdio".into()], root: folder.to_path_buf() });
     }
   }
+  let fallback_root =
+    ancestors.find(|folder| ["tsconfig.json", "package.json", ".git"].iter().any(|marker| folder.join(marker).exists())).unwrap_or(parent);
   let mut folders: Vec<PathBuf> = std::env::var_os("PATH").map(|path| std::env::split_paths(&path).collect()).unwrap_or_default();
   folders.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
-  folders.into_iter().map(|folder| folder.join("typescript-language-server")).find(|candidate| candidate.is_file()).map(|program| Server {
-    program,
-    args: vec!["--stdio".into()],
-    root: project_root(file),
-  })
-}
-
-/// The folder a file's project starts at: the nearest one above it with a `tsconfig.json`, `package.json` or `.git`.
-fn project_root(file: &Path) -> PathBuf {
-  let marked = file.ancestors().skip(1).find(|folder| ["tsconfig.json", "package.json", ".git"].iter().any(|marker| folder.join(marker).exists()));
-  marked.or_else(|| file.parent()).unwrap_or(file).to_path_buf()
+  folders
+    .into_iter()
+    .filter(|folder| folder.is_absolute())
+    .map(|folder| folder.join("typescript-language-server"))
+    .find(|candidate| candidate.is_file())
+    .map(|program| Server { program, args: vec!["--stdio".into()], root: fallback_root.to_path_buf() })
 }
 
 #[derive(Default)]

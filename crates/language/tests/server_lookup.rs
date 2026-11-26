@@ -29,15 +29,42 @@ fn the_project_local_language_server_is_found_above_the_file() {
   fs::write(bin.join("typescript-language-server"), "").unwrap();
   let file = dir.path().join("src/deep/file.ts");
   fs::create_dir_all(file.parent().unwrap()).unwrap();
-  let server = find_server(&file).expect("the local server");
-  assert_eq!(server.program, bin.join("typescript-language-server"));
+  fs::write(&file, "").unwrap();
+  let root = dir.path().canonicalize().unwrap();
+  assert_eq!(find_server(&file, None), None);
+  let server = find_server(&file, Some(&root)).expect("the local server");
+  assert_eq!(server.program, root.join("node_modules/.bin/typescript-language-server"));
   assert_eq!(server.args, ["--stdio"]);
-  assert_eq!(server.root, dir.path());
+  assert_eq!(server.root, root);
+}
+
+#[test]
+fn trust_does_not_include_parent_folders_or_files_linked_outside_the_project() {
+  let dir = tempfile::tempdir().unwrap();
+  let parent = dir.path().canonicalize().unwrap();
+  let root = parent.join("project");
+  let bin = parent.join("node_modules/.bin");
+  fs::create_dir_all(&root).unwrap();
+  fs::create_dir_all(&bin).unwrap();
+  let parent_server = bin.join("typescript-language-server");
+  fs::write(&parent_server, "").unwrap();
+  let file = root.join("local.ts");
+  fs::write(&file, "").unwrap();
+  if let Some(server) = find_server(&file, Some(&root)) {
+    assert_ne!(server.program, parent_server);
+    assert!(server.root.starts_with(&root));
+  }
+
+  let outside = parent.join("outside.ts");
+  fs::write(&outside, "").unwrap();
+  let link = root.join("linked.ts");
+  std::os::unix::fs::symlink(outside, &link).unwrap();
+  assert_eq!(find_server(&link, Some(&root)), None);
 }
 
 #[test]
 fn files_of_other_languages_have_no_server() {
-  assert_eq!(find_server("/tmp/a.rs".as_ref()), None);
+  assert_eq!(find_server("/tmp/a.rs".as_ref(), Some("/tmp".as_ref())), None);
 }
 
 #[test]

@@ -70,9 +70,11 @@ the editor's scroll position, so dragging it never blocks typing.
 
 ## Problems
 
-`EditorPanel` tells a language server about JavaScript and TypeScript files (`ws-language`). `find_server` looks above the file for the
+`EditorPanel` tells a language server about JavaScript and TypeScript files (`ws-language`) after the user approves the active project's
+canonical root. That approval is local to the window and ends on project switch or explicit revocation. Revocation drops the sessions,
+pending sync tasks and diagnostics. `find_server` requires the file to resolve inside the approved root and looks up to that root for the
 project's own TypeScript (`node_modules/@typescript/typescript-<platform>/lib/tsc --lsp --stdio`, then `node_modules/.bin/typescript-language-server`),
-then for a `typescript-language-server` on the path; a file with no server just shows no problems. One server runs per project folder
+then for a `typescript-language-server` on the path. One server runs per discovered project folder
 (`languages`), as a child process with a reader thread, and the editor never waits for it:
 
 - a file is sent when its editor is built, and again 300 ms after typing pauses (`SYNC_DELAY`);

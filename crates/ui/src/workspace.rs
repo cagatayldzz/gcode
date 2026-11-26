@@ -25,9 +25,10 @@ use crate::{
   terminal_layout::{Arrangement, Direction, Node},
   theme::{apply_theme, colors, FONT_SIZE, FONT_SIZE_SM},
   updates::{AppUpdate, UpdatePanel},
-  AddLineComment, AddProfile, AddProject, CheckForUpdates, ClearBuffer, ClosePane, CloseTab, EditProfiles, FindInFile, MentionProjects, NewClaude,
-  NewCodex, NewTerminal, OpenSettings, RemoveLineComment, ReplaceInFile, SaveFile, SearchProject, SelectNextOccurrence, SplitDown, SplitRight,
-  ToggleAgents, ToggleAllChanges, ToggleLineComment, ToggleProjectSettings, ToggleTerminal, ViewOnHost,
+  AddLineComment, AddProfile, AddProject, CheckForUpdates, ClearBuffer, ClosePane, CloseTab, DisableProjectLanguageServers, EditProfiles,
+  EnableProjectLanguageServers, FindInFile, MentionProjects, NewClaude, NewCodex, NewTerminal, OpenSettings, RemoveLineComment, ReplaceInFile,
+  SaveFile, SearchProject, SelectNextOccurrence, SplitDown, SplitRight, ToggleAgents, ToggleAllChanges, ToggleLineComment, ToggleProjectSettings,
+  ToggleTerminal, ViewOnHost,
 };
 use gpui_kit::{base::Selectable as _, prelude::FluentBuilder as _};
 use gpui_kit::{
@@ -751,9 +752,10 @@ impl Workspace {
       }),
       // Changes made in another app (an editor, another Git client, a terminal) show up as soon as the window is back.
       _editor: cx.observe(&editor_panel, |_, _, cx| cx.notify()),
-      _active_tab: cx.subscribe_in(&editor_panel, window, |this, _, shown: &ActiveTab, window, cx| {
+      _active_tab: cx.subscribe_in(&editor_panel, window, |this, editor, shown: &ActiveTab, window, cx| {
         match shown {
           ActiveTab::File(path) => {
+            editor.update(cx, |editor, cx| editor.sync_shown_file(path, window, cx));
             this.selected_entry = Some(path.clone());
             this.selected_change = None;
             // The Explorer shows where the file is: its folders open and the tree scrolls to it only if it is out of sight.
@@ -1051,6 +1053,8 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::search_project))
       .on_action(cx.listener(Self::go_to_file))
       .on_action(cx.listener(Self::open_command_palette))
+      .on_action(cx.listener(Self::confirm_enable_language_servers))
+      .on_action(cx.listener(Self::disable_language_servers))
       .on_action(cx.listener(Self::open_search_results))
       .on_action(cx.listener(Self::new_terminal))
       .on_action(cx.listener(Self::toggle_terminal))

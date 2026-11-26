@@ -22,6 +22,36 @@ pub(crate) struct FileProblems {
 }
 
 impl EditorPanel {
+  pub(crate) fn sync_shown_file(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    if !self.servers.contains_key(path) {
+      self.sync_problems(path, window, cx);
+    }
+  }
+
+  pub(crate) fn enable_language_servers(&mut self, project: PathBuf, root: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    self.set_root(Some(project), cx);
+    if self.trusted_language_root.as_ref() == Some(&root) {
+      return;
+    }
+    self.disable_language_servers(cx);
+    self.trusted_language_root = Some(root);
+    if let Some(path) = self.active_file().map(Path::to_path_buf) {
+      self.sync_problems(&path, window, cx);
+    }
+    cx.notify();
+  }
+
+  pub(crate) fn disable_language_servers(&mut self, cx: &mut Context<Self>) {
+    self.trusted_language_root = None;
+    self.sync_tasks.clear();
+    self.servers.clear();
+    self.languages.clear();
+    for (path, _) in std::mem::take(&mut self.problems) {
+      self.take_problems(path, Vec::new(), cx);
+    }
+    cx.notify();
+  }
+
   /// Whether a language server is running for some project: only then do zero problems mean something.
   pub fn has_language_server(&self) -> bool {
     self.languages.values().any(Option::is_some)
@@ -58,11 +88,12 @@ impl EditorPanel {
 
   /// Tells the language server the text of a file, starting the project's server the first time.
   pub(super) fn sync_problems(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
-    if self.read_only {
+    if self.read_only || self.trusted_language_root.is_none() || ws_language::language_id(path).is_none() {
       return;
     }
     let Some(file) = self.files.get(path) else { return };
-    let server = self.servers.entry(path.to_path_buf()).or_insert_with(|| ws_language::find_server(path)).clone();
+    let server =
+      self.servers.entry(path.to_path_buf()).or_insert_with(|| ws_language::find_server(path, self.trusted_language_root.as_deref())).clone();
     let Some(server) = server else { return };
     let text = file.state.read(cx).value();
     if !self.languages.contains_key(&server.root) {
@@ -75,8 +106,13 @@ impl EditorPanel {
   }
 
   fn start_language(server: &Server, window: &mut Window, cx: &mut Context<Self>) -> Option<ProjectLanguage> {
-    // A server that does not start leaves the editor as it was: there is nothing to report to the user.
-    let (session, mut updates) = Session::start(server).ok()?;
+    let (session, mut updates) = match Session::start(server) {
+      Ok(started) => started,
+      Err(error) => {
+        window.push_notification(crate::failure(format!("Could not start the language server: {error}")), cx);
+        return None;
+      }
+    };
     let task = cx.spawn_in(window, async move |this, cx| {
       while let Some(update) = updates.next().await {
         if this.update_in(cx, |this, _, cx| this.take_problems(update.path, update.problems, cx)).is_err() {
@@ -89,6 +125,9 @@ impl EditorPanel {
 
   /// Tells the language server again after typing pauses.
   pub(super) fn schedule_problem_sync(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    if self.trusted_language_root.is_none() || ws_language::language_id(path).is_none() {
+      return;
+    }
     let owner = path.to_path_buf();
     let task = cx.spawn_in(window, async move |this, cx| {
       cx.background_executor().timer(SYNC_DELAY).await;
