@@ -157,7 +157,7 @@ impl Workspace {
     let accent = theme.primary;
     let palette = colors(cx);
     let picker = self.render_branch_picker(&git.branch, cx);
-    let sync = git.sync.as_ref().map(|sync| {
+    let sync = git.sync.as_ref().filter(|_| git.operation == ws_git::Operation::Idle).map(|sync| {
       let (icon, title, count) = if !sync.upstream {
         ("icons/upload.svg", "Publish branch".to_string(), 0)
       } else if sync.behind > 0 {
@@ -184,7 +184,7 @@ impl Workspace {
         .h_12()
         .w_56()
         .rounded_none()
-        .disabled(self.remote_work.is_some() || git.merging || self.merge_task.is_some())
+        .disabled(self.remote_work.is_some() || git.operation != ws_git::Operation::Idle || self.merge_task.is_some())
         .child(
           h_flex()
             .w_full()
@@ -252,6 +252,45 @@ impl Workspace {
           // The slot is measured: the branch menu opens at its bottom left corner.
           let slot = self.branch_trigger_bounds.clone();
           div().h_12().border_r_1().border_color(palette.border).child(picker).on_prepaint(move |bounds, _, _| slot.set(bounds))
+        })
+        .when(git.operation != ws_git::Operation::Idle, |bar| {
+          let operation = git.operation;
+          let busy = self.merge_task.is_some();
+          bar.child(
+            h_flex()
+              .px_2()
+              .gap_2()
+              .child(Label::new(format!("{} in progress", operation.label())))
+              .when(operation == ws_git::Operation::Merge || operation.can_resume(), |row| {
+                row.child(
+                  Button::new("continue-git-operation")
+                    .small()
+                    .disabled(busy)
+                    .label(if operation == ws_git::Operation::Merge { "Resolve" } else { "Continue" })
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::ContinueGitOperation), cx)),
+                )
+              })
+              .when(operation.can_resume(), |row| {
+                row
+                  .child(
+                    Button::new("skip-git-operation")
+                      .small()
+                      .disabled(busy)
+                      .label("Skip")
+                      .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::SkipGitOperation), cx)),
+                  )
+                  .child(
+                    Button::new("abort-git-operation")
+                      .small()
+                      .disabled(busy)
+                      .label("Abort")
+                      .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::AbortGitOperation), cx)),
+                  )
+              })
+              .when(!operation.can_resume() && operation != ws_git::Operation::Merge, |row| {
+                row.child(Label::new("Finish in the terminal").text_color(theme.muted_foreground))
+              }),
+          )
         })
         .children(sync.map(|button| {
           // While a push, pull or fetch runs, a soft fill of the accent color grows across the button from left to right as
@@ -686,12 +725,19 @@ impl Workspace {
               .small()
               .w_full()
               .label(label)
-              .disabled(chosen == 0 || !summary_filled || self.committing || self.discarding || git.merging || self.merge_task.is_some())
+              .disabled(
+                chosen == 0
+                  || !summary_filled
+                  || self.committing
+                  || self.discarding
+                  || git.operation != ws_git::Operation::Idle
+                  || self.merge_task.is_some(),
+              )
               .on_click(cx.listener(|this, _, window, cx| this.commit_changes(window, cx))),
           )
           .context_menu({
             let workspace = workspace.clone();
-            let disabled = self.committing || self.discarding || git.merging || self.merge_task.is_some();
+            let disabled = self.committing || self.discarding || git.operation != ws_git::Operation::Idle || self.merge_task.is_some();
             let root = self.projects.active.clone().unwrap_or_default();
             move |menu, window, cx| {
               let (amend_workspace, author_workspace, author_root) = (workspace.clone(), workspace.clone(), root.clone());
@@ -1199,7 +1245,11 @@ impl Workspace {
               Button::new("compare-merge")
                 .primary()
                 .w_full()
-                .label(if self.git.as_ref().is_some_and(|git| git.merging) { "Resolve merge conflicts" } else { "Create a merge commit" })
+                .label(if self.git.as_ref().is_some_and(|git| git.operation == ws_git::Operation::Merge) {
+                  "Resolve merge conflicts"
+                } else {
+                  "Create a merge commit"
+                })
                 .loading(self.merge_task.is_some())
                 .disabled(self.merge_task.is_some() || self.remote_work.is_some())
                 .on_click(cx.listener(|this, _, window, cx| this.merge_compare(window, cx))),

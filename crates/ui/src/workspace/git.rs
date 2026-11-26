@@ -3,11 +3,102 @@
 use super::*;
 
 impl Workspace {
+  pub(super) fn continue_git_operation(&mut self, _: &crate::ContinueGitOperation, window: &mut Window, cx: &mut Context<Self>) {
+    if let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) {
+      if git.operation == ws_git::Operation::Merge {
+        self.merge_compare(window, cx);
+      } else if git.operation.can_resume() {
+        self.run_git_operation(root, git.operation, ws_git::OperationStep::Continue, window, cx);
+      }
+    }
+  }
+
+  pub(super) fn skip_git_operation(&mut self, _: &crate::SkipGitOperation, window: &mut Window, cx: &mut Context<Self>) {
+    self.confirm_git_operation(ws_git::OperationStep::Skip, window, cx);
+  }
+
+  pub(super) fn abort_git_operation(&mut self, _: &crate::AbortGitOperation, window: &mut Window, cx: &mut Context<Self>) {
+    self.confirm_git_operation(ws_git::OperationStep::Abort, window, cx);
+  }
+
+  fn confirm_git_operation(&self, step: ws_git::OperationStep, window: &mut Window, cx: &mut Context<Self>) {
+    let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
+    let operation = git.operation;
+    if !operation.can_resume() {
+      return;
+    }
+    let (title, description, button) = if step == ws_git::OperationStep::Abort {
+      (
+        format!("Abort {}?", operation.label().to_lowercase()),
+        "Git will try to return to the state before the operation. Any work resolving this operation may be lost.",
+        "Abort",
+      )
+    } else {
+      ("Skip the current commit?".into(), "Git will leave out the current commit and discard any work resolving its conflicts.", "Skip")
+    };
+    let title: SharedString = title.into();
+    let workspace = cx.entity().downgrade();
+    window.open_alert_dialog(cx, move |alert, _, _| {
+      let (workspace, root) = (workspace.clone(), root.clone());
+      alert.title(title.clone()).description(description).confirm().ok_text(button).ok_variant(ButtonVariant::Danger).on_ok(move |_, window, cx| {
+        let _ = workspace.update(cx, |this, cx| this.run_git_operation(root.clone(), operation, step, window, cx));
+        true
+      })
+    });
+  }
+
+  fn run_git_operation(
+    &mut self,
+    root: PathBuf,
+    operation: ws_git::Operation,
+    step: ws_git::OperationStep,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
+    if self.projects.active.as_ref() != Some(&root)
+      || self.merge_task.is_some()
+      || self.remote_work.is_some()
+      || self.committing
+      || self.discarding
+      || self.stash_task.is_some()
+      || self.switching_branch.is_some()
+    {
+      return;
+    }
+    if self.editor_panel.read(cx).has_unsaved_under(&root) || self.editor_saves.keys().any(|path| path.starts_with(&root)) {
+      window.push_notification(crate::failure("Save the affected editor files before resuming the Git operation."), cx);
+      return;
+    }
+    let work = cx.background_executor().spawn({
+      let root = root.clone();
+      async move { ws_git::resume_operation(&root, operation, step) }
+    });
+    self.merge_task = Some(cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.merge_task = None;
+        this.settle_job(&root, cx);
+        match result {
+          Ok(ws_git::Operation::Idle) => {
+            let result = if step == ws_git::OperationStep::Abort { "aborted" } else { "finished" };
+            window.push_notification(Notification::info(this.say_where(&root, format!("{} {result}.", operation.label()))), cx);
+          }
+          Ok(remaining) => {
+            window.push_notification(Notification::info(this.say_where(&root, format!("{} is still in progress.", remaining.label()))), cx)
+          }
+          Err(message) => window.push_notification(crate::failure(this.say_where(&root, message)), cx),
+        }
+        cx.notify();
+      });
+    }));
+    cx.notify();
+  }
+
   /// Does what the toolbar's button says: pulls when the remote is ahead, pushes (or publishes) when the branch is, else fetches.
   /// The button shows what git reports while it works.
   pub(super) fn sync_remote(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let (Some(root), Some(sync)) = (self.projects.active.clone(), self.git.as_ref().and_then(|git| git.sync.clone())) else { return };
-    if self.remote_work.is_some() || self.merge_task.is_some() || self.git.as_ref().is_some_and(|git| git.merging) {
+    if self.remote_work.is_some() || self.merge_task.is_some() || self.git.as_ref().is_some_and(|git| git.operation != ws_git::Operation::Idle) {
       return;
     }
     let remote = sync.remote.clone();
@@ -408,7 +499,10 @@ impl Workspace {
     if self.merge_task.is_some() || self.remote_work.is_some() || self.committing || self.discarding {
       return;
     }
-    let pending = git.merging;
+    let pending = git.operation == ws_git::Operation::Merge;
+    if !pending && git.operation != ws_git::Operation::Idle {
+      return;
+    }
     let branch = self.compare.as_ref().map(|view| view.branch.clone());
     if !pending && branch.is_none() {
       return;

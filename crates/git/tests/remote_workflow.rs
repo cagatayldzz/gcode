@@ -99,7 +99,7 @@ fn a_conflicting_pull_leaves_a_merge_to_resolve() {
 
   assert!(error.to_lowercase().contains("conflict"), "{error}");
   let summary = ws_git::summary(&remote.mine).unwrap();
-  assert!(summary.merging);
+  assert_eq!(summary.operation, ws_git::Operation::Merge);
   let state = ws_git::read_merge(&remote.mine).unwrap();
   assert_eq!(state.files.len(), 1);
   assert_eq!(state.files[0].path, "a.txt");
@@ -288,7 +288,7 @@ fn merging_over_uncommitted_changes_to_the_same_file_is_refused_and_loses_nothin
 
   assert!(error.contains("overwritten"), "{error}");
   assert_eq!(fs::read_to_string(remote.mine.join("a.txt")).unwrap(), "one\ntwo\nthree\nmine\n");
-  assert!(!ws_git::summary(&remote.mine).unwrap().merging);
+  assert_eq!(ws_git::summary(&remote.mine).unwrap().operation, ws_git::Operation::Idle);
 }
 
 #[cfg(unix)]
@@ -332,4 +332,58 @@ fn a_configured_pre_push_hook_reports_stdout_and_can_block_the_push() {
   assert!(progress.iter().any(|line| line == diagnostic), "{progress:?}");
   assert!(error.contains(diagnostic), "{error}");
   assert_eq!(ws_git::summary(&remote.mine).unwrap().sync.unwrap().ahead, 1);
+}
+
+#[test]
+fn branch_stashes_survive_subsequent_stashes_and_a_no_op() {
+  let remote = Remote::new("multiple-stashes");
+  let path = &remote.mine;
+  fs::write(path.join("a.txt"), "first edit\n").unwrap();
+  git(path, &["stash", "push", "-m", "!!app-stash<main>"]);
+  let first = ws_git::stash_ids(path, "main").unwrap()[0].clone();
+  fs::write(path.join("a.txt"), "second edit\n").unwrap();
+  ws_git::stash_changes(path, "main").unwrap();
+  let ids = ws_git::stash_ids(path, "main").unwrap();
+  assert_eq!(ids.len(), 2);
+  assert_eq!(ids[1], first);
+
+  ws_git::stash_changes(path, "main").unwrap();
+  assert_eq!(ws_git::stash_ids(path, "main").unwrap(), ids);
+
+  fs::write(path.join("a.txt"), "terminal edit\n").unwrap();
+  git(path, &["stash", "push", "-m", "terminal stash"]);
+  let terminal_stash = git(path, &["rev-parse", "refs/stash"]);
+  ws_git::restore_stash_by_id(path, "main", &first).unwrap();
+  assert_eq!(fs::read_to_string(path.join("a.txt")).unwrap(), "first edit\n");
+  assert_eq!(ws_git::stash_ids(path, "main").unwrap(), [ids[0].clone()]);
+  assert_eq!(git(path, &["rev-parse", "refs/stash"]), terminal_stash);
+  assert!(ws_git::discard_stash_by_id(path, "main", &first).is_err());
+  assert_eq!(ws_git::stash_ids(path, "main").unwrap(), [ids[0].clone()]);
+}
+
+#[test]
+fn a_pull_rebase_conflict_blocks_unrelated_writes_and_can_be_aborted() {
+  let remote = Remote::new("operation-rebase");
+  commit_file(&remote.mine, "a.txt", "local conflict\n", "local work");
+  let old = git(&remote.mine, &["rev-parse", "HEAD"]);
+  commit_file(&remote.other, "a.txt", "remote conflict\n", "remote work");
+  ws_git::push(&remote.other, None, |_| {}).unwrap();
+  git(&remote.mine, &["config", "pull.rebase", "true"]);
+
+  assert!(ws_git::pull(&remote.mine, None, |_| {}).unwrap_err().contains("stopped during rebase"));
+  assert_eq!(ws_git::summary(&remote.mine).unwrap().operation, ws_git::Operation::Rebase);
+  assert!(ws_git::create_branch(&remote.mine, "blocked").unwrap_err().contains("Rebase in progress"));
+  assert!(ws_git::discard_changes(&remote.mine, Path::new("a.txt")).unwrap_err().contains("Rebase in progress"));
+  assert!(ws_git::resume_operation(&remote.mine, ws_git::Operation::Revert, ws_git::OperationStep::Abort).is_err());
+
+  assert_eq!(ws_git::resume_operation(&remote.mine, ws_git::Operation::Rebase, ws_git::OperationStep::Abort).unwrap(), ws_git::Operation::Idle);
+  assert_eq!(git(&remote.mine, &["rev-parse", "HEAD"]), old);
+  assert_eq!(fs::read_to_string(remote.mine.join("a.txt")).unwrap(), "local conflict\n");
+
+  assert!(ws_git::pull(&remote.mine, None, |_| {}).is_err());
+  fs::write(remote.mine.join("a.txt"), "resolved\n").unwrap();
+  git(&remote.mine, &["add", "--", "a.txt"]);
+  assert_eq!(ws_git::resume_operation(&remote.mine, ws_git::Operation::Rebase, ws_git::OperationStep::Continue).unwrap(), ws_git::Operation::Idle);
+  assert_eq!(git(&remote.mine, &["rev-parse", "HEAD^"]), git(&remote.other, &["rev-parse", "HEAD"]));
+  assert_eq!(fs::read_to_string(remote.mine.join("a.txt")).unwrap(), "resolved\n");
 }

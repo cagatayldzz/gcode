@@ -82,10 +82,10 @@ If the working tree has changes, choosing another branch asks what to do with th
 
 | Choice | What happens |
 | --- | --- |
-| **Leave My Changes** | Everything (untracked files included) is stashed under the branch you are leaving. The stash is named after that branch, and a newer stash of the same branch replaces the older one only after it was created. |
-| **Bring My Changes** | The changes are stashed, the branch is switched, and they are applied on the new branch. **If they collide** with that branch, they stay safely in the stash and the message says so. Nothing is lost. |
+| **Leave My Changes** | Everything (untracked files included) is stashed under the branch you are leaving. Each stash is kept separately, including earlier stashes on the same branch. |
+| **Bring My Changes** | The changes are stashed, the branch is switched, and they are applied on the new branch. **If they collide** with that branch, the entry stays in the stash. Review the working tree before trying again. |
 
-When you switch to a branch that has changes stashed on it, gCode asks **Restore / Discard / Not Now**.
+When you switch to a branch with stashed changes, the stash list opens. Choose **Restore** or **Discard** beside the entry you want. You can also open it for your current branch with **Show Branch Stashes** in the Command Palette.
 
 Without changes, the switch happens immediately. A plain safe checkout never overwrites anything: when files are in the way the
 message says *"Your changes would be overwritten by switching to …"*.
@@ -126,4 +126,4 @@ While a merge is in progress, committing, switching branches and syncing are dis
 
 ## Stashes, in short
 
-gCode uses Git's stash for **Leave/Bring My Changes**, naming each entry `!!app-stash<branch>`. Your own stashes are never touched.
+**Leave/Bring My Changes** uses Git’s stash. You can also inspect these entries with `git stash list` in the terminal.

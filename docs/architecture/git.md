@@ -29,7 +29,8 @@ explicit user action.**
 | **History** | `history`, `file_history`, `commit_detail`, `recent_authors` |
 | **Commit** | `commit`, `amend_commit`, `undo_commit`, `discard_changes`, `create_tag`, `add_to_gitignore` |
 | **Branches** | `branch_entries`, `create_branch`, `switch_branch`, `switch_branch_with`, `delete_branch`, `delete_remote_branch`, `rename_branch`, `branch_from_commit`, `upstream_remote` |
-| **Stash** | `stash_changes`, `has_stash`, `restore_stash`, `discard_stash` |
+| **Stash** | `stash_changes`, `stash_ids`, `restore_stash_by_id`, `discard_stash_by_id` |
+| **Operation state** | `operation`, `resume_operation` |
 | **Remote** | `fetch`, `pull`, `push`, `clone`, `remote_url`, `set_remote_url` |
 | **Compare & merge** | `compare_choices`, `compare`, `start_merge`, `read_merge`, `MergeState::{resolve, undo, finish}` |
 | **History actions** | `revert_commit`, `cherry_pick` |
@@ -80,8 +81,10 @@ is created without updating HEAD and the branch is moved afterwards). A commit a
 let args = if rebase_configured { ["pull"] } else { ["pull", "--no-rebase", "--no-edit"] };
 ```
 
-If the command fails and the repository is in the `Merge` state, the error says there are conflicts and the merge stays in progress for the
-resolver. (git prints `CONFLICT` on stdout, which gCode does not read; the repository state is the reliable signal.)
+The repository state distinguishes an interrupted merge from a rebase. The Git toolbar opens the merge resolver or offers
+Continue, Skip and Abort for rebase, cherry-pick and revert. Resolve and stage conflicts before continuing. Bisect and patch
+application are shown as active operations with terminal guidance. Commit, amend, undo, branch switching and Git discard
+check the state again before changing the repository.
 
 ### Switching branches
 
@@ -89,18 +92,20 @@ resolver. (git prints `CONFLICT` on stdout, which gCode does not read; the repos
  switch_branch(name)            safe checkout; a remote-only name first gets a tracking branch
  switch_branch_with(name, Leave | Bring)
     no changes?          → switch_branch
-    stash_changes(current)           "!!app-stash<current>"  (untracked included)
-    switch_branch(name)  fails?      → restore_stash(current); return the error
-    Bring: restore_stash(current)    fails? → "…stay stashed on <current>: <why>"
+    create stash(current)           untracked files included; capture the new stash ID
+    switch_branch(name)  fails?      → attempt to restore that stash on the original branch
+    Bring                            → apply that stash and restore its index
 ```
 
-A stash entry is named `!!app-stash<branch>`; a newer stash for the same branch replaces the older one **only after the new one exists**, so a
-failure never loses work. User-made stashes are never touched.
+New stashes retain all earlier entries. The branch list recognizes existing `!!app-stash<branch>` markers. Restore uses
+the selected stash commit ID. After successful application, the current reflog selector is found again before dropping
+that entry. A no-op stash push does not select an older entry. Git's stash reflog is shared with the terminal.
 
 ### Revert and cherry-pick
 
-Both require a clean working tree and a clean repository state. Each runs the `git` program; on failure it runs `git <command> --abort` and,
-for cherry-pick, switches back to the original branch. The error names the conflicted files and says **Nothing was changed**.
+Both require a clean working tree and an idle repository. A conflicting Git command is aborted. Cherry-pick also attempts
+to return to the original branch or detached commit. If the abort or branch restoration fails, the error reports that
+failure and the toolbar shows any operation still in progress.
 
 ### Merge
 

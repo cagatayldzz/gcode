@@ -2,7 +2,7 @@
 //! uncommitted changes when switching.
 
 use super::Credentials;
-use git2::{BranchType, Repository, RepositoryState};
+use git2::{BranchType, Repository};
 use std::{
   collections::HashSet,
   path::Path,
@@ -198,9 +198,7 @@ pub fn has_changes(path: &Path) -> bool {
 /// the stash and says so, so nothing is lost).
 pub fn switch_branch_with(path: &Path, name: &str, changes: Changes) -> Result<(), String> {
   let repository = Repository::discover(path).map_err(message)?;
-  if repository.state() == RepositoryState::Merge {
-    return Err("Finish or abort the current merge first.".into());
-  }
+  super::operation::require_idle(&repository)?;
   let current = repository.head().ok().and_then(|head| head.shorthand().ok().map(str::to_string)).unwrap_or_default();
   if !has_changes(path) {
     return super::switch_branch(path, name);
@@ -208,16 +206,12 @@ pub fn switch_branch_with(path: &Path, name: &str, changes: Changes) -> Result<(
   if !branch_entries(path)?.iter().any(|entry| entry.name == name) {
     return Err(format!("There is no branch named {name}."));
   }
-  stash_changes(path, &current)?;
+  let stashed = push_stash(path, &current)?;
   if let Err(error) = super::switch_branch(path, name) {
-    // Put everything back: a switch that failed must not leave the changes hidden.
-    let _ = restore_stash(path, &current);
-    return Err(error);
+    return Err(restore_after_failure(path, &current, stashed.as_deref(), error));
   }
-  if changes == Changes::Bring {
-    if let Err(error) = restore_stash(path, &current) {
-      return Err(format!("Switched to {name}, but your changes could not be applied and stay stashed on {current}: {error}"));
-    }
+  if let (Changes::Bring, Some(id)) = (changes, stashed) {
+    restore_stash_by_id(path, &current, &id).map_err(|error| format!("Switched to {name}. {error}"))?;
   }
   Ok(())
 }
@@ -232,10 +226,9 @@ pub fn create_branch_with(path: &Path, name: &str, changes: Changes) -> Result<(
   if changes == Changes::Bring || !has_changes(path) {
     return super::create_branch(path, name);
   }
-  stash_changes(path, &current)?;
+  let stashed = push_stash(path, &current)?;
   if let Err(error) = super::create_branch(path, name) {
-    let _ = restore_stash(path, &current);
-    return Err(error);
+    return Err(restore_after_failure(path, &current, stashed.as_deref(), error));
   }
   Ok(())
 }
@@ -244,40 +237,105 @@ fn stash_message(branch: &str) -> String {
   format!("{STASH_MARK}{branch}>")
 }
 
-/// Stashes every change, untracked files included, as the changes of `branch`. Replaces an earlier stash of the same branch only
-/// once the new one exists, so nothing is lost if it fails.
+/// Adds a new branch stash, including untracked files, and retains previous entries.
 pub fn stash_changes(path: &Path, branch: &str) -> Result<(), String> {
-  let previous = stash_index(path, branch)?;
-  checked(git(path, &["stash", "push", "--include-untracked", "-m", &stash_message(branch)])?)?;
-  if let Some(index) = previous {
-    // The older stash moved one place down when the new one went on top.
-    checked(git(path, &["stash", "drop", &format!("stash@{{{}}}", index + 1)])?)?;
-  }
-  Ok(())
+  push_stash(path, branch).map(|_| ())
 }
 
-fn stash_index(path: &Path, branch: &str) -> Result<Option<usize>, String> {
-  let listing = checked(git(path, &["stash", "list", "--format=%gd%x09%s"])?)?;
-  let wanted = stash_message(branch);
+fn push_stash(path: &Path, branch: &str) -> Result<Option<String>, String> {
+  use std::sync::atomic::{AtomicU64, Ordering};
+  use std::time::SystemTime;
+
+  static NEXT: AtomicU64 = AtomicU64::new(0);
+  let repository = Repository::discover(path).map_err(message)?;
+  super::operation::require_idle(&repository)?;
+  let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_err(|error| error.to_string())?.as_nanos();
+  let label = format!("{}-{time}-{} {}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed), stash_message(branch));
+  checked(git(path, &["stash", "push", "--include-untracked", "-m", &label])?)?;
+  let suffix = format!(": {label}");
+  Ok(stash_list(path)?.into_iter().find(|entry| entry.subject.ends_with(&suffix)).map(|entry| entry.id))
+}
+
+struct Stash {
+  id: String,
+  selector: String,
+  subject: String,
+}
+
+fn stash_list(path: &Path) -> Result<Vec<Stash>, String> {
+  let listing = checked(git(path, &["stash", "list", "--format=%H%x09%gd%x09%s"])?)?;
   Ok(
-    listing.lines().filter_map(|line| line.split_once('\t')).enumerate().find(|(_, (_, subject))| subject.ends_with(&wanted)).map(|(index, _)| index),
+    listing
+      .lines()
+      .filter_map(|line| {
+        let mut fields = line.splitn(3, '\t');
+        Some(Stash { id: fields.next()?.into(), selector: fields.next()?.into(), subject: fields.next()?.into() })
+      })
+      .collect(),
   )
 }
 
-/// Whether changes were stashed on this branch by [`stash_changes`].
+fn branch_stashes(path: &Path, branch: &str) -> Result<Vec<Stash>, String> {
+  let wanted = stash_message(branch);
+  Ok(stash_list(path)?.into_iter().filter(|entry| entry.subject.ends_with(&wanted)).collect())
+}
+
+/// Stable commit IDs of this branch's app stashes, newest first.
+pub fn stash_ids(path: &Path, branch: &str) -> Result<Vec<String>, String> {
+  Ok(branch_stashes(path, branch)?.into_iter().map(|entry| entry.id).collect())
+}
+
 pub fn has_stash(path: &Path, branch: &str) -> bool {
-  stash_index(path, branch).ok().flatten().is_some()
+  stash_ids(path, branch).is_ok_and(|ids| !ids.is_empty())
 }
 
-/// Applies the changes stashed on this branch and drops the stash. When applying fails (a conflict with what is there now) the
-/// stash stays.
+fn latest_stash(path: &Path, branch: &str) -> Result<String, String> {
+  stash_ids(path, branch)?.into_iter().next().ok_or("There are no stashed changes on this branch.".into())
+}
+
 pub fn restore_stash(path: &Path, branch: &str) -> Result<(), String> {
-  let index = stash_index(path, branch)?.ok_or("There are no stashed changes on this branch.")?;
-  checked(git(path, &["stash", "pop", &format!("stash@{{{index}}}")])?).map(|_| ())
+  restore_stash_by_id(path, branch, &latest_stash(path, branch)?)
 }
 
-/// Throws away the changes stashed on this branch.
 pub fn discard_stash(path: &Path, branch: &str) -> Result<(), String> {
-  let index = stash_index(path, branch)?.ok_or("There are no stashed changes on this branch.")?;
-  checked(git(path, &["stash", "drop", &format!("stash@{{{index}}}")])?).map(|_| ())
+  discard_stash_by_id(path, branch, &latest_stash(path, branch)?)
+}
+
+pub fn restore_stash_by_id(path: &Path, branch: &str, id: &str) -> Result<(), String> {
+  find_stash(path, branch, id)?;
+  let repository = Repository::discover(path).map_err(message)?;
+  super::operation::require_idle(&repository)?;
+  checked(git(path, &["stash", "apply", "--index", id])?)
+    .map_err(|error| format!("Your changes stay stashed on {branch}. Review the working tree before retrying. {error}"))?;
+  discard_stash_by_id(path, branch, id)
+    .map_err(|error| format!("Applied the changes to the working tree, but could not remove the stash entry. {error}"))
+}
+
+pub fn discard_stash_by_id(path: &Path, branch: &str, id: &str) -> Result<(), String> {
+  let entry = find_stash(path, branch, id)?;
+  // Resolve the current selector from the object ID, since a terminal command may have moved the stash stack.
+  checked(git(path, &["stash", "drop", &entry.selector])?).map(|_| ())
+}
+
+fn find_stash(path: &Path, branch: &str, id: &str) -> Result<Stash, String> {
+  branch_stashes(path, branch)?
+    .into_iter()
+    .find(|entry| entry.id == id)
+    .ok_or("That stash is no longer on this branch. Refresh the stash list.".into())
+}
+
+fn restore_after_failure(path: &Path, branch: &str, stashed: Option<&str>, error: String) -> String {
+  if let Some(id) = stashed {
+    let on_source = Repository::discover(path)
+      .ok()
+      .and_then(|repository| repository.head().ok()?.shorthand().ok().map(str::to_owned))
+      .is_some_and(|head| head == branch);
+    if !on_source || !super::quick_status(path).is_some_and(|(changed, _)| changed == 0) {
+      return format!("{error} Your changes stay stashed on {branch}. Review the working tree before restoring them.");
+    }
+    if let Err(restore) = restore_stash_by_id(path, branch, id) {
+      return format!("{error} Could not restore the working tree automatically. {restore}");
+    }
+  }
+  error
 }

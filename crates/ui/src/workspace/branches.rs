@@ -190,6 +190,9 @@ impl Workspace {
 
   fn run_switch(&mut self, name: String, changes: Option<Changes>, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
+    if self.stash_task.is_some() {
+      return;
+    }
     self.switching_branch = Some(name.clone());
     cx.notify();
     let work = cx.background_executor().spawn({
@@ -199,7 +202,7 @@ impl Workspace {
           Some(changes) => ws_git::switch_branch_with(&root, &name, changes),
           None => ws_git::switch_branch(&root, &name),
         };
-        let stashed = result.is_ok() && ws_git::has_stash(&root, &name);
+        let stashed = if result.is_ok() { ws_git::stash_ids(&root, &name) } else { Ok(Vec::new()) };
         (result, stashed)
       }
     });
@@ -217,8 +220,12 @@ impl Workspace {
               this.load_history(cx);
             }
             // The question acts on the open project's stash: it is asked only while the open project is the one that switched.
-            if stashed && here {
-              this.ask_stashed_changes(name, window, cx);
+            if here {
+              match stashed {
+                Ok(ids) if !ids.is_empty() => this.ask_stashed_changes(root.clone(), name, ids, window, cx),
+                Ok(_) => {}
+                Err(message) => window.push_notification(crate::failure(message), cx),
+              }
             }
           }
           Err(message) => window.push_notification(crate::failure(message), cx),
@@ -229,50 +236,84 @@ impl Workspace {
     .detach();
   }
 
-  /// The branch just switched to has changes stashed on it: restore them, throw them away, or leave them for later.
-  fn ask_stashed_changes(&mut self, branch: String, window: &mut Window, cx: &mut Context<Self>) {
-    let workspace = cx.entity();
-    let muted = cx.theme().muted_foreground;
-    window.open_dialog(cx, move |dialog, _, _| {
-      let (restore, discard) = (workspace.clone(), workspace.clone());
-      let (restore_branch, discard_branch) = (branch.clone(), branch.clone());
-      dialog.title("Stashed changes").width(px(460.)).p_5().child(
-        v_flex()
-          .gap_4()
-          .child(Label::new(format!("You have changes stashed on {branch}. Restore them to the working tree?")).text_color(muted))
-          .child(
-            h_flex()
-              .gap_2()
-              .justify_end()
-              .child(dialog_button("stash-later", "Not Now", false, |_, _| {}))
-              .child(dialog_button("stash-discard", "Discard", false, move |window, cx| {
-                let branch = discard_branch.clone();
-                discard.update(cx, |this, cx| this.stash_action(branch, false, window, cx));
-              }))
-              .child(dialog_button("stash-restore", "Restore", true, move |window, cx| {
-                let branch = restore_branch.clone();
-                restore.update(cx, |this, cx| this.stash_action(branch, true, window, cx));
-              })),
-          ),
-      )
+  pub(super) fn show_branch_stashes(&mut self, _: &crate::ShowBranchStashes, window: &mut Window, cx: &mut Context<Self>) {
+    if self.stash_task.is_some() || self.switching_branch.is_some() {
+      return;
+    }
+    let (Some(root), Some(summary)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
+    let branch = summary.branch.clone();
+    let work = cx.background_executor().spawn({
+      let (root, branch) = (root.clone(), branch.clone());
+      async move { ws_git::stash_ids(&root, &branch) }
+    });
+    self.stash_task = Some(cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.stash_task = None;
+        if this.projects.active.as_ref() != Some(&root) || this.git.as_ref().is_none_or(|summary| summary.branch != branch) {
+          return;
+        }
+        match result {
+          Ok(ids) if ids.is_empty() => window.push_notification(Notification::info("No stashed changes on this branch."), cx),
+          Ok(ids) => this.ask_stashed_changes(root, branch, ids, window, cx),
+          Err(message) => window.push_notification(crate::failure(message), cx),
+        }
+      });
+    }));
+  }
+
+  fn ask_stashed_changes(&self, root: PathBuf, branch: String, ids: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+    use gpui_kit::component::dialog::DialogFooter;
+    use gpui_kit::component::scroll::ScrollableElement as _;
+
+    let workspace = cx.entity().downgrade();
+    let description: SharedString = format!("Stashes on {branch}, newest first.").into();
+    window.open_alert_dialog(cx, move |dialog, _, _| {
+      let rows = ids.iter().map(|id| {
+        let button = |label, restore| {
+          let (workspace, root, branch, stash) = (workspace.clone(), root.clone(), branch.clone(), id.clone());
+          Button::new(SharedString::from(format!("stash-{label}-{id}"))).small().label(label).on_click(move |_, window, cx| {
+            window.close_dialog(cx);
+            let _ = workspace.update(cx, |this, cx| this.stash_action(root.clone(), branch.clone(), stash.clone(), restore, window, cx));
+          })
+        };
+        h_flex()
+          .gap_2()
+          .items_center()
+          .child(Label::new(SharedString::from(id.chars().take(12).collect::<String>())).flex_1())
+          .child(button("Restore", true))
+          .child(button("Discard", false))
+      });
+      dialog
+        .title("Stashed changes")
+        .description(description.clone())
+        .confirm()
+        .child(v_flex().max_h_64().gap_2().children(rows).overflow_y_scrollbar())
+        .footer(DialogFooter::new().child(Button::new("stash-close").label("Close").on_click(|_, window, cx| window.close_dialog(cx))))
     });
   }
 
-  fn stash_action(&mut self, branch: String, restore: bool, window: &mut Window, cx: &mut Context<Self>) {
-    let Some(root) = self.projects.active.clone() else { return };
+  fn stash_action(&mut self, root: PathBuf, branch: String, id: String, restore: bool, window: &mut Window, cx: &mut Context<Self>) {
+    if self.projects.active.as_ref() != Some(&root) || self.stash_task.is_some() {
+      return;
+    }
     let work = cx.background_executor().spawn({
-      let (root, branch) = (root.clone(), branch.clone());
+      let root = root.clone();
       async move {
         if restore {
-          ws_git::restore_stash(&root, &branch)
+          if ws_git::summary(&root).is_none_or(|summary| summary.branch != branch) {
+            return Err("Switch back to the stash's branch before restoring it.".into());
+          }
+          ws_git::restore_stash_by_id(&root, &branch, &id)
         } else {
-          ws_git::discard_stash(&root, &branch)
+          ws_git::discard_stash_by_id(&root, &branch, &id)
         }
       }
     });
-    cx.spawn_in(window, async move |this, cx| {
+    self.stash_task = Some(cx.spawn_in(window, async move |this, cx| {
       let result = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
+        this.stash_task = None;
         this.settle_job(&root, cx);
         match result {
           Ok(()) => {
@@ -283,8 +324,7 @@ impl Workspace {
         }
         cx.notify();
       });
-    })
-    .detach();
+    }));
   }
 
   /// Asks for a new name for a local branch and renames it.
@@ -482,7 +522,7 @@ impl Workspace {
   /// message of the last commit is kept.
   pub(super) fn amend_commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
-    if self.committing || self.discarding || git.merging || self.merge_task.is_some() {
+    if self.committing || self.discarding || git.operation != ws_git::Operation::Idle || self.merge_task.is_some() {
       return;
     }
     let files: Vec<PathBuf> = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).map(|change| change.path.clone()).collect();

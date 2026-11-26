@@ -8,8 +8,8 @@ pub mod editor_diff;
 
 mod branch;
 pub use branch::{
-  branch_entries, create_branch_with, delete_branch, delete_remote_branch, discard_stash, has_changes, has_stash, rename_branch, restore_stash,
-  stash_changes, switch_branch_with, upstream_remote, BranchEntry, Changes, SWITCH_OVERWRITE,
+  branch_entries, create_branch_with, delete_branch, delete_remote_branch, discard_stash, discard_stash_by_id, has_changes, has_stash, rename_branch,
+  restore_stash, restore_stash_by_id, stash_changes, stash_ids, switch_branch_with, upstream_remote, BranchEntry, Changes, SWITCH_OVERWRITE,
 };
 
 mod commit_actions;
@@ -18,6 +18,9 @@ pub use commit_actions::{add_to_gitignore, branch_from_commit, cherry_pick, reve
 mod compare;
 
 mod merge;
+mod operation;
+
+pub use operation::{operation, resume_operation, Operation, OperationStep};
 
 pub mod shell_path;
 pub use merge::{read_merge, start_merge, MergeOutcome, MergeSide, MergeState};
@@ -65,7 +68,7 @@ pub struct Summary {
   pub changes: Vec<Change>,
   /// Where the branch stands against its remote; `None` when the repository has no remote.
   pub sync: Option<Sync>,
-  pub merging: bool,
+  pub operation: Operation,
 }
 
 /// How the checked-out branch relates to its remote.
@@ -190,7 +193,7 @@ pub fn summary(path: &Path) -> Option<Summary> {
     .unwrap_or_default();
   changes.sort_by(|a, b| a.path.cmp(&b.path));
   let sync = sync_status(&repository);
-  Some(Summary { branch, changes, sync, merging: repository.state() == git2::RepositoryState::Merge })
+  Some(Summary { branch, changes, sync, operation: Operation::read(&repository) })
 }
 
 /// What the project menu shows beside a project: how many files have changes, and whether commits are waiting to be pushed
@@ -365,9 +368,7 @@ pub fn file_versions(path: &Path, file: &Path, limit: usize) -> Result<FileVersi
 /// and from the disk. `file` is relative to the repository.
 pub fn discard_changes(path: &Path, file: &Path) -> Result<(), String> {
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
-  if repository.state() == git2::RepositoryState::Merge {
-    return Err("Finish or abort the current merge first.".into());
-  }
+  operation::require_idle(&repository)?;
   let workdir = repository.workdir().ok_or("The repository has no working folder.")?.to_path_buf();
   let committed = repository.head().ok().and_then(|head| head.peel_to_tree().ok()).is_some_and(|tree| tree.get_path(file).is_ok());
   if committed {
@@ -411,9 +412,7 @@ fn build_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str
     return Err("Choose at least one file to commit.".into());
   }
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
-  if repository.state() == git2::RepositoryState::Merge {
-    return Err("Finish or abort the current merge first.".into());
-  }
+  operation::require_idle(&repository)?;
   let workdir = repository.workdir().ok_or("The repository has no working folder.")?.to_path_buf();
   let signature = repository.signature().map_err(|_| "Set user.name and user.email in your Git configuration first.".to_string())?;
   let parent = repository.head().ok().and_then(|head| head.peel_to_commit().ok());
@@ -494,9 +493,7 @@ pub fn check_new_branch(path: &Path, name: &str) -> Result<Repository, String> {
     return Err(format!("\"{name}\" is not a valid branch name."));
   }
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
-  if repository.state() == git2::RepositoryState::Merge {
-    return Err("Finish or abort the current merge first.".into());
-  }
+  operation::require_idle(&repository)?;
   if repository.find_branch(name, git2::BranchType::Local).is_ok() {
     return Err(format!("A branch named {name} already exists."));
   }
@@ -521,9 +518,7 @@ pub fn create_branch(path: &Path, name: &str) -> Result<(), String> {
 /// forced, nothing is lost.
 pub fn switch_branch(path: &Path, name: &str) -> Result<(), String> {
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
-  if repository.state() == git2::RepositoryState::Merge {
-    return Err("Finish or abort the current merge first.".into());
-  }
+  operation::require_idle(&repository)?;
   // A branch only a remote has gets a local branch that follows it, like `git switch` does.
   if repository.find_branch(name, git2::BranchType::Local).is_err() {
     branch::track_remote_branch(&repository, name)?;
@@ -825,14 +820,21 @@ pub fn fetch(path: &Path, credentials: Option<&Credentials>, mut on_progress: im
 /// instead of asking git to choose. A merge that conflicts stays in progress (see [`read_merge`]) for the conflict resolver, and
 /// the error says so.
 pub fn pull(path: &Path, credentials: Option<&Credentials>, mut on_progress: impl FnMut(&str)) -> Result<String, String> {
-  let rebase_configured =
-    Repository::discover(path).ok().and_then(|repository| repository.config().ok()).is_some_and(|config| config.get_entry("pull.rebase").is_ok());
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  operation::require_idle(&repository)?;
+  let rebase_configured = repository.config().is_ok_and(|config| config.get_entry("pull.rebase").is_ok());
   let arguments: &[&str] = if rebase_configured { &["pull"] } else { &["pull", "--no-rebase", "--no-edit"] };
   with_login(credentials, |credentials| {
     let result = run_git(path, arguments, credentials, &mut on_progress)?;
     // git reports the conflicting files on its standard output, which is not read: the state of the repository says it.
-    if !result.0 && Repository::discover(path).is_ok_and(|repository| repository.state() == git2::RepositoryState::Merge) {
-      return Err("The pull has merge conflicts. Resolve them to finish the merge, or abort it.".into());
+    if !result.0 {
+      match Operation::read(&repository) {
+        Operation::Merge => return Err("The pull has merge conflicts. Resolve them to finish the merge, or abort it.".into()),
+        Operation::Rebase => {
+          return Err("The pull stopped during rebase. Resolve and stage the conflicts, then continue or abort the rebase.".into())
+        }
+        _ => {}
+      }
     }
     finish(result, "git pull failed.")
   })
@@ -853,6 +855,7 @@ fn on_remote(repository: &Repository, id: git2::Oid) -> bool {
 /// branch already has: that would rewrite published history.
 pub fn undo_commit(path: &Path, id: &str) -> Result<(String, String), String> {
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  operation::require_idle(&repository)?;
   let commit = repository.head().ok().and_then(|head| head.peel_to_commit().ok()).ok_or("There is no commit to undo.")?;
   if commit.id().to_string() != id {
     return Err("Only the last commit of the branch can be undone.".into());

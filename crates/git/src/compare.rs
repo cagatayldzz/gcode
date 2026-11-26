@@ -138,39 +138,32 @@ pub fn merge_branch(path: &Path, branch: &str) -> Result<(), String> {
   if branch.starts_with('-') || branch.trim().is_empty() {
     return Err(format!("\"{branch}\" is not a branch."));
   }
-  let git = |arguments: &[&str]| {
-    ws_activity::timed(
-      "git",
-      || crate::describe_git(path, arguments),
-      || {
-        let mut command = std::process::Command::new("git");
-        crate::shell_path::apply(&mut command);
-        command
-          .arg("-C")
-          .arg(path)
-          .args(arguments)
-          .env("GIT_TERMINAL_PROMPT", "0")
-          .env("GIT_EDITOR", "true")
-          .stdin(std::process::Stdio::null())
-          .output()
-          .map_err(|error| format!("Could not run git: {error}"))
-      },
-      crate::describe_output,
-    )
-  };
-  let output = git(&["merge", "--no-edit", branch])?;
+  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
+  super::operation::require_idle(&repository)?;
+  let output = super::commit_actions::git(path, &["merge", "--no-edit", "--", branch])?;
   if output.status.success() {
     return Ok(());
   }
   let stdout = String::from_utf8_lossy(&output.stdout);
   let stderr = String::from_utf8_lossy(&output.stderr);
   let conflicts: Vec<&str> = stdout.lines().filter_map(|line| line.split_once("Merge conflict in ").map(|(_, file)| file.trim())).collect();
-  // Stops a merge that was left waiting for the conflicts to be solved; harmless when none was started.
-  let _ = git(&["merge", "--abort"]);
-  if conflicts.is_empty() {
-    let reason = stderr.lines().chain(stdout.lines()).rev().find(|line| !line.trim().is_empty()).unwrap_or("git could not merge.").trim().to_string();
-    Err(reason)
+  let error = if conflicts.is_empty() {
+    stderr.lines().chain(stdout.lines()).rev().find(|line| !line.trim().is_empty()).unwrap_or("git could not merge.").trim().to_string()
   } else {
-    Err(format!("Merging {branch} conflicts in {}. Nothing was changed.", conflicts.join(", ")))
+    format!("Merging {branch} conflicts in {}.", conflicts.join(", "))
+  };
+  if super::operation(path)? != super::Operation::Merge {
+    return Err(error);
+  }
+  let rollback = super::commit_actions::git(path, &["merge", "--abort"]).and_then(|output| {
+    if output.status.success() {
+      super::operation::require_idle(&repository)
+    } else {
+      Err(super::commit_actions::failure(&output, "Git could not abort the merge."))
+    }
+  });
+  match rollback {
+    Ok(()) => Err(format!("{error} Nothing was changed.")),
+    Err(rollback) => Err(format!("{error} Automatic rollback failed: {rollback} Review the repository before retrying.")),
   }
 }

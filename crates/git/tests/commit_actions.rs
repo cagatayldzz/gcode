@@ -56,7 +56,7 @@ fn a_conflicting_revert_changes_nothing() {
 
   assert!(error.contains("conflicts in a.txt"), "{error}");
   assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "one\nOTHER\nthree\n");
-  assert!(!ws_git::summary(&dir).unwrap().merging);
+  assert_eq!(ws_git::summary(&dir).unwrap().operation, ws_git::Operation::Idle);
   assert!(ws_git::summary(&dir).unwrap().changes.is_empty());
   fs::remove_dir_all(dir).unwrap();
 }
@@ -191,5 +191,47 @@ fn recent_authors_lists_other_people_once_and_leaves_out_the_committer() {
   git(&dir, &["commit", "-m", "by ada again", "--author=Ada <ADA@example.com>"]);
 
   assert_eq!(ws_git::recent_authors(&dir, 100, 10), vec![("Ada".to_string(), "ADA@example.com".to_string())]);
+  fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_failed_cherry_pick_restores_the_original_detached_head() {
+  let dir = repository("cherry-detached");
+  git(&dir, &["checkout", "-b", "release"]);
+  commit_file(&dir, "a.txt", "one\nRELEASE\nthree\n", "release edit");
+  git(&dir, &["checkout", "main"]);
+  let picked = commit_file(&dir, "a.txt", "one\nMAIN\nthree\n", "main edit");
+  git(&dir, &["checkout", "--detach", &picked]);
+
+  let error = ws_git::cherry_pick(&dir, &picked, "release").unwrap_err();
+  assert!(error.contains("Nothing was changed"), "{error}");
+  assert_eq!(git(&dir, &["branch", "--show-current"]), "");
+  assert_eq!(git(&dir, &["rev-parse", "HEAD"]), picked);
+  assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "one\nMAIN\nthree\n");
+  assert_eq!(ws_git::operation(&dir).unwrap(), ws_git::Operation::Idle);
+  fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_cherry_pick_reports_when_git_cannot_abort_its_conflict() {
+  use std::os::unix::fs::PermissionsExt as _;
+
+  let dir = repository("cherry-rollback-failed");
+  git(&dir, &["checkout", "-b", "release"]);
+  commit_file(&dir, "a.txt", "one\nRELEASE\nthree\n", "release edit");
+  git(&dir, &["checkout", "main"]);
+  let picked = commit_file(&dir, "a.txt", "one\nMAIN\nthree\n", "main edit");
+
+  let hooks = dir.join(".git/hooks");
+  git(&dir, &["config", "core.hooksPath", hooks.to_str().unwrap()]);
+  let hook = hooks.join("post-index-change");
+  fs::write(&hook, "#!/bin/sh\ntouch .git/index.lock\n").unwrap();
+  fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+
+  let error = ws_git::cherry_pick(&dir, &picked, "release").unwrap_err();
+  assert!(error.contains("Automatic rollback failed"), "{error}");
+  assert!(!error.contains("Nothing was changed"), "{error}");
+  assert_eq!(git(&dir, &["branch", "--show-current"]), "release");
+  assert_eq!(ws_git::operation(&dir).unwrap(), ws_git::Operation::CherryPick);
   fs::remove_dir_all(dir).unwrap();
 }

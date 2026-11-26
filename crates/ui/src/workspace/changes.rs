@@ -181,7 +181,7 @@ impl Workspace {
   /// Commits the changed files that are ticked, with the summary and description typed below the list.
   pub(super) fn commit_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
-    if self.committing || self.discarding || git.merging || self.merge_task.is_some() {
+    if self.committing || self.discarding || git.operation != ws_git::Operation::Idle || self.merge_task.is_some() {
       return;
     }
     let files: Vec<PathBuf> = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).map(|change| change.path.clone()).collect();

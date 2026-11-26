@@ -417,6 +417,7 @@ pub struct Workspace {
   compare_epoch: u64,
   /// A branch is being merged into the current one.
   merge_task: Option<Task<()>>,
+  stash_task: Option<Task<()>>,
   merge_dialog: Option<(PathBuf, Entity<MergeDialog>, Subscription)>,
   selected_commit: Option<String>,
   commit_view: Entity<CommitView>,
@@ -633,6 +634,7 @@ impl Workspace {
       compare_filter: compare_filter.clone(),
       compare_epoch: 0,
       merge_task: None,
+      stash_task: None,
       merge_dialog: None,
       selected_commit: None,
       commit_view: commit_view.clone(),
@@ -1051,6 +1053,10 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::search_project))
       .on_action(cx.listener(Self::go_to_file))
       .on_action(cx.listener(Self::open_command_palette))
+      .on_action(cx.listener(Self::show_branch_stashes))
+      .on_action(cx.listener(Self::continue_git_operation))
+      .on_action(cx.listener(Self::skip_git_operation))
+      .on_action(cx.listener(Self::abort_git_operation))
       .on_action(cx.listener(Self::confirm_enable_language_servers))
       .on_action(cx.listener(Self::disable_language_servers))
       .on_action(cx.listener(Self::open_search_results))

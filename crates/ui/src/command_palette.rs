@@ -84,6 +84,7 @@ fn commands() -> Vec<Entry> {
     entry("New Codex Session", &["agent", "ai"], NewCodex),
     entry("New Claude Session", &["agent", "ai"], NewClaude),
     entry("Toggle All Changes", &["git", "diff", "review"], ToggleAllChanges),
+    entry("Show Branch Stashes", &["git", "restore", "stash"], crate::ShowBranchStashes),
     entry("Toggle Project Settings", &["index", "project"], ToggleProjectSettings),
     entry("Enable Language Servers for This Project", &["trust", "lsp", "typescript"], EnableProjectLanguageServers),
     entry("Disable Language Servers for This Project", &["revoke", "trust", "lsp"], DisableProjectLanguageServers),
