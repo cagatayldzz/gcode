@@ -19,10 +19,7 @@ use crate::{
   project_settings::{AppearanceChosen, HostedRepository, ProjectSettings, ProjectSettingsEvent, RenamedRemote},
   project_setup::{ProjectReady, ProjectSetup},
   pull_request::{PullRequestEvent, PullRequestForm, PullRequestTarget},
-  settings::{
-    activity_ids, settings_for, AccountRecheckRequested, AccountReconnectRequested, AccountRemoveRequested, AddAllProjectsRequested,
-    ConnectAccountRequested, SettingsModel,
-  },
+  settings::{activity_ids, settings_for, SettingsModel},
   settings_window::SettingsWindow,
   terminal::{Terminal, TerminalActivityChanged, TerminalAttentionChanged, TerminalExited},
   terminal_layout::{Arrangement, Direction, Node},
@@ -358,6 +355,8 @@ pub struct Workspace {
   /// The project settings view, which takes the main area like the terminals do while it is open.
   project_settings: Option<Entity<ProjectSettings>>,
   _project_settings_subscription: Option<Subscription>,
+  /// The application's Settings, which take the main area the same way while they are open.
+  app_settings: Option<Entity<SettingsWindow>>,
   /// Projects whose repository was renamed on its service, found by asking it, with what the remote should say now.
   renamed_remotes: HashMap<PathBuf, RenamedRemote>,
   /// The scroll position of the folder tree.
@@ -567,6 +566,7 @@ impl Workspace {
       _dialog_subscription: None,
       project_settings: None,
       _project_settings_subscription: None,
+      app_settings: None,
       renamed_remotes: HashMap::new(),
       explorer_scroll: UniformListScrollHandle::default(),
       search_open: false,
@@ -708,32 +708,6 @@ impl Workspace {
           }
           apply_theme(preferences.theme, preferences.font, preferences.code_font_size, window, cx);
           cx.notify();
-        }),
-        cx.subscribe_in(&settings, window, |this, _, _: &ConnectAccountRequested, window, cx| {
-          if window.is_window_active() {
-            this.open_connect_account(None, window, cx);
-          }
-        }),
-        cx.subscribe_in(&settings, window, |this, _, event: &AccountRecheckRequested, window, cx| {
-          if window.is_window_active() {
-            this.recheck_account(event.0.clone(), window, cx);
-          }
-        }),
-        cx.subscribe_in(&settings, window, |this, _, event: &AccountReconnectRequested, window, cx| {
-          if window.is_window_active() {
-            this.open_connect_account(this.settings.read(cx).accounts.items.iter().find(|account| account.key() == event.0).cloned(), window, cx);
-          }
-        }),
-        cx.subscribe_in(&settings, window, |this, _, event: &AccountRemoveRequested, window, cx| {
-          if window.is_window_active() {
-            this.remove_account(event.0.clone(), window, cx);
-          }
-        }),
-        // "Add all" is handled by the window the user is in.
-        cx.subscribe_in(&settings, window, |this, _, _: &AddAllProjectsRequested, window, cx| {
-          if window.is_window_active() {
-            this.add_projects_from_folder(window, cx);
-          }
         }),
       ],
       dock,
@@ -968,6 +942,8 @@ impl Render for Workspace {
     let main_area = if self.active_project_missing() {
       self.render_missing_project(cx)
     } else if let Some(settings) = &self.project_settings {
+      settings.clone().into_any_element()
+    } else if let Some(settings) = &self.app_settings {
       settings.clone().into_any_element()
     } else if self.terminal_open {
       self.render_terminal_area(window, cx).into_any_element()

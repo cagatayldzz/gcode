@@ -498,17 +498,17 @@ impl Workspace {
             window.dispatch_action(Box::new(AddProject), cx);
           })
         };
-        // Sorting, grouping and renaming projects is done in Settings → Project list.
+        // Sorting, grouping and renaming projects is done in Settings → Projects.
         let sort = {
           let workspace = workspace.clone();
           Button::new("repository-sort")
             .outline()
             .icon(Icon::empty().path("icons/arrow-up-down.svg"))
-            .tooltip("Sort and group the projects (Settings → Project list)")
+            .tooltip("Sort and group the projects (Settings → Projects)")
             .on_click(move |_, window, cx| {
               workspace.update(cx, |this, cx| {
                 this.projects_menu_open = false;
-                this.open_settings_page("Project list", window, cx);
+                this.open_settings_page("Projects", window, cx);
               })
             })
         };

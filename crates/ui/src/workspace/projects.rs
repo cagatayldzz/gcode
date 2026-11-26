@@ -5,7 +5,7 @@ use std::cell::Cell;
 
 impl Workspace {
   /// Adds the repositories directly inside the projects folder that are not listed yet, and says how many.
-  pub(super) fn add_projects_from_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+  pub(crate) fn add_projects_from_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let folder = self.new_project_dir(cx);
     let found = ws_git::find_repositories(&folder);
     let added = self.projects.add_all(found.iter().cloned());
@@ -487,6 +487,7 @@ impl Workspace {
   pub(super) fn leave_project_settings(&mut self) {
     self.project_settings = None;
     self._project_settings_subscription = None;
+    self.app_settings = None;
   }
 
   /// Renames a project's folder on disk and points the project at it. Returns the new path. Nothing changes when the

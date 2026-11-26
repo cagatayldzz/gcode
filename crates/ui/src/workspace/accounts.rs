@@ -32,14 +32,18 @@ impl Workspace {
     }
   }
 
-  /// Opens the Settings dialog.
+  /// Opens the Settings, or closes them when they are open.
   pub fn open_settings(&mut self, _: &OpenSettings, window: &mut Window, cx: &mut Context<Self>) {
+    if self.app_settings.is_some() {
+      self.hide_terminal(window, cx);
+      return;
+    }
     self.open_settings_page("General", window, cx);
   }
 
   /// Opens Settings on the Updates page and looks for a newer release.
   pub fn check_for_updates(&mut self, _: &CheckForUpdates, window: &mut Window, cx: &mut Context<Self>) {
-    self.open_settings_page("Updates", window, cx);
+    self.open_settings_page("About", window, cx);
     self.settings.update(cx, |model, cx| model.check_update(cx));
   }
 
@@ -102,7 +106,7 @@ impl Workspace {
 
   /// Asks the service what the account's token may do (see `ws_hosting::verify_permissions`; nothing is changed) in the open
   /// project's repository if the account serves it, else in the account's first repository. A fixed account loses its warning.
-  pub(super) fn recheck_account(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
+  pub(crate) fn recheck_account(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
     let Some(account) = self.settings.read(cx).accounts.items.iter().find(|account| account.key() == key).cloned() else { return };
     if self.settings.read(cx).rechecking.contains(&key) {
       return;
@@ -167,27 +171,36 @@ impl Workspace {
     .detach();
   }
 
-  /// Opens Settings on one of its pages ("General", "Accounts", …).
+  /// Opens Settings on one of its pages ("General", "Accounts", …) in the main area; if they are open already, the page changes.
   pub(crate) fn open_settings_page(&mut self, page: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+    if let Some(settings) = &self.app_settings {
+      settings.update(cx, |settings, cx| settings.show_page(page, cx));
+      return;
+    }
     let fallback = self.new_project_dir(cx);
     let workspace = cx.entity();
     let projects = cx.new({
       let workspace = workspace.clone();
       |cx| ProjectManager::new(workspace, cx)
     });
-    let profiles = cx.new(|cx| ProfileManager::new(workspace, cx));
+    let profiles = cx.new({
+      let workspace = workspace.clone();
+      |cx| ProfileManager::new(workspace, cx)
+    });
     let accounts = cx.new({
-      let settings = self.settings.clone();
-      |cx| AccountsList::new(settings, cx)
+      let (settings, workspace) = (self.settings.clone(), workspace.clone());
+      |cx| AccountsList::new(settings, workspace, cx)
     });
     let updates = cx.new({
       let settings = self.settings.clone();
       |cx| UpdatePanel::new(settings, cx)
     });
     let settings = self.settings.clone();
-    let view = cx.new(|cx| SettingsWindow::new(settings, fallback, projects, profiles, accounts, updates, page, window, cx));
-    // The dialog's own padding is removed so that the page list reaches the edges of the window.
-    window
-      .open_dialog(cx, move |dialog, _, _| dialog.p_0().width(px(900.)).child(div().h(px(580.)).rounded_lg().overflow_hidden().child(view.clone())));
+    let view = cx.new(|cx| SettingsWindow::new(settings, workspace, fallback, projects, profiles, accounts, updates, page, window, cx));
+    self.leave_project_settings();
+    self.terminal_open = false;
+    self.agent_open = false;
+    self.app_settings = Some(view);
+    cx.notify();
   }
 }

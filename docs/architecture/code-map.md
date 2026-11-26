@@ -78,13 +78,13 @@ repository/
 | `mention_picker.rs` | the project list opened by `⇧⌘M` |
 | `project_setup.rs` | the Add project dialog (New, Clone, Import) |
 | `project_settings.rs` | per-project settings: General (display name, folder rename, repository rename, Git remote), Appearance, Index, Remove; the workspace applies a save in `workspace/projects.rs` (`apply_project_settings`) |
-| `project_manager.rs` | the Project list page of Settings |
+| `project_manager.rs` | the project list under the folder setting on the Projects page of Settings |
 | `settings.rs` | `SettingsModel`, shared by windows of a profile, and the helpers its pages use |
-| `settings_window.rs` | the Settings dialog: pages grouped in a searchable list, each page cards of rows (name, description, control) |
+| `settings_window.rs` | the Settings view in the main area: pages grouped in a searchable list, each page cards of rows (name, description, control) |
 | `profiles.rs` | the profile list, `open_window`, profile menus |
 | `commit_settings.rs` | the commit message dialog |
 | `connections.rs`, `connect_account.rs`, `repository_picker.rs`, `pull_request.rs` | accounts list, the Connect dialog, the repository list of Clone, the Create pull request dialog |
-| `updates.rs` | `UpdateState`, `AppUpdate` and the Updates page |
+| `updates.rs` | `UpdateState`, `AppUpdate` and the updates block of the About page |
 | `menus.rs` | the menu bar and Dock menu (recent files on top, recent projects below, then the profiles) |
 | `recent.rs` | the recent files and projects behind the Dock menu, and its commands |
 

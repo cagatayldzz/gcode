@@ -3,7 +3,7 @@
 ```text
  launch ─► ws_updater::check(current)  ──► Release?  ──► notification (once per tag)
                                                   │
-                  Settings → Updates   ◄──────────┘
+                  Settings → About   ◄──────────┘
                     "Download & Install"  ► prepare(release, current_app)   verified, staged next to the app
                     "Restart to Update"   ► install()  ► SWAP_SCRIPT
 ```

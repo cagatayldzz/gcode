@@ -1,4 +1,4 @@
-//! The Settings dialog: pages grouped by what they are for in a list on the left (with a search that finds a page by the settings on
+//! The Settings view: pages grouped by what they are for in a list on the left (with a search that finds a page by the settings on
 //! it), and on the right the chosen page as titled cards of rows. A row is a setting's name and description with its control at the
 //! right. It looks like the project settings view and uses the app's own text size.
 
@@ -7,9 +7,10 @@ use crate::{
   connections::AccountsList,
   profiles::ProfileManager,
   project_manager::ProjectManager,
-  settings::{activity_layout, activity_row, choose_projects_folder, AddAllProjectsRequested, SettingsModel, Store},
+  settings::{activity_layout, activity_row, choose_projects_folder, SettingsModel, Store},
   theme::{colors, Colors, FONT_SIZE, FONT_SIZE_SM},
   updates::UpdatePanel,
+  workspace::Workspace,
 };
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
@@ -34,23 +35,21 @@ pub(crate) enum Page {
   Editor,
   ActivityBar,
   Projects,
-  ProjectList,
   Profiles,
   Accounts,
-  Updates,
   About,
 }
 
 /// The headings of the list on the left and the pages under each.
 const SECTIONS: [(&str, &[Page]); 4] = [
   ("Application", &[Page::General, Page::Editor, Page::ActivityBar]),
-  ("Workspace", &[Page::Projects, Page::ProjectList, Page::Profiles]),
+  ("Workspace", &[Page::Projects, Page::Profiles]),
   ("Connections", &[Page::Accounts]),
-  ("Product", &[Page::Updates, Page::About]),
+  ("Product", &[Page::About]),
 ];
 
 impl Page {
-  /// The page a caller names ("Accounts", "Project list", …); General when the name is not known.
+  /// The page a caller names ("Accounts", "Projects", …); General when the name is not known.
   pub(crate) fn named(name: &str) -> Self {
     SECTIONS.iter().flat_map(|(_, pages)| pages.iter()).copied().find(|page| page.label() == name).unwrap_or(Self::General)
   }
@@ -61,10 +60,8 @@ impl Page {
       Self::Editor => "Editor",
       Self::ActivityBar => "Activity bar",
       Self::Projects => "Projects",
-      Self::ProjectList => "Project list",
       Self::Profiles => "Profiles",
       Self::Accounts => "Accounts",
-      Self::Updates => "Updates",
       Self::About => "About",
     }
   }
@@ -75,10 +72,8 @@ impl Page {
       Self::Editor => "icons/code.svg",
       Self::ActivityBar => "icons/panel-left.svg",
       Self::Projects => "icons/folder-git-2.svg",
-      Self::ProjectList => "icons/folders.svg",
       Self::Profiles => "icons/users.svg",
       Self::Accounts => "icons/key-round.svg",
-      Self::Updates => "icons/download.svg",
       Self::About => "icons/info.svg",
     }
   }
@@ -88,17 +83,16 @@ impl Page {
       Self::General => "How the app looks.".into(),
       Self::Editor => "The size of text in the editor, in a file's changes and in Explorer.".into(),
       Self::ActivityBar => "Order the buttons of the bar at the left edge and choose which ones show. A hidden button's shortcut still works.".into(),
-      Self::Projects => "Where new and cloned projects are created.".into(),
-      Self::ProjectList => {
-        "Rename, recolor, reorder and group the projects of the menu in the title bar, or remove them. Right-click a project in that menu to move it to a category.".into()
+      Self::Projects => {
+        "Where new and cloned projects are created, and the projects of the menu in the title bar: rename, recolor, reorder, group or remove them. Right-click a project in that menu to move it to a category."
+          .into()
       }
       Self::Profiles => "Each profile keeps its own projects, settings and connected accounts, like a browser profile. Choose one from the Profiles menu to open its window.".into(),
       Self::Accounts => format!(
         "A connected account lets {} list your repositories to clone, list and open pull requests, and gives Git the token for that host over HTTPS. Tokens are kept in the macOS Keychain.",
         ws_product::NAME
       ),
-      Self::Updates => format!("New versions of {}.", ws_product::NAME),
-      Self::About => format!("The version of {} and where it keeps its files.", ws_product::NAME),
+      Self::About => format!("The version of {}, its updates, where it keeps its files and where to find the project.", ws_product::NAME),
     }
   }
 
@@ -108,12 +102,10 @@ impl Page {
       Self::General => "appearance theme light dark system color mode",
       Self::Editor => "font size text code explorer files preview",
       Self::ActivityBar => "buttons order show hide sidebar rail shortcut",
-      Self::Projects => "folder directory clone new create add all repositories",
-      Self::ProjectList => "rename color icon category group reorder remove menu title bar",
+      Self::Projects => "folder directory clone new create add all repositories list rename color icon category group reorder remove menu title bar",
       Self::Profiles => "profile window accounts separate",
       Self::Accounts => "github gitlab azure devops token keychain connect pull request permission",
-      Self::Updates => "update version release download restart launch check",
-      Self::About => "version repository data folder location",
+      Self::About => "version update release download restart launch check repository github link issues source data folder location",
     }
   }
 
@@ -122,10 +114,12 @@ impl Page {
   }
 }
 
-/// The Settings dialog's content.
+/// The Settings view's content.
 pub(crate) struct SettingsWindow {
   page: Page,
   store: Store,
+  /// The window of the application that does what some settings ask for (adding projects).
+  workspace: Entity<Workspace>,
   fallback_dir: PathBuf,
   projects: Entity<ProjectManager>,
   profiles: Entity<ProfileManager>,
@@ -140,6 +134,7 @@ impl SettingsWindow {
   #[allow(clippy::too_many_arguments)]
   pub fn new(
     model: Entity<SettingsModel>,
+    workspace: Entity<Workspace>,
     fallback_dir: PathBuf,
     projects: Entity<ProjectManager>,
     profiles: Entity<ProfileManager>,
@@ -169,6 +164,7 @@ impl SettingsWindow {
     Self {
       page: Page::named(page),
       store: Store(model),
+      workspace,
       fallback_dir,
       projects,
       profiles,
@@ -178,6 +174,12 @@ impl SettingsWindow {
       scroll: ScrollHandle::new(),
       _subscriptions: subscriptions,
     }
+  }
+
+  /// Shows the page a caller names, when the window is already open.
+  pub(crate) fn show_page(&mut self, name: &str, cx: &mut Context<Self>) {
+    self.page = Page::named(name);
+    cx.notify();
   }
 
   fn query(&self, cx: &App) -> String {
@@ -239,13 +241,7 @@ impl SettingsWindow {
       .bg(cx.theme().sidebar)
       .border_r_1()
       .border_color(palette.border)
-      .child(
-        v_flex()
-          .gap_3()
-          .p_4()
-          .child(div().text_lg().font_semibold().child("Settings"))
-          .child(soft_input(&self.search, cx).small().prefix(Icon::empty().path("icons/search.svg").size_4())),
-      )
+      .child(v_flex().gap_3().p_4().child(soft_input(&self.search, cx).small().prefix(Icon::empty().path("icons/search.svg").size_4())))
       .child(
         div()
           .id("settings-pages")
@@ -404,7 +400,7 @@ impl SettingsWindow {
     let palette = colors(cx);
     let chosen = self.store.0.read(cx).preferences.projects_dir.clone();
     let path = chosen.clone().unwrap_or_else(|| self.fallback_dir.clone());
-    let (choose, reset, all) = (self.store.clone(), self.store.clone(), self.store.clone());
+    let (choose, reset, workspace) = (self.store.clone(), self.store.clone(), self.workspace.clone());
     let folder = h_flex()
       .gap_2()
       .items_center()
@@ -428,18 +424,30 @@ impl SettingsWindow {
         row(
           "Add every project in the folder",
           "Adds every Git repository directly inside the projects folder to the project menu.",
-          Button::new("add-all-projects").label("Add all").small().outline().on_click(move |_, _, cx| all.emit(AddAllProjectsRequested, cx)),
+          Button::new("add-all-projects")
+            .label("Add all")
+            .small()
+            .outline()
+            .on_click(move |_, window, cx| workspace.update(cx, |workspace, cx| workspace.add_projects_from_folder(window, cx))),
           &palette,
         ),
       ],
     )
   }
 
-  fn updates_page(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  fn about(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
+    let value = |text: String| div().max_w_80().truncate().text_color(palette.text_secondary).child(text);
     let checking = self.store.0.read(cx).preferences.check_updates;
     let store = self.store.clone();
-    v_flex().gap_4().child(self.updates.clone()).child(card(
+    let info = card(
+      &palette,
+      vec![
+        plain_row("Version", value(env!("CARGO_PKG_VERSION").into()), &palette),
+        plain_row("Data folder", value(display_path(&ws_storage::data_dir())), &palette),
+      ],
+    );
+    let launch_check = card(
       &palette,
       vec![row(
         "Check for updates on launch",
@@ -450,20 +458,33 @@ impl SettingsWindow {
         Switch::new("check-updates").checked(checking).on_click(move |value, _, cx| store.update(cx, |preferences| preferences.check_updates = *value)),
         &palette,
       )],
-    ))
-  }
-
-  fn about(&self, cx: &mut Context<Self>) -> impl IntoElement {
-    let palette = colors(cx);
-    let value = |text: String| div().max_w_80().truncate().text_color(palette.text_secondary).child(text);
-    card(
-      &palette,
-      vec![
-        plain_row("Version", value(env!("CARGO_PKG_VERSION").into()), &palette),
-        plain_row("Repository", value(ws_updater::repository_slug().unwrap_or("—").into()), &palette),
-        plain_row("Data folder", value(display_path(&ws_storage::data_dir())), &palette),
-      ],
-    )
+    );
+    // The links come from the repository the releases are published from.
+    let links = ws_updater::repository_slug().map(|slug| {
+      let link = |id: &'static str, title: &'static str, address: String| {
+        let open = address.clone();
+        plain_row(
+          title,
+          Button::new(id)
+            .label(address.trim_start_matches("https://").to_string())
+            .small()
+            .ghost()
+            .icon(Icon::empty().path("icons/external-link.svg"))
+            .on_click(move |_, _, cx| cx.open_url(&open)),
+          &palette,
+        )
+      };
+      let base = format!("https://github.com/{slug}");
+      card(
+        &palette,
+        vec![
+          link("link-repository", "Repository", base.clone()),
+          link("link-releases", "Releases", format!("{base}/releases")),
+          link("link-issues", "Report an issue", format!("{base}/issues")),
+        ],
+      )
+    });
+    v_flex().gap_4().child(self.updates.clone()).child(launch_check).child(info).children(links)
   }
 }
 
@@ -510,20 +531,15 @@ impl Render for SettingsWindow {
       Page::General => self.general(cx).into_any_element(),
       Page::Editor => self.editor(cx).into_any_element(),
       Page::ActivityBar => self.activity_bar(cx).into_any_element(),
-      Page::Projects => self.projects_page(cx).into_any_element(),
-      Page::ProjectList => self.projects.clone().into_any_element(),
+      Page::Projects => v_flex().gap_4().child(self.projects_page(cx)).child(self.projects.clone()).into_any_element(),
       Page::Profiles => self.profiles.clone().into_any_element(),
       Page::Accounts => self.accounts.clone().into_any_element(),
-      Page::Updates => self.updates_page(cx).into_any_element(),
       Page::About => self.about(cx).into_any_element(),
     };
     let page = self.page;
-    // The title stays put at the top, clear of the dialog's close button; only the page under it scrolls, and so does its scrollbar.
+    // The title scrolls with the page, and the scrollbar runs the whole height of the view.
     let header = v_flex()
       .gap_1()
-      .flex_none()
-      .pl_8()
-      .pr_12()
       .pt_6()
       .pb_4()
       .child(div().text_lg().font_semibold().child(page.label()))
@@ -533,12 +549,17 @@ impl Render for SettingsWindow {
       .flex_1()
       .min_h_0()
       .child(
-        div().id("settings-body").size_full().overflow_y_scroll().track_scroll(&self.scroll).child(v_flex().w_full().px_8().pb_6().child(content)),
+        div()
+          .id("settings-body")
+          .size_full()
+          .overflow_y_scroll()
+          .track_scroll(&self.scroll)
+          .child(v_flex().w_full().px_8().pb_6().child(header).child(content)),
       )
       .child(div().absolute().inset_0().child(
         Scrollbar::new(&self.scroll).id("settings-scrollbar").axis(ScrollbarAxis::Vertical).mode(ScrollbarMode::Always).viewport_from_layout(),
       ));
-    let body = v_flex().flex_1().min_w_0().h_full().child(header).child(scrolling);
+    let body = v_flex().flex_1().min_w_0().h_full().child(scrolling);
     h_flex().size_full().bg(palette.background).text_size(FONT_SIZE).child(self.sidebar(cx)).child(body)
   }
 }

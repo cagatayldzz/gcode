@@ -412,9 +412,15 @@ impl Workspace {
       .child(settings)
       .child(div().flex_1())
       .child(self.render_profile_picker(cx))
-      .child(rail_button("app-settings-open", Icon::empty().path("icons/settings.svg"), "Settings", false, true, &palette, |_, window, cx| {
-        window.dispatch_action(Box::new(OpenSettings), cx)
-      }))
+      .child(rail_button(
+        "app-settings-open",
+        Icon::empty().path("icons/settings.svg"),
+        "Settings",
+        self.app_settings.is_some(),
+        true,
+        &palette,
+        |_, window, cx| window.dispatch_action(Box::new(OpenSettings), cx),
+      ))
   }
 
   /// The terminals, filling the main area like a terminal window: a tab strip when there are several tabs, and the panes of the

@@ -60,9 +60,9 @@ push, pull or commit ends.
 - **Categories** — group projects under headings in the menu. Projects without one are listed under **No category**. A category that
   loses its last project goes away, unless you created it yourself: a category you named stays until you delete it.
 
-The sort button beside **Add** in the menu opens **Settings → Project list**, where you manage both.
+The sort button beside **Add** in the menu opens **Settings → Projects**, where you manage both.
 
-### The Project list page
+### The Projects page
 
 | You can | How |
 | --- | --- |
@@ -71,7 +71,7 @@ The sort button beside **Add** in the menu opens **Settings → Project list**, 
 | Per project | **Name, icon and color**, the category menu, **Move up / down**, and **Remove from gCode** (asks first; its terminals stop, the folder and files stay). |
 | Per category | **Rename**, **Move up / down**, **Fold / unfold** in the menu, and **Delete** (the projects stay). |
 
-**Settings → Projects** holds the projects folder (where new and cloned projects go) and **Add all**, which adds every Git repository
+The top of the same page holds the projects folder (where new and cloned projects go) and **Add all**, which adds every Git repository
 directly inside that folder at once.
 
 ## Project settings

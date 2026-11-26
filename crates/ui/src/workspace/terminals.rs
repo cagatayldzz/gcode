@@ -208,7 +208,7 @@ impl Workspace {
   /// A full-width view is showing: the terminals, the AI view or the project settings. The sidebar, the editor and the status bar
   /// are hidden then.
   pub(super) fn full_area_open(&self) -> bool {
-    self.terminal_open || self.agent_open || self.project_settings.is_some()
+    self.terminal_open || self.agent_open || self.project_settings.is_some() || self.app_settings.is_some()
   }
 
   /// Gives the keyboard to the shown agent session, once it is drawn.

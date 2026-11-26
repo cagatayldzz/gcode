@@ -19,7 +19,7 @@ impl Workspace {
     };
     if let Some((tag, version)) = announce {
       self.settings.update(cx, |model, _| model.updates.announced = Some(tag));
-      window.push_notification(Notification::info(format!("{} {version} is available. Download it in Settings → Updates.", ws_product::NAME)), cx);
+      window.push_notification(Notification::info(format!("{} {version} is available. Download it in Settings → About.", ws_product::NAME)), cx);
     }
   }
 
@@ -153,7 +153,7 @@ impl Workspace {
   }
 
   /// Disconnects an account: it leaves the list and its token leaves the Keychain.
-  pub(super) fn remove_account(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
+  pub(crate) fn remove_account(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
     let described = self.settings.read(cx).accounts.items.iter().find(|account| account.key() == key).map(describe);
     let keychain = self.settings.read(cx).accounts.keychain();
     let work = cx.background_executor().spawn({

@@ -33,31 +33,6 @@ pub(crate) struct SettingsModel {
   pub rechecking: Vec<String>,
 }
 
-/// Sent when the user asks to add every project in the projects folder.
-pub(crate) struct AddAllProjectsRequested;
-
-impl EventEmitter<AddAllProjectsRequested> for SettingsModel {}
-
-/// Sent when the user asks to connect a hosting account.
-pub(crate) struct ConnectAccountRequested;
-
-impl EventEmitter<ConnectAccountRequested> for SettingsModel {}
-
-/// Sent when the user asks to check again the permissions of the account with this key.
-pub(crate) struct AccountRecheckRequested(pub String);
-
-impl EventEmitter<AccountRecheckRequested> for SettingsModel {}
-
-/// Sent when the user asks to connect the account with this key again, with a new token.
-pub(crate) struct AccountReconnectRequested(pub String);
-
-impl EventEmitter<AccountReconnectRequested> for SettingsModel {}
-
-/// Sent when the user disconnects the account with this key.
-pub(crate) struct AccountRemoveRequested(pub String);
-
-impl EventEmitter<AccountRemoveRequested> for SettingsModel {}
-
 /// The buttons of the activity bar, by id and name, in their default order.
 pub(crate) const ACTIVITY_ITEMS: [(&str, &str); 6] =
   [("explorer", "Explorer"), ("search", "Search"), ("git", "Git"), ("extensions", "Extensions"), ("terminal", "Terminal"), ("agents", "AI agents")];
@@ -167,13 +142,6 @@ impl Store {
       change(&mut model.preferences);
       cx.notify();
     });
-  }
-
-  pub(crate) fn emit<E: 'static>(&self, event: E, cx: &mut App)
-  where
-    SettingsModel: EventEmitter<E>,
-  {
-    self.0.update(cx, |_, cx| cx.emit(event));
   }
 }
 

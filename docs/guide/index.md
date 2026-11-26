@@ -11,7 +11,7 @@ macOS 15 or later on Apple Silicon. Intel Macs, Linux and Windows are not suppor
 
 Download the latest `gCode-<tag>-macos-arm64.zip` from [GitHub Releases](https://github.com/cagatayldzz/vekro/releases),
 unzip it and move `gCode.app` to Applications. Releases are signed and notarized, and gCode can update itself
-(see [Settings → Updates](./settings.md#updates)).
+(see [Settings → About](./settings.md#updates)).
 
 To run it from source instead, see [Development → Setup](../development/index.md):
 
