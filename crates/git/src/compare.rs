@@ -10,9 +10,6 @@ use std::{
 /// How many commits of each side of a comparison are listed.
 pub const COMPARE_LIMIT: usize = 300;
 
-/// How many recently used branches the list offers.
-const RECENT_LIMIT: usize = 5;
-
 /// A branch to compare with, and how it stands against the current branch.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BranchRef {
@@ -22,17 +19,17 @@ pub struct BranchRef {
   pub ahead: usize,
   /// Commits this branch has that the current one does not.
   pub behind: usize,
+  /// When the branch's latest commit was made, in seconds since the epoch.
+  pub time: Option<i64>,
 }
 
-/// The branches to choose from, in the groups the list shows.
+/// The branches to choose from. The list groups them (favorites, recent, others) from this order.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BranchChoices {
   /// The branch the remote calls its default (else `main` or `master`).
   pub default: Option<BranchRef>,
-  /// The branches checked out lately.
-  pub recent: Vec<BranchRef>,
-  /// All the others, local and remote, by name.
-  pub other: Vec<BranchRef>,
+  /// All the others, local and remote, the one with the newest commit first.
+  pub branches: Vec<BranchRef>,
 }
 
 /// The two sides of a comparison.
@@ -80,7 +77,8 @@ pub fn compare_choices(path: &Path) -> Result<BranchChoices, String> {
     .into_iter()
     .filter_map(|(name, id)| {
       let (ahead, behind) = repository.graph_ahead_behind(head_id, id).ok()?;
-      Some((name.clone(), BranchRef { name, ahead, behind }))
+      let time = repository.find_commit(id).ok().map(|commit| commit.time().seconds());
+      Some((name.clone(), BranchRef { name, ahead, behind, time }))
     })
     .collect();
   let mut taken: HashSet<String> = HashSet::new();
@@ -97,26 +95,10 @@ pub fn compare_choices(path: &Path) -> Result<BranchChoices, String> {
     .map(|short| if locals.contains(&short) { short } else { format!("origin/{short}") })
     .or_else(|| ["main", "master"].iter().find(|name| locals.contains(**name)).map(|name| (*name).to_string()));
   let default = default_name.and_then(|name| take(&name));
-  let mut recent = Vec::new();
-  if let Ok(reflog) = repository.reflog("HEAD") {
-    'entries: for entry in reflog.iter() {
-      let moved =
-        entry.message().ok().flatten().and_then(|text| text.strip_prefix("checkout: moving from ")).and_then(|rest| rest.split_once(" to "));
-      for name in moved.into_iter().flat_map(|(from, to)| [to, from]) {
-        if locals.contains(name) {
-          if let Some(branch) = take(name) {
-            recent.push(branch);
-          }
-        }
-        if recent.len() >= RECENT_LIMIT {
-          break 'entries;
-        }
-      }
-    }
-  }
-  let mut other: Vec<BranchRef> = counted.into_iter().filter(|(name, _)| !taken.contains(name)).map(|(_, branch)| branch).collect();
-  other.sort_by_key(|branch| branch.name.to_lowercase());
-  Ok(BranchChoices { default, recent, other })
+  let mut branches: Vec<BranchRef> = counted.into_iter().filter(|(name, _)| !taken.contains(name)).map(|(_, branch)| branch).collect();
+  // The newest first; a branch with no known time goes last, and equal times go by name.
+  branches.sort_by(|a, b| b.time.cmp(&a.time).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+  Ok(BranchChoices { default, branches })
 }
 
 /// The commits that differ between the current branch and `branch`, on each side.

@@ -587,7 +587,8 @@ impl Render for DiffTable {
     }
     let rows = list(self.list.clone(), cx.processor(|this, ix: usize, _, cx| this.row(ix, cx)));
     let scrolls_sideways = !self.wrap;
-    let strip = crate::components::scrollbar_strip(&self.list, "diff-scrollbar", cx);
+    // The strip is shown only while the rows are taller than the table.
+    let overflows = self.list.max_offset_for_scrollbar().y > px(0.);
     h_flex()
       .id("diff-table")
       .key_context("DiffTable")
@@ -614,7 +615,7 @@ impl Render for DiffTable {
           .when(scrolls_sideways, |table| table.child(ScrollableMask::new(Axis::Horizontal, &self.scroll_x).id("diff-horizontal-wheel")))
           .when(scrolls_sideways, |table| table.child(div().absolute().inset_0().child(Scrollbar::horizontal(&self.scroll_x)))),
       )
-      .child(strip)
+      .when(overflows, |table| table.child(crate::components::scrollbar_strip(&self.list, "diff-scrollbar", cx)))
       // A drag over the numbers or the text may end anywhere.
       .on_mouse_up(
         MouseButton::Left,

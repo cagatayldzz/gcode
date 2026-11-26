@@ -55,26 +55,24 @@ fn the_choices_leave_out_the_current_branch_and_count_both_ways() {
   let dir = diverged("choices");
   let choices = compare_choices(&dir).unwrap();
   assert_eq!(choices.default, None, "main is the current branch, so only feature is left");
-  // feature was checked out lately, so it is in the recent group.
-  assert!(choices.other.is_empty());
-  assert_eq!(choices.recent.len(), 1);
-  let feature = &choices.recent[0];
+  assert_eq!(choices.branches.len(), 1);
+  let feature = &choices.branches[0];
   assert_eq!((feature.name.as_str(), feature.behind, feature.ahead), ("feature", 2, 1));
   fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
-fn recently_used_branches_are_listed_newest_first_and_once() {
-  let dir = diverged("recent");
+fn branches_are_listed_newest_commit_first_and_once() {
+  let dir = diverged("newest");
   ws_git::create_branch(&dir, "zzz").unwrap();
+  commit_file(&dir, "z.txt", "z\n", "feat: z", 6_000);
   checkout(&dir, "main");
   ws_git::create_branch(&dir, "aaa").unwrap();
+  commit_file(&dir, "a2.txt", "a\n", "feat: a", 5_000);
   checkout(&dir, "main");
   let choices = compare_choices(&dir).unwrap();
-  assert_eq!(choices.recent.iter().map(|branch| branch.name.as_str()).collect::<Vec<_>>(), ["aaa", "zzz", "feature"], "newest checkout first");
-  let all: Vec<String> = choices.default.iter().chain(&choices.recent).chain(&choices.other).map(|branch| branch.name.clone()).collect();
-  assert!(["aaa", "feature", "zzz"].iter().all(|name| all.iter().any(|found| found == name)), "every branch is offered once: {all:?}");
-  assert_eq!(all.len(), 3);
+  assert_eq!(choices.branches.iter().map(|branch| branch.name.as_str()).collect::<Vec<_>>(), ["zzz", "aaa", "feature"], "newest commit first");
+  assert_eq!(choices.branches[0].time, Some(6_000));
   fs::remove_dir_all(dir).unwrap();
 }
 

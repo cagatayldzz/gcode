@@ -125,6 +125,15 @@ const MENU_GAP: Pixels = px(4.);
 /// How many of the most recently changed branches the branch menu lists as recent.
 const RECENT_BRANCHES: usize = 5;
 
+/// The branches of the compare list, in its groups.
+#[derive(Default)]
+pub(crate) struct CompareGroups {
+  pub default: Option<BranchRef>,
+  pub favorites: Vec<BranchRef>,
+  pub recent: Vec<BranchRef>,
+  pub other: Vec<BranchRef>,
+}
+
 /// How often the toolbar redraws while git reports its progress.
 /// How long the fill of a finished push, pull or fetch takes to reach the right edge.
 const REMOTE_FINISH: Duration = Duration::from_millis(300);
@@ -431,6 +440,8 @@ pub struct Workspace {
   history_scroll: ScrollHandle,
   /// The scroll position of the list in the branch menu, which has a scrollbar strip of its own.
   branch_scroll: ScrollHandle,
+  /// The scroll position of the branches under the compare field, which have a scrollbar strip of their own.
+  compare_scroll: ScrollHandle,
   changes_scroll: VirtualListScrollHandle,
   /// Row sizes of the virtualized Changes list.
   change_sizes: RefCell<Rc<Vec<Size<Pixels>>>>,
@@ -628,6 +639,7 @@ impl Workspace {
       history_limit: HISTORY_PAGE,
       history_scroll: ScrollHandle::new(),
       branch_scroll: ScrollHandle::new(),
+      compare_scroll: ScrollHandle::new(),
       changes_scroll: VirtualListScrollHandle::new(),
       change_sizes: RefCell::new(Rc::new(Vec::new())),
       index_task: Task::ready(()),

@@ -195,9 +195,8 @@ impl Workspace {
             h_flex()
               .id(SharedString::from(format!("branch-{name}")))
               .gap_2()
-              .px_2()
+              .px_3()
               .py_1()
-              .rounded_md()
               .items_center()
               .cursor_pointer()
               .when(selected, |row| row.bg(palette.selected))
@@ -266,7 +265,7 @@ impl Workspace {
             if let Some(label) = label {
               rows.push(
                 Label::new(label)
-                  .px_2()
+                  .px_3()
                   .pt_2()
                   .text_size(FONT_SIZE_SM)
                   .font_weight(FontWeight::SEMIBOLD)
@@ -293,8 +292,6 @@ impl Workspace {
               self.scrolling_list(
                 div().id("branch-list").max_h(list_height).overflow_y_scroll().track_scroll(&self.branch_scroll).child(
                   v_flex()
-                    .gap_0p5()
-                    .px_3()
                     .pb_3()
                     .when(starts_with_row, |list| list.pt_3())
                     .when(rows.is_empty(), |list| list.child(Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground)))
@@ -342,14 +339,13 @@ impl Workspace {
               } else {
                 self
                   .scrolling_list(
-                    div().id("pull-request-list").max_h(menu_height).overflow_y_scroll().track_scroll(&self.branch_scroll).child(
-                      v_flex().gap_0p5().px_3().children(shown.into_iter().map(|request| {
+                    div().id("pull-request-list").max_h(menu_height).overflow_y_scroll().track_scroll(&self.branch_scroll).child(v_flex().children(
+                      shown.into_iter().map(|request| {
                         let url = request.url.clone();
                         v_flex()
                           .id(SharedString::from(format!("pull-request-{}", request.url)))
-                          .px_2()
+                          .px_3()
                           .py_1()
-                          .rounded_md()
                           .cursor_pointer()
                           .hover(|row| row.bg(palette.hover))
                           .child(
@@ -367,8 +363,8 @@ impl Workspace {
                               .text_ellipsis(),
                           )
                           .on_click(move |_, _, cx| cx.open_url(&url))
-                      })),
-                    ),
+                      }),
+                    )),
                     cx,
                   )
                   .into_any_element()

@@ -311,24 +311,24 @@ impl Workspace {
     cx.notify();
   }
 
-  /// The branches the field's text matches, in the list's three groups.
-  pub(super) fn matching_compare_branches(&self, cx: &App) -> (Option<BranchRef>, Vec<BranchRef>, Vec<BranchRef>) {
+  /// The branches the field's text matches, in the groups of the branch menu: the default branch, the starred ones, the five with the
+  /// newest commits, then the rest. Each group has the newest first.
+  pub(super) fn matching_compare_branches(&self, cx: &App) -> CompareGroups {
     let query = self.compare_filter.read(cx).value().trim().to_lowercase();
     let fits = |branch: &BranchRef| query.is_empty() || branch.name.to_lowercase().contains(&query);
-    match &self.compare_choices {
-      Some(choices) => (
-        choices.default.clone().filter(fits),
-        choices.recent.iter().filter(|branch| fits(branch)).cloned().collect(),
-        choices.other.iter().filter(|branch| fits(branch)).cloned().collect(),
-      ),
-      None => (None, Vec::new(), Vec::new()),
-    }
+    let Some(choices) = &self.compare_choices else { return CompareGroups::default() };
+    let starred = self.projects.active.as_ref().map(|path| self.projects.favorite_branches(path)).unwrap_or_default();
+    let (favorites, rest): (Vec<_>, Vec<_>) =
+      choices.branches.iter().filter(|branch| fits(branch)).cloned().partition(|branch| starred.contains(&branch.name));
+    let mut rest = rest.into_iter();
+    let recent: Vec<BranchRef> = rest.by_ref().take(RECENT_BRANCHES).collect();
+    CompareGroups { default: choices.default.clone().filter(fits), favorites, recent, other: rest.collect() }
   }
 
   /// Enter in the field: compares with the first branch that matches.
   pub(super) fn choose_first_compare_branch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    let (default, recent, other) = self.matching_compare_branches(cx);
-    if let Some(branch) = default.into_iter().chain(recent).chain(other).next() {
+    let groups = self.matching_compare_branches(cx);
+    if let Some(branch) = groups.default.into_iter().chain(groups.favorites).chain(groups.recent).chain(groups.other).next() {
       self.choose_compare_branch(branch.name, window, cx);
     }
   }

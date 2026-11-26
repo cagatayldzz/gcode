@@ -56,8 +56,8 @@ started on and tells you which files conflicted. **Nothing is left half done.**
 
 ## Comparing branches
 
-Above the list, **Select Branch to Compare…** lists the other branches: the default branch, the ones you used lately, then all the
-others (local and remote). Each shows how many commits it is **behind (↓)** and **ahead (↑)** of the current branch. Type to
+Above the list, **Select Branch to Compare…** lists the other branches as the branch menu does: the default branch, your **Favorites**, the five
+**Recent Branches** (newest commit first), then all the **Other Branches** (local and remote), also newest first. Each shows how many commits it is **behind (↓)** and **ahead (↑)** of the current branch. Type to
 narrow the list; Enter takes the first match.
 
 Choosing a branch shows two tabs:

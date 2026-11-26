@@ -994,20 +994,19 @@ impl Workspace {
         .child(Label::new("Reading branches…").text_color(theme.muted_foreground))
         .into_any_element();
     }
-    let (default, recent, other) = self.matching_compare_branches(cx);
-    if default.is_none() && recent.is_empty() && other.is_empty() {
+    let groups = self.matching_compare_branches(cx);
+    if groups.default.is_none() && groups.favorites.is_empty() && groups.recent.is_empty() && groups.other.is_empty() {
       return Label::new("No matching branches").px_2().py_1().text_color(theme.muted_foreground).into_any_element();
     }
-    let heading = |text: &'static str| Label::new(text).px_2().pt_2().pb_1().font_weight(FontWeight::SEMIBOLD).text_color(theme.muted_foreground);
+    let heading = |text: &'static str| Label::new(text).px_3().pt_2().pb_1().font_weight(FontWeight::SEMIBOLD).text_color(theme.muted_foreground);
     let row = |branch: &BranchRef, cx: &mut Context<Self>| {
       let name = branch.name.clone();
       h_flex()
         .id(SharedString::from(format!("compare-branch-{}", branch.name)))
         .gap_2()
-        .px_2()
+        .px_3()
         .py_1p5()
         .items_center()
-        .rounded_md()
         .cursor_pointer()
         .hover(|row| row.bg(palette.hover))
         .child(Icon::empty().path("icons/git-branch.svg").size_4().text_color(theme.muted_foreground))
@@ -1016,17 +1015,31 @@ impl Workspace {
         .on_click(cx.listener(move |this, _, window, cx| this.choose_compare_branch(name.clone(), window, cx)))
         .into_any_element()
     };
-    let mut list = v_flex().id("compare-list").flex_1().min_h_0().pr_3().overflow_y_scrollbar();
-    if let Some(branch) = &default {
-      list = list.child(heading("Default Branch")).child(row(branch, cx));
+    let mut list = v_flex()
+      .id("compare-list")
+      .size_full()
+      .overflow_y_scroll()
+      .track_scroll(&self.compare_scroll)
+      .when(groups.default.is_some(), |list| list.pt_2());
+    // The default branch is the first row and needs no heading, as in the branch menu.
+    if let Some(branch) = &groups.default {
+      list = list.child(row(branch, cx));
     }
-    if !recent.is_empty() {
-      list = list.child(heading("Recent Branches")).children(recent.iter().map(|branch| row(branch, cx)).collect::<Vec<_>>());
+    for (label, branches) in [("Favorites", &groups.favorites), ("Recent Branches", &groups.recent), ("Other Branches", &groups.other)] {
+      if !branches.is_empty() {
+        list = list.child(heading(label)).children(branches.iter().map(|branch| row(branch, cx)).collect::<Vec<_>>());
+      }
     }
-    if !other.is_empty() {
-      list = list.child(heading("Other Branches")).children(other.iter().map(|branch| row(branch, cx)).collect::<Vec<_>>());
-    }
-    list.into_any_element()
+    // The scrollbar has a strip of its own beside the list, as in History, shown only while the rows are taller than the list.
+    h_flex()
+      .flex_1()
+      .min_h_0()
+      .bg(palette.background)
+      .child(div().flex_1().min_w_0().h_full().child(list))
+      .when(self.compare_scroll.max_offset().y > px(0.), |row| {
+        row.child(crate::components::scrollbar_strip(&self.compare_scroll, "compare-scrollbar", cx))
+      })
+      .into_any_element()
   }
 
   /// The comparison with the chosen branch: its two sides as tabs, the commits of the shown side, and what merging would do.
