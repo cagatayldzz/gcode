@@ -276,7 +276,6 @@ impl Workspace {
     let loading = self.search_cancellation.is_some();
     let status = self.search_error.as_ref().map_or_else(|| self.search_status(), ToString::to_string);
     let option = |label, title, selected| Button::new(title).ghost().xsmall().label(label).tooltip(title).selected(selected);
-    let focus = self.focus_handle.clone();
     let flags = h_flex()
       .gap_0p5()
       .child(option("Aa", "Match case", self.search_options.case_sensitive).on_click(cx.listener(|this, _, window, cx| {
@@ -374,26 +373,9 @@ impl Workspace {
         )
       })
       .when(!status.is_empty(), |panel| {
-        panel.child(
-          h_flex()
-            .gap_2()
-            .when(loading, |row| row.child(Spinner::new().small()))
-            .flex_wrap()
-            .child(Label::new(status).text_size(FONT_SIZE_SM).text_color(if self.search_error.is_some() {
-              theme.danger
-            } else {
-              theme.muted_foreground
-            }))
-            .when(!self.search_results.is_empty(), |row| {
-              row.child(
-                Button::new("open-search-results")
-                  .link()
-                  .xsmall()
-                  .label("Open in editor")
-                  .on_click(move |_, window, cx| focus.dispatch_action(&OpenSearchResults, window, cx)),
-              )
-            }),
-        )
+        panel.child(h_flex().gap_2().when(loading, |row| row.child(Spinner::new().small())).flex_wrap().child(
+          Label::new(status).text_size(FONT_SIZE_SM).text_color(if self.search_error.is_some() { theme.danger } else { theme.muted_foreground }),
+        ))
       })
       .child(self.render_search_results(cx))
       .into_any_element()

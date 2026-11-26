@@ -1207,6 +1207,12 @@ impl Workspace {
           )
         })
     });
-    v_flex().flex_1().min_h_0().gap_2().child(div().px_3().child(tabs)).child(list).children(footer).into_any_element()
+    v_flex()
+      .flex_1()
+      .min_h_0()
+      .gap_2()
+      .child(div().px_3().child(tabs))
+      .child(v_flex().flex_1().min_h_0().gap_2().bg(palette.background).child(list).children(footer))
+      .into_any_element()
   }
 }
