@@ -71,15 +71,12 @@ The button in the Changes header opens every file's diff in **one scrollable pan
 2. Write a **Summary** (required) and, if you like, a **Description**.
 3. Press **Commit N files to &lt;branch&gt;**.
 
-```text
- commit(path, files, summary, description)
-   └─ the commit is built from  LAST COMMIT  +  the ticked files
-      ⇒ unticked files stay exactly as they are, and still show up in Changes
-        (even if you had staged them before)
-```
+Ticking a file includes its whole working copy, including any unstaged edits to that file. Staged changes for unticked files
+remain staged and are kept out of the commit. Repository hooks can edit the message or stage fixes, and Git applies your signing
+configuration. If a hook or signing rejects the commit, the app shows Git’s output and keeps the commit draft.
 
-A commit needs `user.name` and `user.email` in your Git configuration. The commit button is disabled while the summary is empty, while
-nothing is ticked, during a merge in progress, and while another Git operation runs.
+A commit needs a Git author identity. The commit button is disabled when the summary is empty, no file is selected, or a Git
+operation is in progress.
 
 ### Commit options (right-click the Commit button)
 

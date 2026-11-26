@@ -178,13 +178,22 @@ impl Workspace {
     cx.notify();
   }
 
+  pub(super) fn selected_commit_files(&self, git: &ws_git::Summary) -> Vec<PathBuf> {
+    git
+      .changes
+      .iter()
+      .filter(|change| !self.excluded.contains(&change.path))
+      .flat_map(|change| std::iter::once(change.path.clone()).chain(change.from.clone()))
+      .collect()
+  }
+
   /// Commits the changed files that are ticked, with the summary and description typed below the list.
   pub(super) fn commit_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
     if self.committing || self.discarding || git.operation != ws_git::Operation::Idle || self.merge_task.is_some() {
       return;
     }
-    let files: Vec<PathBuf> = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).map(|change| change.path.clone()).collect();
+    let files = self.selected_commit_files(git);
     let summary = self.commit_summary.read(cx).value().to_string();
     let description = self.commit_description.read(cx).value().to_string();
     self.committing = true;
@@ -197,9 +206,9 @@ impl Workspace {
     let work = cx.background_executor().spawn({
       let (root, files) = (root.clone(), files.clone());
       async move {
-        let id = ws_git::commit(&root, &files, &summary, &description)?;
-        let pushed = push.then(|| ws_git::push(&root, credentials_for_repository(&accounts, &root).as_ref(), |_| {}));
-        Ok::<_, String>((id, pushed))
+        let commit = ws_git::commit(&root, &files, &summary, &description)?;
+        let pushed = (push && commit.warning.is_none()).then(|| ws_git::push(&root, credentials_for_repository(&accounts, &root).as_ref(), |_| {}));
+        Ok::<_, String>((commit, pushed))
       }
     });
     cx.spawn_in(window, async move |this, cx| {
@@ -207,7 +216,7 @@ impl Workspace {
       let _ = this.update_in(cx, |this, window, cx| {
         this.committing = false;
         match result {
-          Ok((id, pushed)) => {
+          Ok((commit, pushed)) => {
             // The diff of a file that was just committed has nothing left to show.
             if let Some(open) =
               this.selected_change.clone().filter(|open| files.contains(open) && job_scope::lands_here(this.projects.active.as_deref(), &root))
@@ -222,17 +231,23 @@ impl Workspace {
             }
             this.clear_commit_draft(&root, window, cx);
             this.settle_job(&root, cx);
+            if let Some(warning) = commit.warning {
+              window.push_notification(crate::failure(this.say_where(&root, warning)), cx);
+            }
             match pushed {
               None | Some(Ok(_)) => {}
               Some(Err(message)) => {
                 if let Some(kind) = refusal_kind(&message) {
                   this.flag_account_issue(&remote_url, kind, cx);
                 }
-                this.push_remote_failure(format!("Committed {id}, but the push failed: {message}"), &remote_url, window, cx)
+                this.push_remote_failure(format!("Committed {}, but the push failed: {message}", commit.id), &remote_url, window, cx)
               }
             }
           }
-          Err(message) => window.push_notification(crate::failure(message), cx),
+          Err(message) => {
+            this.settle_job(&root, cx);
+            window.push_notification(crate::failure(this.say_where(&root, message)), cx);
+          }
         }
         cx.notify();
       });

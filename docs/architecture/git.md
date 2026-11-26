@@ -6,18 +6,18 @@ temporary directories, and exposes plain functions that return `Result<_, String
 ## Two engines, one rule
 
 ```text
-              reading state, local edits                 talking to a remote, merging
+              reading state, local edits                 commit, network and sequencer
              ┌────────────────────────────┐             ┌──────────────────────────────┐
              │ libgit2  (git2 crate)       │             │ the `git` program             │
              │  summary · history · diff   │             │  clone · fetch · pull · push  │
-             │  commit · branches · tags   │             │  merge · revert · cherry-pick │
-             │  create repository          │             │  stash                        │
+             │  branches · tags            │             │  merge · revert · cherry-pick │
+             │  create repository          │             │  commit · amend · stash       │
              └────────────────────────────┘             └──────────────────────────────┘
                   fast, in-process                          the user's own credentials apply
 ```
 
 **Rule:** `git2` is used to read state and create repositories; the `git` program is used for `clone` and everything that needs the user's
-credentials or Git's full merge machinery. And **no Git command that changes the user's repository runs from the interface without an
+credentials, hooks, signing, or Git's full merge machinery. And **no Git command that changes the user's repository runs from the interface without an
 explicit user action.**
 
 ## What the crate exposes
@@ -69,10 +69,19 @@ The sync button is a direct function of this value (`render_git_toolbar`):
 
 ### Commit
 
-`commit(path, files, summary, description)` builds the tree **from the last commit plus the chosen files only**, in memory, so what was
-staged for other files is left out. Afterwards the index of the chosen files matches the commit. `amend_commit` is the same with HEAD's
-parents, then moves the branch reference to the new commit (libgit2 refuses to create a commit whose parent is not the tip, so the commit
-is created without updating HEAD and the branch is moved afterwards). A commit a remote already has cannot be amended.
+Commit and amend use `git commit --only`, so Git enforces repository hooks, commit signing and its expected-HEAD update. Files
+are selected by literal paths, including both paths of a selected rename. The selection uses whole working-tree files. Staged
+changes on unticked paths stay outside the commit unless a hook explicitly stages them into it.
+
+The app holds the worktree's real `index.lock` and copies its index to a private, temporary directory under the Git directory.
+Untracked selections are registered with intent to add in that copy. Git only writes the isolated index until the commit succeeds.
+The app aligns selected paths and hook-added paths with the committed tree, preserving prior staging for unrelated files, and
+atomically publishes the index. A hook rejection or signing failure leaves the real index intact. Hooks can still change files in
+the working tree. When Git commits successfully but publishing the index fails, the result carries the created commit and a
+separate warning. The interface skips automatic push on that outcome.
+
+Message-only amend uses the same transaction with an empty selection. Amend checks that the existing commit is unpublished and
+is not a merge commit. The normal commit and amend flows refuse to start during another Git operation.
 
 ### Pull
 

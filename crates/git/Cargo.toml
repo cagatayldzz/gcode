@@ -16,6 +16,7 @@ doctest = false
 [dependencies]
 ws-activity.workspace = true
 git2.workspace = true
+tempfile = "3.27.0"
 
 [dev-dependencies]
 git2.workspace = true

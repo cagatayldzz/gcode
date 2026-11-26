@@ -176,7 +176,7 @@ fn committing_takes_only_the_chosen_files() {
   fs::write(dir.join("fresh.txt"), "new").unwrap();
 
   let id = commit(&dir, &[PathBuf::from("kept.txt"), PathBuf::from("fresh.txt")], "  Change two files ", "More about it").unwrap();
-  assert_eq!(id.len(), 7);
+  assert_eq!(id.id.len(), 7);
   let found = summary(&dir).unwrap();
   let left: Vec<_> = found.changes.iter().map(|change| change.path.to_string_lossy().into_owned()).collect();
   assert_eq!(left, ["other.txt"]);

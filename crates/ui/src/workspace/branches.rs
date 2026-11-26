@@ -525,7 +525,7 @@ impl Workspace {
     if self.committing || self.discarding || git.operation != ws_git::Operation::Idle || self.merge_task.is_some() {
       return;
     }
-    let files: Vec<PathBuf> = git.changes.iter().filter(|change| !self.excluded.contains(&change.path)).map(|change| change.path.clone()).collect();
+    let files = self.selected_commit_files(git);
     let mut summary = self.commit_summary.read(cx).value().to_string();
     let mut description = self.commit_description.read(cx).value().to_string();
     self.committing = true;
@@ -544,13 +544,19 @@ impl Workspace {
       let _ = this.update_in(cx, |this, window, cx| {
         this.committing = false;
         match result {
-          Ok(_) => {
+          Ok(commit) => {
+            if let Some(warning) = commit.warning {
+              window.push_notification(crate::failure(this.say_where(&root, warning)), cx);
+            }
             this.clear_commit_draft(&root, window, cx);
             if this.settle_job(&root, cx) {
               this.load_history(cx);
             }
           }
-          Err(message) => window.push_notification(crate::failure(message), cx),
+          Err(message) => {
+            this.settle_job(&root, cx);
+            window.push_notification(crate::failure(this.say_where(&root, message)), cx);
+          }
         }
         cx.notify();
       });

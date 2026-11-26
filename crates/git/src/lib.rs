@@ -12,6 +12,9 @@ pub use branch::{
   restore_stash, restore_stash_by_id, stash_changes, stash_ids, switch_branch_with, upstream_remote, BranchEntry, Changes, SWITCH_OVERWRITE,
 };
 
+mod commit;
+pub use commit::{amend_commit, commit, CommitOutcome};
+
 mod commit_actions;
 pub use commit_actions::{add_to_gitignore, branch_from_commit, cherry_pick, revert_commit};
 
@@ -385,90 +388,6 @@ pub fn discard_changes(path: &Path, file: &Path) -> Result<(), String> {
     Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(format!("Could not remove {}: {error}", file.display())),
     _ => Ok(()),
   }
-}
-
-/// Commits `files` (relative to the repository) with the given message, and nothing else: other changes stay as they are,
-/// also those that were staged. Returns the short id of the new commit.
-///
-/// The commit is built from the last commit plus the chosen files, so what was staged for other files is left out of it.
-/// Afterwards the index of the chosen files matches the commit, like after `git commit <files>`.
-pub fn commit(path: &Path, files: &[PathBuf], summary: &str, description: &str) -> Result<String, String> {
-  build_commit(path, files, summary, description, false)
-}
-
-/// Replaces the last commit with one that also has `files` (which may be none, to only change the message), like
-/// `git commit --amend`. A commit a remote branch already has cannot be amended: that would rewrite published history. Returns
-/// the short id of the new commit.
-pub fn amend_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str) -> Result<String, String> {
-  build_commit(path, files, summary, description, true)
-}
-
-fn build_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str, amend: bool) -> Result<String, String> {
-  let summary = summary.trim();
-  if summary.is_empty() {
-    return Err("Write a summary for the commit.".into());
-  }
-  if files.is_empty() && !amend {
-    return Err("Choose at least one file to commit.".into());
-  }
-  let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
-  operation::require_idle(&repository)?;
-  let workdir = repository.workdir().ok_or("The repository has no working folder.")?.to_path_buf();
-  let signature = repository.signature().map_err(|_| "Set user.name and user.email in your Git configuration first.".to_string())?;
-  let parent = repository.head().ok().and_then(|head| head.peel_to_commit().ok());
-  if amend {
-    let last = parent.as_ref().ok_or("There is no commit to amend.")?;
-    if last.parent_count() > 1 {
-      return Err("A merge commit cannot be amended here.".into());
-    }
-    if on_remote(&repository, last.id()) {
-      return Err("This commit is already on the remote; amending it would rewrite published history.".into());
-    }
-  }
-
-  // A copy of the last commit's tree in memory, with the chosen files applied.
-  let mut tree_index = git2::Index::new().map_err(|error| error.message().to_string())?;
-  if let Some(parent) = &parent {
-    tree_index.read_tree(&parent.tree().map_err(|error| error.message().to_string())?).map_err(|error| error.message().to_string())?;
-  }
-  let mut real_index = repository.index().map_err(|error| error.message().to_string())?;
-  for file in files {
-    if workdir.join(file).exists() {
-      real_index.add_path(file).map_err(|error| error.message().to_string())?;
-      let entry = real_index.get_path(file, 0).ok_or_else(|| format!("Could not add {}.", file.display()))?;
-      tree_index.add(&entry).map_err(|error| error.message().to_string())?;
-    } else {
-      // A deleted file: it leaves both the commit and the index.
-      let _ = tree_index.remove_path(file);
-      let _ = real_index.remove_path(file);
-    }
-  }
-  let tree_id = tree_index.write_tree_to(&repository).map_err(|error| error.message().to_string())?;
-  let tree = repository.find_tree(tree_id).map_err(|error| error.message().to_string())?;
-  if !amend && parent.as_ref().is_some_and(|parent| parent.tree_id() == tree_id) {
-    return Err("The chosen files have no changes to commit.".into());
-  }
-  let message = match description.trim() {
-    "" => summary.to_string(),
-    description => format!("{summary}\n\n{description}"),
-  };
-  let before_last: Option<git2::Commit> = if amend { parent.as_ref().and_then(|last| last.parent(0).ok()) } else { None };
-  let parents: Vec<&git2::Commit> = if amend { before_last.iter().collect() } else { parent.iter().collect() };
-  // An amended commit does not have the current tip as its parent, so the branch is moved to it afterwards.
-  let id = repository
-    .commit(if amend { None } else { Some("HEAD") }, &signature, &signature, &message, &tree, &parents)
-    .map_err(|error| error.message().to_string())?;
-  if amend {
-    let head = repository.head().map_err(|error| error.message().to_string())?;
-    if head.is_branch() {
-      let name = head.name().map_err(|error| error.message().to_string())?.to_string();
-      repository.reference(&name, id, true, "commit (amend)").map_err(|error| error.message().to_string())?;
-    } else {
-      repository.set_head_detached(id).map_err(|error| error.message().to_string())?;
-    }
-  }
-  real_index.write().map_err(|error| error.message().to_string())?;
-  Ok(id.to_string().chars().take(7).collect())
 }
 
 /// The local branches of the repository containing `path`, sorted by name (the current one is not moved to the front).
