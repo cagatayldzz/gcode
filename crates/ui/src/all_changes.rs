@@ -17,7 +17,7 @@ use gpui_kit::{
     menu::{DropdownMenu as _, PopupMenuItem},
     progress::ProgressCircle,
     spinner::Spinner,
-    v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, StyledExt as _,
+    v_flex, ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
   },
   *,
 };
@@ -32,6 +32,11 @@ use std::{
 
 // The Kit adds a one-pixel separator above every header after the first one.
 const FILE_HEADER_SEPARATOR: Pixels = px(1.);
+
+/// The first Kit header has 1.5 rem of content, 0.5 rem of padding and a bottom rule.
+pub(crate) fn first_file_header_height(rem_size: Pixels) -> Pixels {
+  rem_size * 2. + FILE_HEADER_SEPARATOR
+}
 
 #[derive(Default)]
 struct FileHeaderLayout {
@@ -181,7 +186,7 @@ impl AllChanges {
       .overflow_hidden()
       .gap_3()
       .px_4()
-      .py_1p5()
+      .h_9()
       .items_center()
       .border_b_1()
       .border_color(palette.border)
@@ -259,6 +264,11 @@ impl Render for AllChanges {
       return crate::components::skeleton_lines(16);
     }
     let state = diff.state().clone();
+    let files = state.read(cx).files();
+    let first_file = files.first().map(|file| file.path().clone());
+    let collapsed_with_next: HashSet<_> =
+      files.windows(2).map(|pair| pair[0].path()).filter(|path| state.read(cx).is_file_collapsed(path)).cloned().collect();
+    let collapsed_headers = collapsed_with_next.clone();
     let view = cx.entity().downgrade();
     let layout = Rc::new(RefCell::new(FileHeaderLayout::default()));
     let header_layout = layout.clone();
@@ -287,12 +297,21 @@ impl Render for AllChanges {
       .render_header(move |file, _, cx| {
         let layout = header_layout.clone();
         let path = file.path().clone();
+        let has_top_border = first_file.as_ref() != Some(&path);
+        let hide_bottom_border = collapsed_headers.contains(&path);
         file_header(file, &header_view, cx).relative().child(
           canvas(
-            move |bounds, window, _| {
-              // Measure the top of the Kit row, including its vertical padding and separator.
-              let header_top = bounds.top() - window.rem_size() / 4.;
-              let offset = header_top - window.content_mask().bounds.top();
+            move |bounds, window, cx| {
+              let mask = window.content_mask();
+              let padding = window.rem_size() / 4.;
+              let top_border = if has_top_border { FILE_HEADER_SEPARATOR } else { Pixels::ZERO };
+              let offset = bounds.top() - padding - top_border - mask.bounds.top();
+              if hide_bottom_border {
+                // The following header already draws the separator. Paint over this row's bottom rule after the Kit draws it.
+                let mut cover = div().w_full().h_px().bg(cx.theme().background).into_any_element();
+                cover.layout_as_root(size(mask.bounds.size.width.into(), AvailableSpace::MinContent), window, cx);
+                window.defer_draw(cover, point(mask.bounds.left(), bounds.bottom() + padding), 0, Some(mask));
+              }
               let mut layout = layout.borrow_mut();
               if offset < Pixels::ZERO {
                 layout.above = Some(path);
@@ -314,7 +333,7 @@ impl Render for AllChanges {
         let files = sticky_state.read(cx).files();
         let mut current = current_file.borrow_mut();
         // When the next header reaches the top it can take over in the list itself.
-        if let Some((path, _)) = below.as_ref().filter(|(_, offset)| *offset <= FILE_HEADER_SEPARATOR) {
+        if let Some((path, _)) = below.as_ref().filter(|(_, offset)| *offset == Pixels::ZERO) {
           *current = Some(path.clone());
           return;
         }
@@ -330,32 +349,36 @@ impl Render for AllChanges {
         let state = sticky_state.clone();
         let path = file.path().clone();
         let collapsed = state.read(cx).is_file_collapsed(&path);
-        let mut header = h_flex()
+        let draw_separator = !collapsed_with_next.contains(&path) || below.is_none();
+        let mut header = v_flex()
           .id(SharedString::from(format!("sticky-diff-header-{path}")))
           .block_mouse_except_scroll()
           .w(viewport.size.width)
-          .gap_1()
-          .pl_1()
-          .pr_3()
-          .py_1()
-          .border_b_1()
-          .border_color(cx.theme().border)
-          .bg(colors(cx).background)
+          .bg(cx.theme().background)
           .child(
-            Button::new("collapse-sticky-file")
-              .ghost()
-              .xsmall()
-              .icon(if collapsed { IconName::ChevronRight } else { IconName::ChevronDown })
-              .accessibility_label(if collapsed { "Expand file" } else { "Collapse file" })
-              .on_click(move |_, _, cx| {
-                state.update(cx, |state, cx| state.set_file_collapsed(&path, !collapsed, cx));
-              }),
+            h_flex()
+              .gap_1()
+              .pl_1()
+              .pr_3()
+              .py_1()
+              .child(
+                Button::new("collapse-sticky-file")
+                  .ghost()
+                  .xsmall()
+                  .icon(if collapsed { IconName::ChevronRight } else { IconName::ChevronDown })
+                  .accessibility_label(if collapsed { "Expand file" } else { "Collapse file" })
+                  .on_click(move |_, _, cx| {
+                    state.update(cx, |state, cx| state.set_file_collapsed(&path, !collapsed, cx));
+                  }),
+              )
+              .child(div().flex_1().min_w_0().child(file_header(file, &view, cx))),
           )
-          .child(div().flex_1().min_w_0().child(file_header(file, &view, cx)))
+          .when(draw_separator, |header| header.child(div().flex_none().w_full().h_px().bg(cx.theme().border)))
           .into_any_element();
         let size = header.layout_as_root(size(viewport.size.width.into(), AvailableSpace::MinContent), window, cx);
         let offset = below.map_or(Pixels::ZERO, |(_, top)| (top - size.height).min(Pixels::ZERO));
-        window.defer_draw(header, viewport.origin + point(Pixels::ZERO, offset), 0, Some(ContentMask { bounds: viewport }));
+        // Keep the pinned header above the covers that hide duplicate separators in the list.
+        window.defer_draw(header, viewport.origin + point(Pixels::ZERO, offset), 1, Some(ContentMask { bounds: viewport }));
       },
       |_, _, _, _| {},
     )
@@ -365,7 +388,9 @@ impl Render for AllChanges {
       .size_full()
       .min_h_0()
       .child(self.toolbar(&state, cx))
-      .child(h_flex().px_2().py_1().justify_end().border_b_1().border_color(cx.theme().border).child(crate::diff_view::diff_controls(&state)))
+      .child(
+        h_flex().flex_none().h_7().px_2().justify_end().border_b_1().border_color(colors(cx).border).child(crate::diff_view::diff_controls(&state)),
+      )
       // The diff owns its scrolling, so its scrollbar sits at the right edge of the area.
       .child(div().relative().flex_1().min_h_0().overflow_hidden().cursor_text().child(diff).child(sticky_header))
       .into_any_element()
@@ -439,6 +464,7 @@ fn file_header(file: &DiffFile, view: &WeakEntity<AllChanges>, cx: &App) -> Div 
   let view = view.clone();
   h_flex()
     .w_full()
+    .h_6()
     .min_w_0()
     .gap_3()
     .child(
@@ -518,9 +544,7 @@ fn file_title(path: &str, title: &str, cx: &App) -> impl IntoElement {
     .overflow_hidden()
     .whitespace_nowrap()
     .gap_0()
-    .text_sm()
-    .child(div().flex_none().font_semibold().child(name.to_string()))
-    .children(folder.map(|folder| {
-      div().ml_2().min_w_0().overflow_hidden().text_ellipsis().text_size(FONT_SIZE_SM).text_color(palette.text_secondary).child(folder)
-    }))
+    .items_baseline()
+    .child(Label::new(name.to_string()).flex_none().text_size(crate::components::CHANGE_PATH_FONT_SIZE).font_weight(FontWeight::SEMIBOLD))
+    .children(folder.map(|folder| Label::new(folder).ml_2().min_w_0().truncate().text_size(FONT_SIZE_SM).text_color(palette.text_secondary)))
 }

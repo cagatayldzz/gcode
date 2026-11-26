@@ -10,14 +10,22 @@ use gpui_kit::component::ElementExt as _;
 /// How long a project tab takes to glide to its place after a swap.
 pub(super) const TAB_SLIDE: Duration = Duration::from_millis(180);
 
-const CHANGE_ROW_HEIGHT: Pixels = px(28.);
+const COMPACT_CHANGE_ROW_HEIGHT: Pixels = px(28.);
 
 impl Workspace {
-  /// The row sizes of the Changes list, rebuilt only when the number of files changes.
-  fn change_sizes(&self, count: usize) -> Rc<Vec<Size<Pixels>>> {
+  fn change_row_height(&self, rem_size: Pixels) -> Pixels {
+    if self.all_changes_open {
+      crate::all_changes::first_file_header_height(rem_size)
+    } else {
+      COMPACT_CHANGE_ROW_HEIGHT
+    }
+  }
+
+  /// The row sizes of the Changes list, rebuilt when the count or height changes.
+  fn change_sizes(&self, count: usize, height: Pixels) -> Rc<Vec<Size<Pixels>>> {
     let mut cached = self.change_sizes.borrow_mut();
-    if cached.len() != count {
-      *cached = Rc::new(vec![size(px(0.), CHANGE_ROW_HEIGHT); count]);
+    if cached.len() != count || cached.first().is_some_and(|size| size.height != height) {
+      *cached = Rc::new(vec![size(px(0.), height); count]);
     }
     cached.clone()
   }
@@ -272,18 +280,18 @@ impl Workspace {
   }
 
   /// ↑ in the Changes or History list: the row above the chosen one.
-  pub(super) fn select_previous_row(&mut self, _: &SelectPreviousRow, _: &mut Window, cx: &mut Context<Self>) {
-    self.select_adjacent_row(-1, cx);
+  pub(super) fn select_previous_row(&mut self, _: &SelectPreviousRow, window: &mut Window, cx: &mut Context<Self>) {
+    self.select_adjacent_row(-1, window, cx);
   }
 
   /// ↓ in the Changes or History list: the row below the chosen one.
-  pub(super) fn select_next_row(&mut self, _: &SelectNextRow, _: &mut Window, cx: &mut Context<Self>) {
-    self.select_adjacent_row(1, cx);
+  pub(super) fn select_next_row(&mut self, _: &SelectNextRow, window: &mut Window, cx: &mut Context<Self>) {
+    self.select_adjacent_row(1, window, cx);
   }
 
   /// Chooses the row `step` places from the chosen one in the list that is shown, and brings it into view. With none chosen, ↓ takes the
   /// first row and ↑ the last. Stops at the ends.
-  fn select_adjacent_row(&mut self, step: isize, cx: &mut Context<Self>) {
+  fn select_adjacent_row(&mut self, step: isize, window: &Window, cx: &mut Context<Self>) {
     let next = |current: Option<usize>, len: usize| -> Option<usize> {
       match current {
         _ if len == 0 => None,
@@ -303,7 +311,8 @@ impl Workspace {
         self.open_change(paths[index].clone(), cx);
         // Scrolls only when the row is out of view, so that the list does not jump on every key.
         let (viewport, offset) = (self.changes_scroll.bounds().size.height, -self.changes_scroll.base_handle().offset().y);
-        let (top, bottom) = (CHANGE_ROW_HEIGHT * index as f32, CHANGE_ROW_HEIGHT * (index + 1) as f32);
+        let height = self.change_row_height(window.rem_size());
+        let (top, bottom) = (height * index as f32, height * (index + 1) as f32);
         if top < offset {
           self.changes_scroll.scroll_to_item(index, ScrollStrategy::Top);
         } else if bottom > offset + viewport {
@@ -409,10 +418,9 @@ impl Workspace {
       )
   }
 
-  /// One line of the Changes list: a checkbox, the file name with its folder, and the kind of change. Its height is fixed
-  /// ([`CHANGE_ROW_HEIGHT`]) because the list is virtualized, and its width is the list's own: a virtual list lays its rows out
+  /// A virtualized Changes row takes its height from the list and uses the list's width: a virtual list lays its rows out
   /// at their content width, so a percentage would leave short rows narrow and long ones unclipped.
-  fn change_row(&self, change: &ws_git::Change, width: Pixels, last: bool, cx: &mut Context<Self>) -> impl IntoElement {
+  fn change_row(&self, change: &ws_git::Change, width: Pixels, height: Pixels, last: bool, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
     let workspace = cx.entity();
     let root = self.projects.active.clone().unwrap_or_default();
@@ -440,10 +448,10 @@ impl Workspace {
       .when(!width.is_zero(), |row| row.w(width))
       .min_w_0()
       .overflow_hidden()
-      .h(CHANGE_ROW_HEIGHT)
+      .h(height)
       .gap_1p5()
       .px_3()
-      .when(!last, |row| row.border_b_1())
+      .when(!last || self.all_changes_open, |row| row.border_b_1())
       .border_color(crate::theme::row_divider(&palette))
       .items_center()
       // A chosen row is blue, and a little deeper under the pointer.
@@ -571,7 +579,7 @@ impl Workspace {
       })
   }
 
-  pub(super) fn render_git(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+  pub(super) fn render_git(&self, window: &Window, cx: &mut Context<Self>) -> Option<impl IntoElement> {
     let palette = colors(cx);
     let git = self.git.as_ref()?;
     self.projects.active.as_ref()?;
@@ -585,21 +593,21 @@ impl Workspace {
     // Only the rows in view are built: a project can have thousands of changed files.
     let query = self.changes_filter.read(cx).value().trim().to_lowercase();
     let shown = self.visible_changes(&query).len();
-    let changes_list = v_virtual_list(workspace.clone(), "git-changes", self.change_sizes(shown), |this, range, _, cx| {
+    let height = self.change_row_height(window.rem_size());
+    let changes_list = v_virtual_list(workspace.clone(), "git-changes", self.change_sizes(shown, height), move |this, range, _, cx| {
       let query = this.changes_filter.read(cx).value().trim().to_lowercase();
       let all = this.visible_changes(&query);
       let total = all.len();
       let first = range.start;
       let changes: Vec<ws_git::Change> = all.get(range).map(|rows| rows.iter().map(|change| (*change).clone()).collect()).unwrap_or_default();
       let width = this.changes_scroll.bounds().size.width;
-      // The last row has no line under it: the one of what follows the list (the commit box) is there.
-      changes.iter().enumerate().map(|(offset, change)| this.change_row(change, width, first + offset + 1 == total, cx)).collect()
+      changes.iter().enumerate().map(|(offset, change)| this.change_row(change, width, height, first + offset + 1 == total, cx)).collect()
     })
     .track_scroll(&self.changes_scroll);
     // The scrollbar strip is shown only when the rows are taller than the list. The height of the list is known once it was drawn, so
     // the first time a frame is asked for again.
     let viewport = self.changes_scroll.bounds().size.height;
-    let overflows = !viewport.is_zero() && CHANGE_ROW_HEIGHT * shown as f32 > viewport;
+    let overflows = !viewport.is_zero() && height * shown as f32 > viewport;
     if viewport.is_zero() {
       let this = workspace.clone();
       cx.defer(move |cx| this.update(cx, |_, cx| cx.notify()));
@@ -727,13 +735,22 @@ impl Workspace {
       GitView::Changes => v_flex()
         .flex_1()
         .min_h_0()
-        .child(div().flex_none().px_3().py_2().child(crate::components::soft_input(&self.changes_filter, cx).bg(palette.background)))
+        .child(
+          v_flex()
+            .flex_none()
+            .justify_center()
+            .px_3()
+            .when(self.all_changes_open, |row| row.h_9())
+            .when(!self.all_changes_open, |row| row.py_2())
+            .child(crate::components::soft_input(&self.changes_filter, cx).when(self.all_changes_open, |input| input.small()).bg(palette.background)),
+        )
         .child(
           h_flex()
             .id("changes-header")
             .justify_between()
             .px_3()
-            .py_1()
+            .when(self.all_changes_open, |row| row.flex_none().h_7())
+            .when(!self.all_changes_open, |row| row.py_1())
             .border_b_1()
             .border_color(palette.border)
             .child(
@@ -806,7 +823,15 @@ impl Workspace {
         .into_any_element(),
       GitView::History => v_flex().flex_1().min_h_0().pt_2().child(self.render_history(cx)).into_any_element(),
     };
-    Some(v_flex().size_full().child(div().px_3().child(tabs)).child(body))
+    Some(
+      v_flex()
+        .size_full()
+        // Match the branch bar, review toolbar and diff controls across the split.
+        .child(
+          v_flex().flex_none().justify_center().px_3().when(self.all_changes_open && self.git_view == GitView::Changes, |row| row.h_12()).child(tabs),
+        )
+        .child(body),
+    )
   }
 
   /// The commits of the open project, newest first: the subject, who made it and when, the tags on it, and an arrow while the

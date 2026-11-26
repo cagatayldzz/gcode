@@ -1008,7 +1008,9 @@ impl Render for Workspace {
           .child(
             h_resizable("sidebar-split")
               // `fixed`: the sidebar keeps the width the user gave it when the window is resized; only the main area changes.
-              .child(resizable_panel().size(SIDEBAR_WIDTH).size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH).fixed().child(self.render_sidebar(cx)))
+              .child(
+                resizable_panel().size(SIDEBAR_WIDTH).size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH).fixed().child(self.render_sidebar(window, cx)),
+              )
               // The status bar belongs to the editor: the sidebar runs down to the bottom of the window.
               .child(
                 resizable_panel().child(

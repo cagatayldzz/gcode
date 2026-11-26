@@ -214,12 +214,12 @@ impl Workspace {
   }
 
   /// The repository summary and the folder tree.
-  pub(super) fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  pub(super) fn render_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
     let content = match self.sidebar_tab {
       SidebarTab::Explorer => self.render_explorer(cx).into_any_element(),
       SidebarTab::Search => self.render_project_search(cx),
       SidebarTab::Extensions => self.extensions_panel.clone().into_any_element(),
-      SidebarTab::Git => match self.render_git(cx) {
+      SidebarTab::Git => match self.render_git(window, cx) {
         Some(git) => git.into_any_element(),
         None => Label::new("Not a Git repository").text_color(cx.theme().muted_foreground).p_3().into_any_element(),
       },
