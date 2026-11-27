@@ -90,6 +90,10 @@ impl Workspace {
     if files.is_empty() || self.committing || self.discarding {
       return;
     }
+    if let Some(operation) = self.git.as_ref().map(|git| git.operation).filter(|operation| *operation != ws_git::Operation::Idle) {
+      self.explain_discard_blocked(operation, window, cx);
+      return;
+    }
     let count = files.len();
     let (title, description) = if let [file] = files.as_slice() {
       (
@@ -121,6 +125,39 @@ impl Workspace {
           workspace.update(cx, |this, cx| this.discard_changes(root.clone(), files.clone(), window, cx));
           true
         })
+    });
+  }
+
+  /// Files cannot be discarded one by one while a Git operation runs: restoring them would silently drop what the operation
+  /// brought in. Offers the way out instead: the merge resolver (which can abort) or aborting the operation.
+  fn explain_discard_blocked(&self, operation: ws_git::Operation, window: &mut Window, cx: &mut Context<Self>) {
+    let is_merge = operation == ws_git::Operation::Merge;
+    let title = SharedString::from(format!("{} in progress", operation.label()));
+    let description = SharedString::from(if is_merge {
+      "Changes cannot be discarded while a merge is in progress. To get rid of them, abort the merge: the repository returns to its state before the merge."
+    } else if operation.can_resume() {
+      "Changes cannot be discarded while this operation is in progress. Abort it to return to the state before it."
+    } else {
+      "Changes cannot be discarded while this operation is in progress. Finish it in the terminal first."
+    });
+    let can_act = is_merge || operation.can_resume();
+    let workspace = cx.entity().downgrade();
+    window.open_alert_dialog(cx, move |alert, _, _| {
+      let workspace = workspace.clone();
+      let alert = alert.title(title.clone()).description(description.clone());
+      if !can_act {
+        return alert;
+      }
+      alert.confirm().ok_text(if is_merge { "Open merge…" } else { "Abort…" }).on_ok(move |_, window, cx| {
+        let _ = workspace.update(cx, |this, cx| {
+          if is_merge {
+            this.merge_compare(window, cx);
+          } else {
+            this.abort_git_operation(&crate::AbortGitOperation, window, cx);
+          }
+        });
+        true
+      })
     });
   }
 
