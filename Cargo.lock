@@ -9156,6 +9156,7 @@ name = "ws-language"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "lsp-types",
  "serde_json",
  "tempfile",
 ]

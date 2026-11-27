@@ -3,7 +3,10 @@
 //!
 //! It knows nothing about the interface: problems come out of a channel.
 
+mod edits;
 mod server;
+
+pub use edits::apply_text_edits;
 mod uri;
 
 pub use server::{find_server, language_id, parse_locations, Server, Session, Update};

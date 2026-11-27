@@ -68,6 +68,8 @@ fn commands() -> Vec<Entry> {
     entry("Search in Project", &["find", "grep", "replace"], SearchProject),
     entry("Add Project", &["open folder", "clone", "new"], AddProject),
     entry("Save File", &["write"], SaveFile),
+    entry("Format Document", &["formatter", "indent"], crate::FormatDocument),
+    entry("Quick Fix", &["code actions", "diagnostics"], gpui_kit::base::input::ToggleCodeActions),
     entry("Add Line Comment", &["comment out", "#", "//"], AddLineComment),
     entry("Remove Line Comment", &["uncomment", "comment in"], RemoveLineComment),
     entry("Toggle Line Comment", &["comment", "uncomment"], ToggleLineComment),

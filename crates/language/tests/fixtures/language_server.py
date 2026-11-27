@@ -39,7 +39,7 @@ if case == "malformed":
 
 # The client can write snapshots while initialization is pending.
 time.sleep(0.1)
-send({"id": init["id"], "result": {"capabilities": {"textDocumentSync": 2}}})
+send({"id": init["id"], "result": {"capabilities": {"textDocumentSync": 2, "documentFormattingProvider": True}}})
 assert receive()["method"] == "initialized"
 opened = receive()
 assert opened["method"] == "textDocument/didOpen"
@@ -73,3 +73,10 @@ while True:
     send({"id": message["id"], "result": {"contents": {"kind": "markdown", "value": "**string**"}}})
   if message["method"] == "textDocument/completion":
     send({"id": message["id"], "result": {"isIncomplete": False, "items": [{"label": "workspace"}]}})
+  if message["method"] == "textDocument/formatting":
+    send({"id": message["id"], "result": [{
+      "range": {"start": {"line": 0, "character": 2}, "end": {"line": 0, "character": 12}},
+      "newText": " workspace formatted",
+    }]})
+  if message["method"] == "test/error":
+    send({"id": message["id"], "error": {"code": -32603, "message": "Formatter refused"}})

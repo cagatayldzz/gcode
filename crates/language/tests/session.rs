@@ -22,9 +22,9 @@ fn initialization_sends_the_latest_open_text_before_changes_and_requests() {
   assert!(!session.matches_document(&path, update.version, "🦀 new text"));
 
   session.sync(&path, "🦀 new text");
-  let answer = block_on(session.request("textDocument/completion", json!({}))).unwrap();
+  let answer = block_on(session.request("textDocument/completion", json!({}))).unwrap().unwrap();
   assert_eq!(answer["items"][0]["label"], "workspace");
-  let hover = block_on(session.request("textDocument/hover", json!({}))).unwrap();
+  let hover = block_on(session.request("textDocument/hover", json!({}))).unwrap().unwrap();
   assert_eq!(hover["contents"]["value"], "**string**");
 }
 
@@ -69,4 +69,19 @@ fn a_server_exit_cancels_pending_requests_and_allows_a_new_session() {
   new_session.sync(&path, "🦀 workspace");
   assert!(block_on(updates.next()).is_some());
   assert!(block_on(new_session.request("textDocument/hover", json!({}))).is_ok());
+}
+
+#[test]
+fn formatting_capability_and_remote_errors_are_reported() {
+  let root = tempfile::tempdir().unwrap();
+  let path = root.path().join("index.ts");
+  let (session, mut updates) = Session::start(&server(root.path(), "protocol")).unwrap();
+  session.sync(&path, "🦀 workspace");
+  assert!(block_on(updates.next()).is_some());
+  assert!(session.supports_formatting());
+
+  let reply = block_on(session.request("textDocument/formatting", json!({}))).unwrap().unwrap();
+  let edits: Vec<lsp_types::TextEdit> = serde_json::from_value(reply).unwrap();
+  assert_eq!(ws_language::apply_text_edits("🦀 workspace", &edits).unwrap(), "🦀 workspace formatted");
+  assert_eq!(block_on(session.request("test/error", json!({}))).unwrap().unwrap_err(), "Formatter refused");
 }

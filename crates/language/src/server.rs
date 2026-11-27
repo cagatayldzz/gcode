@@ -98,7 +98,7 @@ struct Document {
 }
 
 enum Reply {
-  Request(oneshot::Sender<Value>),
+  Request(oneshot::Sender<Result<Value, String>>),
   Diagnostic(PathBuf, i64),
 }
 
@@ -113,6 +113,7 @@ struct State {
   stopped: bool,
   supports_pull_diagnostics: bool,
   incremental_sync: bool,
+  formatting: bool,
   documents: HashMap<PathBuf, Document>,
   pending: HashMap<i64, Pending>,
   next_id: i64,
@@ -247,6 +248,7 @@ impl Session {
             "publishDiagnostics": { "versionSupport": true },
             "diagnostic": { "dynamicRegistration": false },
             "completion": { "completionItem": { "snippetSupport": false, "documentationFormat": ["markdown", "plaintext"] } },
+            "codeAction": { "codeActionLiteralSupport": { "codeActionKind": { "valueSet": ["quickfix"] } } },
             "hover": { "contentFormat": ["markdown", "plaintext"] }
           },
           "workspace": { "configuration": true }
@@ -299,7 +301,7 @@ impl Session {
   }
 
   /// Sends a request and resolves it or cancels the receiver at its deadline.
-  pub fn request(&self, method: &str, params: Value) -> oneshot::Receiver<Value> {
+  pub fn request(&self, method: &str, params: Value) -> oneshot::Receiver<Result<Value, String>> {
     let (sender, receiver) = oneshot::channel();
     let Ok(mut state) = self.shared.state.lock() else { return receiver };
     if state.ready {
@@ -316,6 +318,10 @@ impl Session {
       .state
       .lock()
       .is_ok_and(|state| !state.stopped && state.documents.get(path).is_some_and(|document| document.version == version && document.text == text))
+  }
+
+  pub fn supports_formatting(&self) -> bool {
+    self.shared.state.lock().is_ok_and(|state| state.ready && !state.stopped && state.formatting)
   }
 
   pub fn is_running(&self) -> bool {
@@ -442,6 +448,8 @@ fn handle(message: &Value, shared: &Shared, updates: &mut Sender<Update>) {
         state.supports_pull_diagnostics = message.pointer("/result/capabilities/diagnosticProvider").is_some_and(Value::is_object);
         shared.write(&mut state, json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }));
         let sync = &message["result"]["capabilities"]["textDocumentSync"];
+        let formatting = &message["result"]["capabilities"]["documentFormattingProvider"];
+        state.formatting = formatting == &Value::Bool(true) || formatting.is_object();
         state.incremental_sync = sync.as_u64().or_else(|| sync["change"].as_u64()) == Some(2);
         // While holding the same lock used by sync and requests, enqueue didOpen for the latest copy of each file.
         let documents = std::mem::take(&mut state.documents);
@@ -458,7 +466,11 @@ fn handle(message: &Value, shared: &Shared, updates: &mut Sender<Update>) {
       } else if let Some(pending) = state.pending.remove(&id).filter(|pending| pending.deadline > Instant::now()) {
         match pending.reply {
           Reply::Request(sender) => {
-            let _ = sender.send(message["result"].clone());
+            let response = match message.get("error") {
+              Some(error) => Err(error["message"].as_str().unwrap_or("The language server rejected the request.").to_owned()),
+              None => Ok(message["result"].clone()),
+            };
+            let _ = sender.send(response);
           }
           Reply::Diagnostic(path, version) => {
             if state.documents.get(&path).is_some_and(|document| document.version == version)

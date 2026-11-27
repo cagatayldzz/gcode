@@ -91,6 +91,9 @@ their original files. Force quit or a crash restores only changes that reached a
 
 ### `projects.json`
 
+Each project's optional `editor` object stores `tab_size`, `hard_tabs`, `line_endings` (`preserve`, `lf` or `crlf`), and
+`format_on_save`. Older entries default to two spaces, preserving line endings, and manual formatting.
+
 ```json
 {
   "projects": [

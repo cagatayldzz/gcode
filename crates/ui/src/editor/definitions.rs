@@ -2,8 +2,11 @@
 
 use super::*;
 use anyhow::Result;
-use gpui_kit::base::input::{CompletionProvider, DefinitionProvider, HoverProvider, Position, RopeExt as _};
-use lsp_types::{CompletionContext, CompletionResponse, CompletionTextEdit, Hover, LocationLink, Range, Uri};
+use gpui_kit::base::input::{CodeActionProvider, CompletionProvider, DefinitionProvider, HoverProvider, Position, RopeExt as _};
+use lsp_types::{
+  CodeAction, CodeActionOrCommand, CompletionContext, CompletionResponse, CompletionTextEdit, DocumentChanges, Hover, LocationLink, OneOf, Range,
+  TextEdit, Uri,
+};
 use serde_json::{json, Value};
 use std::str::FromStr as _;
 use ws_language::Location;
@@ -24,12 +27,17 @@ struct LanguageProvider {
 }
 
 impl LanguageProvider {
-  fn query(&self, method: &str, text: &Rope, offset: usize, context: Option<Value>, cx: &App) -> Option<futures::channel::oneshot::Receiver<Value>> {
+  fn query(
+    &self,
+    method: &str,
+    text: &Rope,
+    offset: usize,
+    context: Option<Value>,
+    cx: &App,
+  ) -> Option<futures::channel::oneshot::Receiver<std::result::Result<Value, String>>> {
     let session = self.panel.read_with(cx, |panel, _| panel.session_for(&self.path)).ok().flatten()?;
     session.sync(&self.path, &text.to_string());
-    let point = text.offset_to_point(offset);
-    let line = text.slice_line(point.row);
-    let position = Position::new(point.row as u32, line.byte_to_utf16_idx(point.column) as u32);
+    let position = wire_position(text, offset);
     let mut params = json!({ "textDocument": { "uri": ws_language::file_uri(&self.path) }, "position": position });
     if let Some(context) = context {
       params["context"] = context;
@@ -44,7 +52,7 @@ impl DefinitionProvider for LanguageProvider {
     let text = text.clone();
     let path = self.path.clone();
     cx.background_executor().spawn(async move {
-      let results = ws_language::parse_locations(&answer.await.unwrap_or_default());
+      let results = ws_language::parse_locations(&answer.await.ok().and_then(std::result::Result::ok).unwrap_or_default());
       Ok(
         results
           .iter()
@@ -70,7 +78,7 @@ impl CompletionProvider for LanguageProvider {
     };
     let text = text.clone();
     cx.background_executor().spawn(async move {
-      let reply: Value = answer.await.unwrap_or_default();
+      let reply: Value = answer.await.ok().and_then(std::result::Result::ok).unwrap_or_default();
       let mut completions = serde_json::from_value(reply).unwrap_or_else(|_| CompletionResponse::Array(Vec::new()));
       let items = match &mut completions {
         CompletionResponse::Array(items) => items,
@@ -120,13 +128,135 @@ impl HoverProvider for LanguageProvider {
     let Some(answer) = self.query("textDocument/hover", text, offset, None, cx) else { return Task::ready(Ok(None)) };
     let text = text.clone();
     cx.background_executor().spawn(async move {
-      let mut hover: Option<Hover> = serde_json::from_value(answer.await.unwrap_or_default()).ok().flatten();
+      let mut hover: Option<Hover> = serde_json::from_value(answer.await.ok().and_then(std::result::Result::ok).unwrap_or_default()).ok().flatten();
       if let Some(hover) = &mut hover {
         hover.range = hover.range.map(|range| editor_range(&text, range));
       }
       Ok(hover)
     })
   }
+}
+
+impl CodeActionProvider for LanguageProvider {
+  fn id(&self) -> SharedString {
+    "project-language-server".into()
+  }
+
+  fn code_actions(&self, state: Entity<EditorState>, range: std::ops::Range<usize>, _: &mut Window, cx: &mut App) -> Task<Result<Vec<CodeAction>>> {
+    let Some(session) = self.panel.read_with(cx, |panel, _| panel.session_for(&self.path)).ok().flatten() else {
+      return Task::ready(Ok(Vec::new()));
+    };
+    let editor = state.read(cx);
+    let source = editor.value();
+    let text = editor.text();
+    let mut selection = Range::new(wire_position(text, range.start), wire_position(text, range.end));
+    let diagnostics = self
+      .panel
+      .read_with(cx, |panel, _| {
+        panel
+          .problems
+          .get(&self.path)
+          .into_iter()
+          .flatten()
+          .filter_map(|problem| {
+            let start = text.position_to_offset(&Position::new(problem.line, problem.column));
+            let end = text.position_to_offset(&Position::new(problem.end_line, problem.end_column));
+            if start > range.end || end < range.start {
+              return None;
+            }
+            let range = Range::new(wire_position(text, start), wire_position(text, end));
+            if selection.start == selection.end {
+              selection = range;
+            }
+            let code = problem.code.as_ref().map(|code| code.parse::<i32>().map_or_else(|_| json!(code), |code| json!(code)));
+            Some(json!({
+              "range": range, "code": code, "message": problem.message, "source": problem.source,
+              "severity": if problem.severity == ws_language::Severity::Error { 1 } else { 2 },
+            }))
+          })
+          .collect::<Vec<_>>()
+      })
+      .unwrap_or_default();
+    session.sync(&self.path, &source);
+    let uri = ws_language::file_uri(&self.path);
+    let answer = session.request(
+      "textDocument/codeAction",
+      json!({
+        "textDocument": { "uri": uri }, "range": selection,
+        "context": { "diagnostics": diagnostics, "only": ["quickfix"] }
+      }),
+    );
+    cx.background_executor().spawn(async move {
+      let mut actions = Vec::new();
+      let response: Vec<CodeActionOrCommand> =
+        serde_json::from_value(answer.await.ok().and_then(std::result::Result::ok).unwrap_or_default()).unwrap_or_default();
+      for item in response {
+        let CodeActionOrCommand::CodeAction(mut action) = item else { continue };
+        if action.disabled.is_none() && action.command.is_none() && action_edits(&action, &uri).is_some() {
+          action.data = Some(json!(text_hash(&source)));
+          actions.push(action);
+        }
+      }
+      Ok(actions)
+    })
+  }
+
+  fn perform_code_action(&self, state: Entity<EditorState>, action: CodeAction, _: bool, window: &mut Window, cx: &mut App) -> Task<Result<()>> {
+    // The completion menu invokes this while its editor entity is already being updated.
+    let panel = self.panel.clone();
+    let path = self.path.clone();
+    window.defer(cx, move |window, cx| {
+      let source = state.read(cx).value();
+      let current = panel
+        .read_with(cx, |panel, _| {
+          panel.session_for(&path).is_some()
+            && panel.files.get(&path).is_some_and(|file| file.state == state)
+            && !panel.replacement_files.contains(&path)
+        })
+        .unwrap_or(false);
+      let result = if current && action.data.as_ref().and_then(Value::as_u64) == Some(text_hash(&source)) {
+        match action_edits(&action, &ws_language::file_uri(&path)) {
+          Some(edits) => ws_language::apply_text_edits(&source, &edits),
+          None => Err("This quick fix requires changes outside the current file.".into()),
+        }
+      } else {
+        Err("The document or language session changed. Open Quick Fix again.".into())
+      };
+      match result {
+        Ok(replacement) => super::formatting::replace_document(&state, &source, replacement, window, cx),
+        Err(message) => window.push_notification(crate::failure(message), cx),
+      }
+    });
+    Task::ready(Ok(()))
+  }
+}
+
+fn action_edits(action: &CodeAction, target: &str) -> Option<Vec<TextEdit>> {
+  let edit = action.edit.as_ref()?;
+  match (&edit.changes, &edit.document_changes) {
+    (Some(files), None) if files.len() == 1 => {
+      let (uri, changes) = files.iter().next()?;
+      (uri.as_str() == target && !changes.is_empty()).then(|| changes.clone())
+    }
+    (None, Some(DocumentChanges::Edits(files))) if files.len() == 1 && files[0].text_document.uri.as_str() == target => files[0]
+      .edits
+      .iter()
+      .map(|edit| match edit {
+        OneOf::Left(edit) => Some(edit.clone()),
+        OneOf::Right(_) => None,
+      })
+      .collect(),
+    _ => None,
+  }
+}
+
+fn text_hash(text: &str) -> u64 {
+  std::hash::BuildHasher::hash_one(&std::hash::BuildHasherDefault::<std::hash::DefaultHasher>::default(), text)
+}
+
+fn wire_position(text: &Rope, offset: usize) -> Position {
+  let point = text.offset_to_point(offset);
+  Position::new(point.row as u32, text.slice_line(point.row).byte_to_utf16_idx(point.column) as u32)
 }
 
 pub(super) fn editor_position(text: &Rope, position: Position) -> Position {
@@ -168,7 +298,8 @@ impl EditorPanel {
       let provider = Rc::new(LanguageProvider { panel: panel.clone(), path: owner.clone() });
       lsp.definition_provider = Some(provider.clone());
       lsp.completion_provider = Some(provider.clone());
-      lsp.hover_provider = Some(provider);
+      lsp.hover_provider = Some(provider.clone());
+      lsp.code_action_providers.push(provider);
       lsp.show_document = Some(Rc::new(move |params, window, cx| {
         let Some(target) = ws_language::file_path(params.uri.as_str()).filter(|target| *target != owner) else { return false };
         let selection = params.selection.unwrap_or_default();

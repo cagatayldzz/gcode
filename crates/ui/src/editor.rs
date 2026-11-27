@@ -8,7 +8,7 @@ use crate::minimap::{line_styles, Minimap};
 use crate::occurrences::{next_occurrence, word_at};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  base::input::{FoldRange, HighlightStyleResolver, InputEdit, InputHighlighter, Rope},
+  base::input::{FoldRange, HighlightStyleResolver, InputEdit, InputHighlighter, Rope, TabSize},
   component::{
     button::{Button, ButtonVariants as _},
     dock::{BasePanel, Panel, PanelControl, PanelEvent},
@@ -34,6 +34,7 @@ use std::{
 use ws_index::highlight::{Highlights, Language};
 
 mod definitions;
+mod formatting;
 pub(crate) mod git_changes;
 mod problems;
 mod recovery;
@@ -45,7 +46,7 @@ pub(crate) use save::SaveOutcome;
 use problems::ProjectLanguage;
 use recovery::RecoveryWriter;
 use ws_language::{Problem, Server};
-use ws_storage::FileVersion;
+use ws_storage::{FileVersion, ProjectEditorSettings};
 
 /// Files larger than this are not opened: the editor reads the whole text.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -324,6 +325,7 @@ pub(crate) struct EditorPanel {
   large_ok: HashSet<PathBuf>,
   /// The open project's folder: the breadcrumb path starts below it.
   root: Option<PathBuf>,
+  editor_settings: HashMap<PathBuf, ProjectEditorSettings>,
 }
 
 impl EditorPanel {
@@ -363,12 +365,12 @@ impl EditorPanel {
     });
     let refresh_task = cx.spawn_in(window, async move |this, cx| loop {
       cx.background_executor().timer(Duration::from_secs(2)).await;
-      let Ok(files) = this.update(cx, |this, cx| {
+      let Ok(files) = this.update(cx, |this, _| {
         this
           .files
           .iter()
           .filter(|(_, file)| !file.dirty)
-          .map(|(path, file)| (path.clone(), file.state.entity_id(), file.state.read(cx).value().to_string()))
+          .map(|(path, file)| (path.clone(), file.state.entity_id(), file.disk.clone()))
           .collect::<Vec<_>>()
       }) else {
         break;
@@ -382,7 +384,7 @@ impl EditorPanel {
               return None;
             }
             let (text, version) = read_editor_text(&path).ok()?;
-            (text != original).then_some((path, id, original, text, version))
+            (Some(&version) != original.as_ref()).then_some((path, id, original, text, version))
           })
           .collect::<Vec<_>>()
       });
@@ -390,7 +392,7 @@ impl EditorPanel {
       if this
         .update_in(cx, |this, window, cx| {
           for (path, id, original, text, version) in changes {
-            if this.files.get(&path).is_some_and(|file| !file.dirty && file.state.entity_id() == id && file.state.read(cx).value() == original) {
+            if this.files.get(&path).is_some_and(|file| !file.dirty && file.state.entity_id() == id && file.disk == original) {
               let cursor = this.files[&path].state.read(cx).cursor_position();
               this.install_text(&path, text, Some(version), window, cx);
               this.files[&path].state.update(cx, |state, cx| state.set_cursor_position(cursor, window, cx));
@@ -435,6 +437,7 @@ impl EditorPanel {
       sync_tasks: HashMap::new(),
       large_ok: HashSet::new(),
       root: None,
+      editor_settings: HashMap::new(),
     }
   }
 
@@ -452,6 +455,31 @@ impl EditorPanel {
       self.tabs = tabs;
     }
     self.announce(cx);
+  }
+
+  pub(crate) fn editor_preferences(&self, path: &Path) -> ProjectEditorSettings {
+    self
+      .editor_settings
+      .iter()
+      .filter(|(root, _)| path.starts_with(root))
+      .max_by_key(|(root, _)| root.components().count())
+      .map_or_else(ProjectEditorSettings::default, |(_, preferences)| *preferences)
+  }
+
+  pub(crate) fn set_editor_preferences(&mut self, root: PathBuf, preferences: ProjectEditorSettings, cx: &mut Context<Self>) {
+    self.editor_settings.insert(root.clone(), preferences);
+    for (path, file) in self.files.iter().filter(|(path, _)| path.starts_with(&root)) {
+      file.state.update(cx, |state, cx| state.set_tab_size(project_tab_size(self.editor_preferences(path)), cx));
+    }
+    cx.notify();
+  }
+
+  pub(crate) fn clear_editor_preferences(&mut self, root: &Path, cx: &mut Context<Self>) {
+    self.editor_settings.remove(root);
+    for (path, file) in self.files.iter().filter(|(path, _)| path.starts_with(root)) {
+      file.state.update(cx, |state, cx| state.set_tab_size(project_tab_size(self.editor_preferences(path)), cx));
+    }
+    cx.notify();
   }
 
   /// Whether a file inside `root` has unsaved changes.
@@ -768,12 +796,17 @@ impl EditorPanel {
 
   fn install_text(&mut self, path: &Path, text: String, disk: Option<FileVersion>, window: &mut Window, cx: &mut Context<Self>) {
     let language = language_for(path);
+    let preferences = self.editor_preferences(path);
     let crlf = text.contains("\r\n");
     // The colors of a line-based language are worked out here, before the editor exists, and the editor only reads them.
     let highlights = Language::from_name(language).map(|language| (language, Arc::new(Highlights::compute(language, &text))));
     let state = cx.new(|cx| {
-      let mut state =
-        EditorState::new(window, cx).language(language).line_number(true).gutter_decorations_width(window.rem_size() / 4.).default_value(text);
+      let mut state = EditorState::new(window, cx)
+        .language(language)
+        .line_number(true)
+        .gutter_decorations_width(window.rem_size() / 4.)
+        .tab_size(project_tab_size(preferences))
+        .default_value(text);
       // Code scrolls sideways when a line is long, as on GitHub; prose (Markdown) wraps at the edge of the editor.
       state.set_soft_wrap(language == "markdown", window, cx);
       // The editor's scrollbars (vertical, and horizontal for long lines) stay visible instead of fading out when the file is not scrolling.
@@ -1005,11 +1038,12 @@ impl EditorPanel {
         }
         let Some(file) = self.files.get(path) else { return Vec::new() };
         let cursor = file.state.read(cx).cursor_position();
+        let preferences = self.editor_preferences(path);
         vec![
           format!("Ln {}, Col {}", cursor.line + 1, cursor.character + 1),
-          format!("Spaces: {INDENT_WIDTH}"),
+          format!("{}: {}", if preferences.hard_tabs { "Tabs" } else { "Spaces" }, preferences.tab_size),
           "UTF-8".into(),
-          if file.crlf { "CRLF" } else { "LF" }.into(),
+          if preferences.line_endings.crlf(file.crlf) { "CRLF" } else { "LF" }.into(),
           language_label(path).into(),
         ]
       }
@@ -1017,8 +1051,9 @@ impl EditorPanel {
   }
 }
 
-/// How many spaces one indent is: the editor's default.
-const INDENT_WIDTH: usize = 2;
+fn project_tab_size(settings: ProjectEditorSettings) -> TabSize {
+  TabSize { tab_size: settings.tab_size, hard_tabs: settings.hard_tabs }
+}
 
 pub(crate) fn read_editor_text(path: &Path) -> io::Result<(String, FileVersion)> {
   let target = path.canonicalize()?;

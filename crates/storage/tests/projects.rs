@@ -304,3 +304,23 @@ fn the_address_a_project_was_cloned_from_is_remembered_and_saved() {
   assert_eq!(moved.projects[0].remote_url.as_deref(), Some("git@example.com:o/a.git"));
   std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn editor_preferences_round_trip_and_older_projects_use_the_defaults() {
+  use ws_storage::{LineEndings, ProjectEditorSettings};
+
+  let dir = tempfile::tempdir().unwrap();
+  let path = dir.path().join("projects.json");
+  std::fs::write(&path, r#"{"projects":["/old","/custom"]}"#).unwrap();
+  let mut projects = ProjectList::load(&path);
+  assert_eq!(projects.projects[0].editor, ProjectEditorSettings::default());
+  let custom = ProjectEditorSettings { tab_size: 4, hard_tabs: true, line_endings: LineEndings::Crlf, format_on_save: true };
+  projects.projects[1].editor = custom;
+  projects.save(&path).unwrap();
+  let reopened = ProjectList::load(&path);
+  assert_eq!(reopened.projects[0].editor, ProjectEditorSettings::default());
+  assert_eq!(reopened.projects[1].editor, custom);
+  assert_eq!(LineEndings::Preserve.encode("a\r\nb\n"), "a\r\nb\n");
+  assert_eq!(LineEndings::Lf.encode("a\r\nb\n"), "a\nb\n");
+  assert_eq!(LineEndings::Crlf.encode("a\r\nb\n"), "a\r\nb\r\n");
+}

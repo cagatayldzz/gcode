@@ -91,6 +91,13 @@ disconnect clears that server's diagnostics and triggers one delayed restart whi
 - errors and warnings become the editor's own diagnostics (underlines and hover text) and fill the counts in the status bar and the
   Problems panel, which the counts open. A row in the panel opens the file at the problem.
 
+## Formatting and Quick Fix
+
+The project settings select indentation, line endings on save, and optional format on save. A document-format request uses
+the approved session. The edit list is validated against the original document using UTF-16 positions, then applied in one undoable
+replacement. An edited or replaced buffer and a revoked language session invalidate the formatting result. Quick Fix supports
+direct edits to the current file and verifies that the document has not changed since the action was offered.
+
 ## Go to definition
 
 ⌘-click on a name underlines it and opens its definition, in the same file or another (imports, and the declaration files of libraries in

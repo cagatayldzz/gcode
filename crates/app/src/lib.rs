@@ -28,6 +28,7 @@ pub fn run() {
       KeyBinding::new("cmd-p", GoToFile, None),
       KeyBinding::new("cmd-shift-p", OpenCommandPalette, None),
       KeyBinding::new("cmd-s", SaveFile, None),
+      KeyBinding::new("ctrl-.", gpui_kit::base::input::ToggleCodeActions, Some("Input && mode == editor")),
       KeyBinding::new("ctrl-space", gpui_kit::base::input::ShowCompletions, Some("Input && mode == editor")),
       KeyBinding::new("cmd-k cmd-c", AddLineComment, Some("Input && mode == editor")),
       KeyBinding::new("cmd-k cmd-u", RemoveLineComment, Some("Input && mode == editor")),

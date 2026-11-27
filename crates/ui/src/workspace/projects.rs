@@ -283,6 +283,7 @@ impl Workspace {
       self.projects.remove(path);
       self.persist_projects();
     }
+    self.editor_panel.update(cx, |editor, cx| editor.clear_editor_preferences(path, cx));
     self.terminal_tabs.remove(path);
     self.agent_tabs.remove(path);
     self.views.remove(path);
@@ -334,6 +335,16 @@ impl Workspace {
         }
         ProjectSettingsEvent::SyncRenamed(path) => {
           this.sync_renamed_remote(path.clone(), window, cx);
+          return;
+        }
+        ProjectSettingsEvent::EditorChanged(root, preferences) => {
+          if let Some(project) = this.projects.projects.iter_mut().find(|project| &project.path == root) {
+            project.editor = *preferences;
+            this.editor_panel.update(cx, |editor, cx| editor.set_editor_preferences(root.clone(), *preferences, cx));
+            if let Err(error) = this.projects.save(&this.profile.projects_path()) {
+              window.push_notification(crate::failure(format!("Could not save editor settings: {error}")), cx);
+            }
+          }
           return;
         }
         ProjectSettingsEvent::Save(chosen) => chosen.clone(),
@@ -544,6 +555,10 @@ impl Workspace {
     let active = self.projects.active.as_deref() == Some(path);
     self.editor_panel.update(cx, |editor, cx| editor.close_project(path, active, cx));
     self.projects.relocate(path, &target);
+    self.editor_panel.update(cx, |editor, cx| editor.clear_editor_preferences(path, cx));
+    if let Some(project) = self.projects.projects.iter().find(|project| project.path == target) {
+      self.editor_panel.update(cx, |editor, cx| editor.set_editor_preferences(target.clone(), project.editor, cx));
+    }
     Ok(target)
   }
 
@@ -618,7 +633,14 @@ impl Workspace {
       self.change_view.update(cx, |view, cx| view.show(root, file, None, cx));
     }
     self.file_actions.clear_side();
-    self.editor_panel.update(cx, |editor, cx| editor.switch_project(before, after, cx));
+    let preferences =
+      after.as_ref().and_then(|root| self.projects.projects.iter().find(|project| &project.path == root)).map(|project| project.editor);
+    self.editor_panel.update(cx, |editor, cx| {
+      if let (Some(root), Some(preferences)) = (&after, preferences) {
+        editor.set_editor_preferences(root.clone(), preferences, cx);
+      }
+      editor.switch_project(before, after, cx);
+    });
     self.refresh_project();
     if self.git_view == GitView::History {
       self.load_history(cx);

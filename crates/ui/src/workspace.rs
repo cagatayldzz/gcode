@@ -535,6 +535,7 @@ pub struct Workspace {
   dock: Entity<DockArea>,
   editor_panel: Entity<EditorPanel>,
   editor_saves: HashMap<PathBuf, Task<()>>,
+  editor_formats: HashMap<PathBuf, Task<()>>,
   save_dialog_task: Option<Task<()>>,
   file_actions: FileActions,
   /// The shells of every project that has been opened, in tabs and split panes, kept alive while another project is shown.
@@ -555,7 +556,12 @@ impl Workspace {
     let (dock, _skin) = DockSkin::dock_area("workspace-dock", Some(1), window, cx);
     let editor_panel = cx.new(|cx| EditorPanel::new(window, cx));
     let projects = ProjectList::load(&profile.projects_path());
-    editor_panel.update(cx, |editor, cx| editor.start_recovery(&profile, &projects, window, cx));
+    editor_panel.update(cx, |editor, cx| {
+      for project in &projects.projects {
+        editor.set_editor_preferences(project.path.clone(), project.editor, cx);
+      }
+      editor.start_recovery(&profile, &projects, window, cx);
+    });
     dock.update(cx, |area, cx| {
       area.set_center(DockLayout::h_split().child(DockLayout::tabs().panel_view(panel_handle(editor_panel.clone()), cx), None), window, cx);
     });
@@ -759,6 +765,7 @@ impl Workspace {
       dock,
       editor_panel: editor_panel.clone(),
       editor_saves: HashMap::new(),
+      editor_formats: HashMap::new(),
       save_dialog_task: None,
       file_actions: FileActions::default(),
       terminal_tabs: HashMap::new(),
@@ -923,7 +930,7 @@ impl Workspace {
   }
 
   pub(crate) fn flush_editor_recovery(&self, cx: &mut Context<Self>) -> std::io::Result<()> {
-    if !self.editor_saves.is_empty() {
+    if !self.editor_saves.is_empty() || !self.editor_formats.is_empty() {
       return Err(std::io::Error::other("Wait for the current save to finish"));
     }
     self.editor_panel.update(cx, |editor, cx| editor.flush_recovery(cx))
@@ -1080,6 +1087,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::view_on_host))
       .on_action(cx.listener(Self::split_down))
       .on_action(cx.listener(Self::save_file))
+      .on_action(cx.listener(Self::format_document))
       .on_action(cx.listener(Self::find_in_file))
       .on_action(cx.listener(Self::replace_in_file))
       .on_action(cx.listener(Self::select_next_occurrence))

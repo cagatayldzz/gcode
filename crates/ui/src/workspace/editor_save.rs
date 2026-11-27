@@ -15,8 +15,59 @@ impl Workspace {
       return;
     }
     if let Some(path) = self.editor_panel.read(cx).active_file().map(Path::to_path_buf) {
-      self.save_editor_file(path, None, window, cx);
+      if ws_language::language_id(&path).is_some() && self.editor_panel.read(cx).editor_preferences(&path).format_on_save {
+        self.run_formatter(path, true, window, cx);
+      } else {
+        self.save_editor_file(path, None, window, cx);
+      }
     }
+  }
+
+  pub(super) fn format_document(&mut self, _: &crate::FormatDocument, window: &mut Window, cx: &mut Context<Self>) {
+    if self.file_actions.focused_side(window, cx).is_none() {
+      if let Some(path) = self.editor_panel.read(cx).active_file().map(Path::to_path_buf) {
+        self.run_formatter(path, false, window, cx);
+      }
+    }
+  }
+
+  fn run_formatter(&mut self, path: PathBuf, save_after: bool, window: &mut Window, cx: &mut Context<Self>) {
+    if self.editor_formats.contains_key(&path) || self.editor_saves.contains_key(&path) {
+      return;
+    }
+    let work = match self.editor_panel.read(cx).request_format(&path, cx) {
+      Ok(work) => work,
+      Err(message) => {
+        window.push_notification(crate::failure(message), cx);
+        if save_after {
+          self.save_editor_file(path, None, window, cx);
+        }
+        return;
+      }
+    };
+    self.editor_formats.insert(
+      path.clone(),
+      cx.spawn_in(window, async move |this, cx| {
+        let result = work.await;
+        let _ = this.update_in(cx, |this, window, cx| {
+          this.editor_formats.remove(&path);
+          match result {
+            Ok(result) => {
+              if !this.editor_panel.update(cx, |editor, cx| editor.apply_format(&path, result, window, cx)) {
+                window.push_notification(crate::failure("The file changed while formatting. Try again with the current text."), cx);
+                return;
+              }
+            }
+            Err(error) => {
+              window.push_notification(crate::failure(format!("Could not format the document: {error}")), cx);
+            }
+          }
+          if save_after {
+            this.save_editor_file(path, None, window, cx);
+          }
+        });
+      }),
+    );
   }
 
   fn save_editor_file(&mut self, path: PathBuf, approval: Option<&Option<FileVersion>>, window: &mut Window, cx: &mut Context<Self>) {

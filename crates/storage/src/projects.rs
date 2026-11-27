@@ -1,8 +1,55 @@
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
   fs, io,
   path::{Path, PathBuf},
 };
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LineEndings {
+  #[default]
+  Preserve,
+  Lf,
+  Crlf,
+}
+
+impl LineEndings {
+  pub fn crlf(self, original: bool) -> bool {
+    match self {
+      Self::Preserve => original,
+      Self::Lf => false,
+      Self::Crlf => true,
+    }
+  }
+
+  pub fn encode(self, text: &str) -> std::borrow::Cow<'_, str> {
+    if self == Self::Preserve {
+      return std::borrow::Cow::Borrowed(text);
+    }
+    let text = text.replace("\r\n", "\n");
+    if self == Self::Crlf {
+      text.replace('\n', "\r\n").into()
+    } else {
+      text.into()
+    }
+  }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct ProjectEditorSettings {
+  pub tab_size: usize,
+  pub hard_tabs: bool,
+  pub line_endings: LineEndings,
+  pub format_on_save: bool,
+}
+
+impl Default for ProjectEditorSettings {
+  fn default() -> Self {
+    Self { tab_size: 2, hard_tabs: false, line_endings: LineEndings::Preserve, format_on_save: false }
+  }
+}
 
 /// A folder the user works in.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,11 +69,22 @@ pub struct Project {
   pub favorite_branches: Vec<String>,
   /// Where the repository was cloned from, as it was last seen: what "Clone Again" uses when the folder is gone.
   pub remote_url: Option<String>,
+  pub editor: ProjectEditorSettings,
 }
 
 impl Project {
   pub fn new(path: PathBuf) -> Self {
-    Self { path, category: None, name: None, icon: None, color: None, favorite: false, favorite_branches: Vec::new(), remote_url: None }
+    Self {
+      path,
+      category: None,
+      name: None,
+      icon: None,
+      color: None,
+      favorite: false,
+      favorite_branches: Vec::new(),
+      remote_url: None,
+      editor: ProjectEditorSettings::default(),
+    }
   }
 
   /// The folder's name.
@@ -87,6 +145,15 @@ impl ProjectList {
                 .map(|names| names.iter().filter_map(|name| name.as_str().map(str::to_owned)).collect())
                 .unwrap_or_default(),
               remote_url: text(object, "remote_url").filter(|url| !url.is_empty()),
+              editor: object
+                .get("editor")
+                .cloned()
+                .and_then(|value| serde_json::from_value::<ProjectEditorSettings>(value).ok())
+                .map(|mut settings| {
+                  settings.tab_size = settings.tab_size.clamp(1, 8);
+                  settings
+                })
+                .unwrap_or_default(),
             }),
             _ => None,
           })
@@ -124,6 +191,7 @@ impl ProjectList {
           "favorite": project.favorite,
           "favorite_branches": project.favorite_branches,
           "remote_url": project.remote_url,
+          "editor": project.editor,
         })).collect::<Vec<_>>(),
       "categories": self.categories.iter().map(|category| json!({ "id": category.id, "name": category.name, "collapsed": category.collapsed })).collect::<Vec<_>>(),
       "active": self.active.as_ref().map(|path| path.to_string_lossy()),

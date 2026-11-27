@@ -14,6 +14,7 @@ use gpui_kit::{
     h_flex,
     input::{InputEvent, InputState},
     label::Label,
+    menu::{DropdownMenu as _, PopupMenuItem},
     scroll::{Scrollbar, ScrollbarAxis, ScrollbarMode},
     v_flex, ActiveTheme, Disableable as _, Icon, StyledExt as _,
   },
@@ -21,7 +22,7 @@ use gpui_kit::{
 };
 use std::path::{Path, PathBuf};
 use ws_index::{IndexInfo, ProjectIndex};
-use ws_storage::Project;
+use ws_storage::{LineEndings, Project, ProjectEditorSettings};
 
 /// The icons a project can take instead of its first letter.
 pub(crate) const PROJECT_ICONS: [&str; 20] = [
@@ -95,6 +96,7 @@ pub(crate) struct AppearanceChosen {
 
 pub(crate) enum ProjectSettingsEvent {
   Save(AppearanceChosen),
+  EditorChanged(PathBuf, ProjectEditorSettings),
   RemoveRequested(PathBuf),
   /// Bring the remote address and the display name in line with the repository's new name.
   SyncRenamed(PathBuf),
@@ -108,17 +110,19 @@ type IndexWork = (&'static str, fn(&Path, &Path) -> std::io::Result<()>);
 enum Page {
   General,
   Appearance,
+  Editor,
   Index,
   Remove,
 }
 
 impl Page {
-  const ALL: [Self; 4] = [Self::General, Self::Appearance, Self::Index, Self::Remove];
+  const ALL: [Self; 5] = [Self::General, Self::Appearance, Self::Editor, Self::Index, Self::Remove];
 
   fn label(self) -> &'static str {
     match self {
       Self::General => "General",
       Self::Appearance => "Appearance",
+      Self::Editor => "Editor",
       Self::Index => "Index",
       Self::Remove => "Remove project",
     }
@@ -128,6 +132,7 @@ impl Page {
     match self {
       Self::General => "icons/sliders-horizontal.svg",
       Self::Appearance => "icons/palette.svg",
+      Self::Editor => "icons/file.svg",
       Self::Index => "icons/database.svg",
       Self::Remove => "icons/trash.svg",
     }
@@ -136,6 +141,7 @@ impl Page {
   fn description(self) -> &'static str {
     match self {
       Self::General => "The name shown in the project menu and on the project's tab, and the address of its Git repository.",
+      Self::Editor => "Indentation, line endings and formatting for this project.",
       Self::Appearance => "The avatar of the project: a color, and an icon instead of its first letter.",
       Self::Index => "The list of the project's files, made once and kept, so that searching and opening the project start from a ready list.",
       Self::Remove => "The project leaves the list and its terminals stop. The folder and its files stay on disk.",
@@ -279,6 +285,54 @@ impl ProjectSettings {
         cx.notify();
       });
     });
+    cx.notify();
+  }
+
+  fn editor_page(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    let settings = self.project.editor;
+    let owner = cx.entity().downgrade();
+    let endings = [(LineEndings::Preserve, "Preserve"), (LineEndings::Lf, "LF"), (LineEndings::Crlf, "CRLF")];
+    let selected_endings = endings.iter().find(|(value, _)| *value == settings.line_endings).map(|(_, label)| *label).unwrap_or("Preserve");
+    let widths = owner.clone();
+    let indent = Button::new("project-tab-width").label(settings.tab_size.to_string()).dropdown_menu(move |menu, _, _| {
+      (1..=8).fold(menu, |menu, size| {
+        let owner = widths.clone();
+        menu.item(PopupMenuItem::new(size.to_string()).checked(size == settings.tab_size).on_click(move |_, _, cx| {
+          let _ = owner.update(cx, |this, cx| this.change_editor(|preferences| preferences.tab_size = size, cx));
+        }))
+      })
+    });
+    let endings = Button::new("project-line-endings").label(selected_endings).dropdown_menu(move |menu, _, _| {
+      endings.into_iter().fold(menu, |menu, (value, label)| {
+        let owner = owner.clone();
+        menu.item(PopupMenuItem::new(label).checked(value == settings.line_endings).on_click(move |_, _, cx| {
+          let _ = owner.update(cx, |this, cx| this.change_editor(|preferences| preferences.line_endings = value, cx));
+        }))
+      })
+    });
+    section(
+      Page::Editor,
+      v_flex()
+        .gap_3()
+        .child(h_flex().gap_3().child(Label::new("Tab width")).child(indent))
+        .child(Checkbox::new("project-hard-tabs").label("Indent with tabs").checked(settings.hard_tabs).on_click(cx.listener(
+          |this, value: &bool, _, cx| {
+            this.change_editor(|preferences| preferences.hard_tabs = *value, cx);
+          },
+        )))
+        .child(h_flex().gap_3().child(Label::new("Line endings on save")).child(endings))
+        .child(Checkbox::new("project-format-on-save").label("Format on save using the language server").checked(settings.format_on_save).on_click(
+          cx.listener(|this, value: &bool, _, cx| {
+            this.change_editor(|preferences| preferences.format_on_save = *value, cx);
+          }),
+        )),
+      cx,
+    )
+  }
+
+  fn change_editor(&mut self, apply: impl FnOnce(&mut ProjectEditorSettings), cx: &mut Context<Self>) {
+    apply(&mut self.project.editor);
+    cx.emit(ProjectSettingsEvent::EditorChanged(self.project.path.clone(), self.project.editor));
     cx.notify();
   }
 
@@ -647,6 +701,7 @@ impl Render for ProjectSettings {
     let content = match self.page {
       Page::General => v_flex().gap_6().child(self.general(cx)).child(h_flex().child(save)).into_any_element(),
       Page::Appearance => v_flex().gap_6().child(self.appearance(cx)).child(h_flex().child(save)).into_any_element(),
+      Page::Editor => self.editor_page(cx).into_any_element(),
       Page::Index => self.index_page(cx).into_any_element(),
       Page::Remove => self.danger(cx).into_any_element(),
     };

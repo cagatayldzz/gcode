@@ -219,3 +219,26 @@ fn recovered_edits_open_as_a_tab_and_require_approval_to_overwrite_a_changed_dis
   cx.run_until_parked();
   assert!(ws_storage::RecoveryJournal::new(data.path()).load().unwrap().0.is_empty());
 }
+
+#[gpui_kit::test]
+fn project_editor_settings_save_changes_from_the_editor_page(cx: &mut TestAppContext) {
+  let (data, handle) = open_window_with_project(cx);
+  toggle_project_settings(cx, handle);
+  cx.update_window(handle, |_, window, cx| {
+    use gpui_kit::test::{TestEventExt as _, TestQueryExt as _};
+
+    let page = gpui_kit::ElementId::from("project-settings-page-Editor");
+    let point = window.elements().into_iter().find(|element| element.path().contains(&page)).expect("Editor page navigation label").bounds().center();
+    window.pointer_move(point, None, cx);
+    window.pointer_down(point, gpui_kit::MouseButton::Left, cx);
+    window.pointer_up(point, gpui_kit::MouseButton::Left, cx);
+    window.render_frame(cx);
+    assert!(window.try_find("project-tab-width").is_some());
+    window.click("project-format-on-save", cx);
+  })
+  .unwrap();
+  cx.run_until_parked();
+
+  let projects = ws_storage::ProjectList::load(&data.path().join("projects.json"));
+  assert!(projects.projects[0].editor.format_on_save);
+}

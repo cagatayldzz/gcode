@@ -9,6 +9,7 @@ pub(crate) struct SaveRequest {
   pub state: EntityId,
   pub text: SharedString,
   expected: Option<FileVersion>,
+  endings: ws_storage::LineEndings,
 }
 
 impl SaveRequest {
@@ -17,12 +18,13 @@ impl SaveRequest {
     if current != self.expected {
       return Ok(SaveOutcome::Conflict(current));
     }
-    if !ws_storage::write_if_current(path, self.text.as_bytes(), current.as_ref())? {
+    let text = self.endings.encode(&self.text);
+    if !ws_storage::write_if_current(path, text.as_bytes(), current.as_ref())? {
       return Ok(SaveOutcome::Conflict(FileVersion::read(path)?));
     }
     let version = match current {
-      Some(version) => version.with_contents(self.text.as_bytes()),
-      None => FileVersion::from_contents(path, self.text.as_bytes()),
+      Some(version) => version.with_contents(text.as_bytes()),
+      None => FileVersion::from_contents(path, text.as_bytes()),
     };
     Ok(SaveOutcome::Saved(version))
   }
@@ -41,12 +43,18 @@ impl EditorPanel {
     if self.replacement_files.contains(path) {
       return Err(io::Error::other("Wait for the project replacement to finish."));
     }
-    Ok(Some(SaveRequest { state: file.state.entity_id(), text: file.state.read(cx).value(), expected: approval.unwrap_or(&file.disk).clone() }))
+    Ok(Some(SaveRequest {
+      state: file.state.entity_id(),
+      text: file.state.read(cx).value(),
+      expected: approval.unwrap_or(&file.disk).clone(),
+      endings: self.editor_preferences(path).line_endings,
+    }))
   }
 
   pub(crate) fn finish_save(&mut self, path: &Path, request: SaveRequest, version: FileVersion, cx: &mut Context<Self>) {
     let Some(file) = self.files.get_mut(path).filter(|file| file.state.entity_id() == request.state) else { return };
     file.disk = Some(version);
+    file.crlf = request.endings.crlf(request.text.contains("\r\n"));
     file.dirty = file.state.read(cx).value() != request.text;
     self.remove_recovery_for(path, cx);
     cx.notify();
@@ -94,6 +102,7 @@ impl EditorPanel {
     if self.replacement_files.contains(path) || self.replacement_files.contains(destination) {
       return Err(io::Error::other("Wait for the project replacement to finish."));
     }
+    let text = self.editor_preferences(destination).line_endings.encode(&text);
     ws_storage::write_new(destination, text.as_bytes())?;
     self.forget(path, cx);
     self.remove_recovery_for(path, cx);

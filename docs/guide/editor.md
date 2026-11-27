@@ -36,6 +36,16 @@ Click a file to open it in a tab. The tabs sit in a row on top, and the shown on
 - **Limits** — other than images, files must be text and at most 2 MB, or they are refused with a notification.
 - `⌘W` closes the shown tab; pressed again, the remaining tabs from the last to the first. It never closes the window. The red close button minimizes the window instead, so terminals and agents keep running; `⌘Q` quits the app.
 
+### Formatting and Quick Fix
+
+With a project language server enabled, run **Format Document** from the Command Palette. The server must support document
+formatting. **Quick Fix** in the Command Palette or **Control-.** offers fixes at the cursor from the language server. The menu
+offers fixes that directly edit the current file.
+
+Open **Project Settings → Editor** to set tab width, tabs or spaces, and line endings on save. **Preserve** keeps the buffer's
+line endings. **Format on save using the language server** runs formatting before an ordinary save. If the formatter is unavailable
+or reports an error, the app shows the error and saves the current text. Edits made while formatting cause the result to be rejected.
+
 ### Syntax highlighting
 
 Highlighting comes from tree-sitter grammars through GPUI Kit, plus a few line-based languages gCode colors itself. The dark theme uses GitHub's colors.
