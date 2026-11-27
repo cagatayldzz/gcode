@@ -76,8 +76,12 @@ impl Workspace {
 
   /// Gives the keyboard to a shell, once it is drawn.
   pub(super) fn focus_pane(&self, terminal: &Entity<Terminal>, window: &mut Window, cx: &mut Context<Self>) {
-    let handle = terminal.read(cx).focus_handle(cx);
-    window.defer(cx, move |window, cx| handle.focus(window, cx));
+    let terminal = terminal.downgrade();
+    window.defer(cx, move |window, cx| {
+      if let Some(terminal) = terminal.upgrade() {
+        terminal.read(cx).focus_handle(cx).focus(window, cx);
+      }
+    });
   }
 
   /// Gives the keyboard to the shell that should have it.
@@ -411,6 +415,9 @@ impl Workspace {
   /// Takes a pane out, because its shell exited or it was closed: the shell stops, a tab left without panes goes, and when the
   /// open project has no shell left the main area goes back to the editor.
   pub(crate) fn close_pane(&mut self, terminal: Entity<Terminal>, window: &mut Window, cx: &mut Context<Self>) {
+    let closing_focused_agent = self.agent_open
+      && self.agents().and_then(AgentTabs::current).is_some_and(|tab| tab.session == terminal)
+      && terminal.read(cx).focus_handle(cx).contains_focused(window, cx);
     self.script_terminal_closed(&terminal, cx);
     for tabs in self.terminal_tabs.values_mut() {
       tabs.remove(&terminal);
@@ -421,8 +428,12 @@ impl Workspace {
     }
     self.agent_tabs.retain(|_, tabs| !tabs.is_empty());
     // The AI view stays open when its last session ends: it shows the choice of agents again.
-    if self.agent_open {
-      self.focus_agent(window, cx);
+    if closing_focused_agent {
+      if self.agents().is_some() {
+        self.focus_agent(window, cx);
+      } else {
+        self.focus_handle.focus(window, cx);
+      }
     }
     if self.terminal_open {
       if self.arrangement().is_some() {

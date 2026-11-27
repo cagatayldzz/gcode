@@ -451,7 +451,20 @@ fn an_agent_starts_in_its_own_worktree_and_its_changes_open_in_git(cx: &mut Test
   }
   assert_eq!(Path::new(fs::read_to_string(output).unwrap().trim()), checkout);
   assert!(!source.join("agent-output.txt").exists());
-  draw_every_window(cx);
+  loop {
+    draw_every_window(cx);
+    let exited = cx
+      .update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.try_find("agent-start-codex").is_some()
+      })
+      .unwrap();
+    if exited {
+      break;
+    }
+    assert!(std::time::Instant::now() < deadline, "the agent should exit");
+    std::thread::sleep(std::time::Duration::from_millis(10));
+  }
 
   cx.dispatch_action(handle, ws_ui::ShowAgentChanges);
   draw_every_window(cx);
