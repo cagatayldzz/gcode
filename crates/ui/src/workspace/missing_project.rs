@@ -49,6 +49,7 @@ impl Workspace {
       self.switch_project(window, cx, move |projects| {
         projects.relocate(&from, &to);
       });
+      self.clear_project_scripts(&old, cx);
       self.terminal_tabs.remove(&old);
       self.agent_tabs.remove(&old);
       self.views.remove(&old);

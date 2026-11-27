@@ -328,3 +328,36 @@ fn the_split_editor_saves_its_focused_file_with_the_terminal_docked(cx: &mut Tes
   })
   .unwrap();
 }
+
+#[gpui_kit::test]
+fn project_scripts_run_only_on_request_and_keep_the_terminal_output(cx: &mut TestAppContext) {
+  let (data, handle) = open_window_with_project(cx);
+  let project = data.path().join("project");
+  let marker = project.join("script-ran");
+  fs::write(project.join("Makefile"), "smoke:\n\tprintf ran > script-ran\n").unwrap();
+
+  cx.dispatch_action(handle, ws_ui::ShowProjectScripts);
+  draw_every_window(cx);
+  assert!(!marker.exists());
+  cx.update_window(handle, |_, window, cx| {
+    window.render_frame(cx);
+    window.click("script-Makefile-smoke-Run", cx);
+  })
+  .unwrap();
+  allow_shell_threads(cx);
+  let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+  while !marker.exists() && std::time::Instant::now() < deadline {
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    cx.run_until_parked();
+  }
+  assert_eq!(fs::read_to_string(marker).unwrap(), "ran");
+  draw_every_window(cx);
+
+  cx.dispatch_action(handle, ws_ui::ShowProjectScripts);
+  draw_every_window(cx);
+  cx.update_window(handle, |_, window, cx| {
+    window.render_frame(cx);
+    assert!(window.try_find("script-Makefile-smoke-Show Output").is_some());
+  })
+  .unwrap();
+}

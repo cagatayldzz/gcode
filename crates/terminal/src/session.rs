@@ -33,7 +33,7 @@ pub enum SessionEvent {
   /// The program asked to put text on the clipboard (OSC 52).
   ClipboardStore(String),
   /// The shell exited.
-  Exit,
+  Exit(Option<i32>),
 }
 
 /// How to start a session.
@@ -79,6 +79,7 @@ type Notify = Arc<dyn Fn(SessionEvent) + Send + Sync>;
 #[derive(Clone)]
 struct Proxy {
   notify: Notify,
+  exit_code: Arc<Mutex<Option<i32>>>,
   sender: Arc<OnceLock<EventLoopSender>>,
   palette: Arc<Mutex<Palette>>,
   #[cfg(unix)]
@@ -131,7 +132,19 @@ impl EventListener for Proxy {
       Event::ClipboardStore(_, text) => (self.notify)(SessionEvent::ClipboardStore(text)),
       // ChildExit arrives before the PTY's remaining output is drained. Term::exit sends Exit
       // after that drain, so consumers can safely read the final screen before closing the pane.
-      Event::Exit => (self.notify)(SessionEvent::Exit),
+      Event::ChildExit(status) => {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt as _;
+
+        let code = status.code();
+        #[cfg(unix)]
+        let code = code.or_else(|| status.signal().map(|signal| 128 + signal));
+        *self.exit_code.lock().unwrap_or_else(|error| error.into_inner()) = code;
+      }
+      Event::Exit => {
+        let code = *self.exit_code.lock().unwrap_or_else(|error| error.into_inner());
+        (self.notify)(SessionEvent::Exit(code));
+      }
       // Replies the program asked for, such as cursor position reports.
       Event::PtyWrite(text) => {
         if let Some(sender) = self.sender.get() {
@@ -185,6 +198,8 @@ impl Dimensions for Size {
 
 /// A running shell attached to a pseudo-terminal.
 pub struct Session {
+  #[cfg(unix)]
+  exit_code: Arc<Mutex<Option<i32>>>,
   term: Arc<FairMutex<Term<Proxy>>>,
   sender: EventLoopSender,
   palette: Arc<Mutex<Palette>>,
@@ -233,6 +248,7 @@ impl Session {
     #[cfg(unix)]
     let foreground = pty.file().try_clone().ok().map(|tty| Arc::new(ForegroundActivity { tty, title_activity: Mutex::new(None) }));
     let proxy = Proxy {
+      exit_code: Arc::default(),
       notify: Arc::new(notify),
       sender: Arc::new(OnceLock::new()),
       palette: palette.clone(),
@@ -246,6 +262,8 @@ impl Session {
     let _ = proxy.sender.set(sender.clone());
     event_loop.spawn();
     Ok(Self {
+      #[cfg(unix)]
+      exit_code: proxy.exit_code.clone(),
       term,
       sender,
       palette,
@@ -297,6 +315,21 @@ impl Session {
   }
 
   /// Sends bytes to the program, as if typed.
+  #[cfg(unix)]
+  pub fn terminate(&self) -> std::io::Result<()> {
+    use rustix::process::{kill_process_group, Pid, Signal};
+
+    let exit = self.exit_code.lock().unwrap_or_else(|error| error.into_inner());
+    if exit.is_some() {
+      return Ok(());
+    }
+    let pid = Pid::from_raw(self.child_id as i32).ok_or_else(|| std::io::Error::other("The terminal has no child process."))?;
+    match kill_process_group(pid, Signal::KILL) {
+      Err(rustix::io::Errno::SRCH) => Ok(()),
+      result => result.map_err(Into::into),
+    }
+  }
+
   pub fn write(&self, bytes: impl Into<std::borrow::Cow<'static, [u8]>>) {
     let _ = self.sender.send(Msg::Input(bytes.into()));
     // Typing returns the view to the live output.

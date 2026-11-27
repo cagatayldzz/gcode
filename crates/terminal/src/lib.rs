@@ -5,6 +5,7 @@
 mod keys;
 mod mouse;
 mod palette;
+pub mod project_scripts;
 mod search;
 mod session;
 mod snapshot;

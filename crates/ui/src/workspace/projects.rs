@@ -290,6 +290,7 @@ impl Workspace {
     for panel in self.editor_panels() {
       panel.update(cx, |editor, cx| editor.clear_editor_preferences(path, cx));
     }
+    self.clear_project_scripts(path, cx);
     self.terminal_tabs.remove(path);
     self.agent_tabs.remove(path);
     self.views.remove(path);
@@ -519,6 +520,7 @@ impl Workspace {
     self.projects.set_appearance(&path, &chosen.name, chosen.icon.as_deref(), chosen.color.as_deref());
     self.persist_projects();
     if chosen.rename_folder {
+      self.clear_project_scripts(&chosen.path, cx);
       self.terminal_tabs.remove(&chosen.path);
       self.agent_tabs.remove(&chosen.path);
       self.views.remove(&chosen.path);

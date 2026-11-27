@@ -38,7 +38,7 @@ const LINK_UNDERLINE_OFFSET: Pixels = px(14.);
 const LINK_UNDERLINE_THICKNESS: Pixels = px(1.);
 
 /// Sent when the shell of a terminal exits.
-pub(crate) struct TerminalExited;
+pub(crate) struct TerminalExited(pub Option<i32>);
 
 /// Sent when the terminal attention indicator changes.
 pub(crate) struct TerminalAttentionChanged;
@@ -155,6 +155,19 @@ impl Terminal {
     }
   }
 
+  pub(crate) fn interrupt(&self) {
+    self.session.write(vec![3]);
+  }
+
+  pub(crate) fn terminate(&self) -> std::io::Result<()> {
+    self.session.terminate()
+  }
+
+  pub(crate) fn set_title(&mut self, title: SharedString, cx: &mut Context<Self>) {
+    self.title = title;
+    cx.notify();
+  }
+
   /// Types `text` into the program as if it was pasted.
   pub fn insert_text(&mut self, text: &str, cx: &mut Context<Self>) {
     self.clear_attention(cx);
@@ -198,7 +211,7 @@ impl Terminal {
       SessionEvent::Title(title) => self.title = title.into(),
       SessionEvent::Directory(path) => self.directory = Some(path),
       SessionEvent::ClipboardStore(text) => cx.write_to_clipboard(ClipboardItem::new_string(text)),
-      SessionEvent::Exit => cx.emit(TerminalExited),
+      SessionEvent::Exit(code) => cx.emit(TerminalExited(code)),
     }
     cx.notify();
   }

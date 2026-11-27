@@ -84,6 +84,7 @@ mod git;
 mod helpers;
 mod missing_project;
 mod profiles;
+mod project_scripts;
 mod projects;
 mod quick_open;
 mod render_git;
@@ -549,6 +550,8 @@ pub struct Workspace {
   file_actions: FileActions,
   /// The shells of every project that has been opened, in tabs and split panes, kept alive while another project is shown.
   terminal_tabs: HashMap<PathBuf, Arrangement<Entity<Terminal>>>,
+  script_runs: HashMap<project_scripts::ScriptKey, project_scripts::ScriptRun>,
+  scripts_discovery: Option<Task<()>>,
   _terminal_subscriptions: Vec<Subscription>,
 }
 
@@ -789,6 +792,8 @@ impl Workspace {
       save_dialog_task: None,
       file_actions: FileActions::default(),
       terminal_tabs: HashMap::new(),
+      script_runs: HashMap::new(),
+      scripts_discovery: None,
       _terminal_subscriptions: Vec::new(),
       _appearance: cx.observe_window_appearance(window, |this, window, cx| {
         let preferences = &this.settings.read(cx).preferences;
@@ -1120,6 +1125,8 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::save_file))
       .on_action(cx.listener(Self::toggle_editor_split))
       .on_action(cx.listener(Self::toggle_terminal_dock))
+      .on_action(cx.listener(Self::show_project_scripts))
+      .on_action(cx.listener(Self::control_script))
       .on_action(cx.listener(Self::format_document))
       .on_action(cx.listener(Self::find_in_file))
       .on_action(cx.listener(Self::replace_in_file))

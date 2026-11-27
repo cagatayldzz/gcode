@@ -44,3 +44,11 @@ wrapped at the screen edge.
 
 An AI agent session is simply a `Terminal` whose shell line is `$SHELL -l -i -c "exec codex"` (or `claude`), so the user's PATH finds the
 agent. See [Window layout → The AI view](./window-layout.md#the-ai-view).
+
+
+## Project scripts
+
+`ws_terminal::project_scripts` reads root manifests and builds literal argument lists. The workspace starts these commands only
+on an explicit script action and puts each run in its own tab of the existing project terminal arrangement. The PTY forwards
+the exit status after draining output, so exited script tabs can retain their last screen. Run state belongs to the project
+in the current window. A restart waits for the previous child to exit before launching a replacement.

@@ -49,8 +49,10 @@ impl Workspace {
       }
     };
     let terminal = cx.new(|cx| Terminal::new(started, cx));
-    self._terminal_subscriptions.push(cx.subscribe_in(&terminal, window, |this, terminal, _: &TerminalExited, window, cx| {
-      this.close_pane(terminal.clone(), window, cx);
+    self._terminal_subscriptions.push(cx.subscribe_in(&terminal, window, |this, terminal, exited: &TerminalExited, window, cx| {
+      if !this.script_exited(terminal, exited.0, window, cx) {
+        this.close_pane(terminal.clone(), window, cx);
+      }
     }));
     self._terminal_subscriptions.push(cx.subscribe(&terminal, |_, _, _: &TerminalAttentionChanged, cx| cx.notify()));
     self._terminal_subscriptions.push(cx.subscribe(&terminal, |_, _, _: &TerminalActivityChanged, cx| cx.notify()));
@@ -378,6 +380,7 @@ impl Workspace {
   /// Takes a pane out, because its shell exited or it was closed: the shell stops, a tab left without panes goes, and when the
   /// open project has no shell left the main area goes back to the editor.
   pub(crate) fn close_pane(&mut self, terminal: Entity<Terminal>, window: &mut Window, cx: &mut Context<Self>) {
+    self.script_terminal_closed(&terminal, cx);
     for tabs in self.terminal_tabs.values_mut() {
       tabs.remove(&terminal);
     }

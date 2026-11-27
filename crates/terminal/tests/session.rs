@@ -17,7 +17,7 @@ fn run(script: &str) -> (Session, mpsc::Receiver<SessionEvent>) {
 fn wait_for_exit(receiver: &mpsc::Receiver<SessionEvent>) {
   let deadline = Instant::now() + Duration::from_secs(10);
   while Instant::now() < deadline {
-    if let Ok(SessionEvent::Exit) = receiver.recv_timeout(Duration::from_millis(100)) {
+    if let Ok(SessionEvent::Exit(_)) = receiver.recv_timeout(Duration::from_millis(100)) {
       return;
     }
   }
@@ -438,4 +438,41 @@ fn terminal_bell_is_reported_to_the_interface() {
     }
   }
   panic!("the terminal bell was not reported");
+}
+
+#[test]
+fn a_finished_program_reports_its_exit_code() {
+  let (sender, receiver) = std::sync::mpsc::channel();
+  let _session = Session::spawn(
+    SessionOptions { program: Some(("/bin/sh".into(), vec!["-c".into(), "exit 7".into()])), ..SessionOptions::default() },
+    80,
+    24,
+    move |event| {
+      let _ = sender.send(event);
+    },
+  )
+  .unwrap();
+  let deadline = std::time::Instant::now() + Duration::from_secs(5);
+  loop {
+    let event = receiver.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())).expect("the program exits");
+    if let SessionEvent::Exit(code) = event {
+      assert_eq!(code, Some(7));
+      break;
+    }
+  }
+}
+
+#[cfg(unix)]
+#[test]
+fn terminating_a_program_reports_a_signal_exit() {
+  let (session, receiver) = run("while :; do sleep 1; done");
+  session.terminate().unwrap();
+  let deadline = Instant::now() + Duration::from_secs(5);
+  loop {
+    let event = receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())).expect("the program exits");
+    if let SessionEvent::Exit(code) = event {
+      assert_eq!(code, Some(137));
+      break;
+    }
+  }
 }
