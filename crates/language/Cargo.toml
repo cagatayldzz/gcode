@@ -20,3 +20,8 @@ serde_json.workspace = true
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[[bin]]
+name = "language-server-fixture"
+path = "tests/fixtures/language_server.rs"
+test = false

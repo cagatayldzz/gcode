@@ -4,8 +4,7 @@ use std::{path::Path, time::Instant};
 use ws_language::{Server, Session};
 
 fn server(root: &Path, scenario: &str) -> Server {
-  let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/language_server.py");
-  Server { program: "python3".into(), args: vec![fixture.to_string_lossy().into_owned(), scenario.into()], root: root.to_path_buf() }
+  Server { program: env!("CARGO_BIN_EXE_language-server-fixture").into(), args: vec![scenario.into()], root: root.to_path_buf() }
 }
 
 #[test]

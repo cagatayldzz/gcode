@@ -1,31 +1,52 @@
-# <img src="apps/desktop/macos/icon.svg" alt="" width="48" align="absmiddle"> gCode
+<div align="center">
+  <img src="apps/desktop/macos/icon.png" width="88" alt="">
+  <h1>gCode</h1>
+  <p><strong>A native macOS workspace for code, terminals, Git, and AI agents.</strong></p>
+  <p>Built with Rust and GPUI Kit · macOS 15+ · Apple Silicon</p>
+  <p>
+    <a href="https://github.com/cagatayldzz/gcode/releases/latest"><strong>Download for macOS</strong></a>
+    &nbsp;·&nbsp;
+    <a href="docs/guide/index.md">User guide</a>
+    &nbsp;·&nbsp;
+    <a href="#run-from-source">Run from source</a>
+  </p>
+</div>
 
-gCode brings your projects, a code editor, terminals, and Git together in one native macOS
-window. Built with Rust and [GPUI Kit](https://gpui-kit.com).
+![Light mode showing the project explorer and a Rust file open in the editor](docs/images/workspace-light.png)
 
-| Light · Editor | Dark · Git changes |
+## Your workspace
+
+| Area | What you can do |
 | --- | --- |
-| ![gCode in Light mode with the file explorer and a Rust file open in the editor](docs/images/workspace-light.png) | ![gCode in Dark mode with changed files, commit controls, and an inline diff](docs/images/workspace-dark.png) |
+| **Editor** | Open files quickly, edit side by side, search and replace across a project, and use JavaScript and TypeScript completion and Quick Fix. [Editor guide](docs/guide/editor.md) |
+| **Terminals** | Dock a terminal below the editor or switch to a full terminal workspace. Split panes and run project scripts from the Command Palette. [Terminal guide](docs/guide/terminals.md) |
+| **Git** | Review diffs, stage individual hunks, and commit selected changes. Compare branches, rebase, and manage linked worktrees. [Git guide](docs/guide/git-changes.md) |
+| **AI agents** | Run Codex and Claude in separate Git worktrees. Review each session’s changes against its starting commit and open its Git panel to commit. [Agent guide](docs/guide/agents.md) |
+| **Projects** | Create, clone, or import projects. Group and star them, then switch between projects while their terminals keep running. [Project guide](docs/guide/projects.md) |
+| **Accounts** | Connect GitHub, GitLab, or Azure DevOps to browse repositories and work with pull requests. [Accounts guide](docs/guide/accounts.md) |
 
-- **Projects** — Create a repository, clone by URL, or import a local folder. Group projects by category, star favorites, and switch between them while their terminals keep running.
-- **Editor** — Browse the file tree, edit files in tabs with syntax highlighting, and preview SVG and ICNS images. Press `⌘S` to save.
-- **Terminals** — Press `⌘J` to switch between the editor and a full workspace of shells. Open tabs and split panes side by side or vertically.
-- **Git** — Review diffs and commit history, commit selected files, compare branches, and fetch, pull, or push from the workspace.
-- **Accounts** — Connect GitHub, GitLab, or Azure DevOps to browse repositories and work with pull requests.
-- **Appearance** — Choose Light or Dark in Settings, or follow macOS.
+![Dark mode showing changed files, commit controls, and an inline Git diff](docs/images/workspace-dark.png)
 
-## Get started
+## Start with the keyboard
 
-gCode supports macOS 15 or later on Apple Silicon. See [GitHub Releases](https://github.com/cagatayldzz/vekro/releases) for downloads, or follow the [development guide](docs/development/index.md) to run it from source.
+| Shortcut | Action |
+| --- | --- |
+| `⇧⌘P` | Open the Command Palette |
+| `⌘P` | Open a project file |
+| `⌘J` | Toggle the terminal |
+| `⇧⌘A` | Toggle the AI view |
+
+See the [full shortcut list](docs/guide/shortcuts.md).
+
+## Run from source
+
+On Apple Silicon with macOS 15 or later, install the Xcode Command Line Tools, stable Rust, Bun, and Git. [Development setup](docs/development/index.md)
 
 ```sh
+git clone https://github.com/cagatayldzz/gcode.git
+cd gcode
 bun install
 bun run dev
 ```
 
-## Documentation
-
-- [User guide](docs/guide/index.md) — projects, editor, search, terminals, AI agents, Git, accounts, settings and shortcuts
-- [Architecture](docs/architecture/index.md) — crate boundaries, the code map, window layout, data flow and persistence
-- [Development](docs/development/index.md) — setup, conventions, testing, performance and releases
-- [Project rules](AGENTS.md) — conventions for contributors and AI agents
+[Architecture](docs/architecture/index.md) · [Development](docs/development/index.md) · [Contributor conventions](AGENTS.md)
