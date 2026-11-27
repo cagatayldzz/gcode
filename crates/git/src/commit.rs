@@ -20,22 +20,27 @@ pub struct CommitOutcome {
 
 /// Commits the selected working-tree files and preserves unrelated staged changes.
 pub fn commit(path: &Path, files: &[PathBuf], summary: &str, description: &str) -> Result<CommitOutcome, String> {
-  build_commit(path, files, summary, description, false)
+  build_commit(path, files, summary, description, false, false)
 }
 
 /// Amends an unpublished, non-merge commit with the selected files or only a new message.
 pub fn amend_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str) -> Result<CommitOutcome, String> {
-  build_commit(path, files, summary, description, true)
+  build_commit(path, files, summary, description, true, false)
+}
+
+/// Commits the current index, including any changes staged from the terminal.
+pub fn commit_staged(path: &Path, summary: &str, description: &str) -> Result<CommitOutcome, String> {
+  build_commit(path, &[], summary, description, false, true)
 }
 
 #[derive(PartialEq, Eq)]
-struct Head {
+pub(crate) struct Head {
   branch: Option<Vec<u8>>,
-  tip: Option<Oid>,
+  pub(crate) tip: Option<Oid>,
 }
 
 impl Head {
-  fn read(repository: &Repository) -> Result<Self, String> {
+  pub(crate) fn read(repository: &Repository) -> Result<Self, String> {
     let reference = repository.find_reference("HEAD").map_err(message)?;
     let branch = reference.symbolic_target_bytes().map(<[u8]>::to_vec);
     let tip = match repository.head() {
@@ -72,23 +77,53 @@ impl Drop for IndexLock {
   }
 }
 
-fn build_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str, amend: bool) -> Result<CommitOutcome, String> {
+pub(crate) struct IndexTransaction {
+  pub(crate) scratch: tempfile::TempDir,
+  pub(crate) shadow: PathBuf,
+  real: PathBuf,
+  _lock: IndexLock,
+}
+
+impl IndexTransaction {
+  pub(crate) fn open(repository: &Repository, workdir: &Path) -> Result<Self, String> {
+    let real = repository.path().join("index");
+    let lock = IndexLock::acquire(&real)?;
+    let scratch = tempfile::Builder::new().prefix("index-").tempdir_in(repository.path()).map_err(|error| error.to_string())?;
+    let shadow = scratch.path().join("index");
+    match fs::copy(&real, &shadow) {
+      Ok(_) => {}
+      Err(error) if error.kind() == io::ErrorKind::NotFound => {
+        run(workdir, &shadow, "read-tree", ["--empty"])?;
+      }
+      Err(error) => return Err(format!("Could not copy Git's index: {error}")),
+    }
+    Ok(Self { scratch, shadow, real, _lock: lock })
+  }
+
+  pub(crate) fn publish(&self) -> Result<(), String> {
+    File::open(&self.shadow).and_then(|file| file.sync_all()).and_then(|()| fs::rename(&self.shadow, &self.real)).map_err(|error| error.to_string())
+  }
+}
+
+pub(crate) fn validate_paths(files: &[PathBuf]) -> Result<(), String> {
+  if files.iter().any(|path| path.as_os_str().is_empty() || path.components().any(|part| !matches!(part, Component::Normal(_)))) {
+    return Err("Select files inside the repository.".into());
+  }
+  Ok(())
+}
+
+fn build_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str, amend: bool, staged: bool) -> Result<CommitOutcome, String> {
   let summary = summary.trim();
   if summary.is_empty() {
     return Err("Write a summary for the commit.".into());
   }
-  if files.is_empty() && !amend {
+  if files.is_empty() && !amend && !staged {
     return Err("Choose at least one file to commit.".into());
   }
-  for path in files {
-    if path.as_os_str().is_empty() || path.components().any(|part| !matches!(part, Component::Normal(_))) {
-      return Err("Commit paths must name files inside the repository.".into());
-    }
-  }
+  validate_paths(files)?;
   let repository = Repository::discover(path).map_err(message)?;
   let workdir = repository.workdir().ok_or("The repository has no working folder.")?;
-  let real_index = repository.path().join("index");
-  let _lock = IndexLock::acquire(&real_index)?;
+  let index = IndexTransaction::open(&repository, workdir)?;
   super::operation::require_idle(&repository)?;
   let before = Head::read(&repository)?;
   if amend {
@@ -100,24 +135,17 @@ fn build_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str
       return Err("This commit is already on the remote; amending it would rewrite published history.".into());
     }
   }
-  let scratch = tempfile::Builder::new().prefix("commit-").tempdir_in(repository.path()).map_err(|error| error.to_string())?;
-  let shadow = scratch.path().join("index");
-  match fs::copy(&real_index, &shadow) {
-    Ok(_) => {}
-    Err(error) if error.kind() == io::ErrorKind::NotFound => {
-      run(workdir, &shadow, "read-tree", ["--empty"])?;
-    }
-    Err(error) => return Err(format!("Could not copy Git's index: {error}")),
-  }
-  let existing_stage = run(workdir, &shadow, "diff", ["--cached", "--name-only", "--no-renames", "-z", "--"])?;
-  let saved_stage: HashSet<_> = paths(&existing_stage.stdout).collect();
+  let shadow = &index.shadow;
+  let existing_stage =
+    if staged { Vec::new() } else { run(workdir, shadow, "diff", ["--cached", "--name-only", "--no-renames", "-z", "--"])?.stdout };
+  let saved_stage: HashSet<_> = paths(&existing_stage).collect();
 
   // Register new paths in the isolated index so Git's path-only commit accepts them. Git reads their actual content at commit time.
   let selected: Vec<_> = files.iter().map(|file| literal(file.as_os_str())).collect();
   if !files.is_empty() {
     let tracked = run(
       workdir,
-      &shadow,
+      shadow,
       "ls-files",
       [OsStr::new("--cached"), OsStr::new("-z"), OsStr::new("--")].into_iter().chain(selected.iter().map(OsString::as_os_str)),
     )?;
@@ -134,10 +162,10 @@ fn build_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str
       }
     }
     if !new_paths.is_empty() {
-      run(workdir, &shadow, "add", [OsStr::new("--intent-to-add"), OsStr::new("--")].into_iter().chain(new_paths))?;
+      run(workdir, shadow, "add", [OsStr::new("--intent-to-add"), OsStr::new("--")].into_iter().chain(new_paths))?;
     }
   }
-  let message_path = scratch.path().join("message");
+  let message_path = index.scratch.path().join("message");
   let description = description.trim();
   let text = if description.is_empty() { summary.to_owned() } else { format!("{summary}\n\n{description}") };
   fs::write(&message_path, text).map_err(|error| format!("Could not prepare the commit message: {error}"))?;
@@ -146,13 +174,15 @@ fn build_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str
     return Err("HEAD changed while preparing the commit. Review the selection and try again.".into());
   }
 
-  let mut arguments = vec![OsStr::new("--only"), OsStr::new("--cleanup=verbatim"), OsStr::new("--file"), message_path.as_os_str()];
+  let mut arguments = vec![OsStr::new("--cleanup=verbatim"), OsStr::new("--file"), message_path.as_os_str()];
   if amend {
     arguments.push(OsStr::new("--amend"));
   }
-  arguments.push(OsStr::new("--"));
-  arguments.extend(selected.iter().map(OsString::as_os_str));
-  let output = execute(workdir, &shadow, "commit", arguments)?;
+  if !staged {
+    arguments.extend([OsStr::new("--only"), OsStr::new("--")]);
+    arguments.extend(selected.iter().map(OsString::as_os_str));
+  }
+  let output = execute(workdir, shadow, "commit", arguments)?;
   let after = Head::read(&repository);
   if !output.status.success() {
     let error = failure(&output);
@@ -177,7 +207,15 @@ fn build_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str
       warning: Some("Git reported success, but the checked-out branch changed. Review the commit and index.".into()),
     });
   }
-  let result = publish_index(workdir, &shadow, &repository, before.tip, &after, selected, &saved_stage);
+  let result = (|| {
+    if !staged {
+      reconcile_index(workdir, shadow, before.tip, id, selected, &saved_stage)?;
+    }
+    if Head::read(&repository)? != after {
+      return Err("HEAD moved again before the index could be published.".into());
+    }
+    index.publish()
+  })();
   Ok(CommitOutcome {
     id: short(id),
     warning: result
@@ -186,16 +224,15 @@ fn build_commit(path: &Path, files: &[PathBuf], summary: &str, description: &str
   })
 }
 
-fn publish_index(
+fn reconcile_index(
   workdir: &Path,
   shadow: &Path,
-  repository: &Repository,
   old: Option<Oid>,
-  after: &Head,
+  id: Oid,
   mut reset: Vec<OsString>,
   saved_stage: &HashSet<&OsStr>,
 ) -> Result<(), String> {
-  let tip = after.tip.ok_or("The committed revision is missing.")?.to_string();
+  let tip = id.to_string();
   let mut diff = vec!["--root", "--no-commit-id", "--name-only", "--no-renames", "-r", "-z"];
   let previous = old.map(|id| id.to_string());
   diff.extend(previous.as_deref());
@@ -218,22 +255,16 @@ fn publish_index(
       [OsStr::new("--quiet"), OsStr::new(&tip), OsStr::new("--")].into_iter().chain(reset.iter().map(OsString::as_os_str)),
     )?;
   }
-  if Head::read(repository)? != *after {
-    return Err("HEAD moved again before the index could be published.".into());
-  }
-  File::open(shadow)
-    .and_then(|file| file.sync_all())
-    .and_then(|()| fs::rename(shadow, repository.path().join("index")))
-    .map_err(|error| error.to_string())
+  Ok(())
 }
 
-fn literal(path: &OsStr) -> OsString {
+pub(crate) fn literal(path: &OsStr) -> OsString {
   let mut spec = OsString::from(":(top,literal)");
   spec.push(path);
   spec
 }
 
-fn paths(output: &[u8]) -> impl Iterator<Item = &OsStr> {
+pub(crate) fn paths(output: &[u8]) -> impl Iterator<Item = &OsStr> {
   output.split(|byte| *byte == 0).filter(|path| !path.is_empty()).map(OsStr::from_bytes)
 }
 
@@ -258,7 +289,7 @@ fn failure(output: &Output) -> String {
   }
 }
 
-fn run(workdir: &Path, index: &Path, command: &str, args: impl IntoIterator<Item = impl AsRef<OsStr>>) -> Result<Output, String> {
+pub(crate) fn run(workdir: &Path, index: &Path, command: &str, args: impl IntoIterator<Item = impl AsRef<OsStr>>) -> Result<Output, String> {
   let output = execute(workdir, index, command, args)?;
   if output.status.success() {
     Ok(output)

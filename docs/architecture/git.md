@@ -83,6 +83,13 @@ separate warning. The interface skips automatic push on that outcome.
 Message-only amend uses the same transaction with an empty selection. Amend checks that the existing commit is unpublished and
 is not a merge commit. The normal commit and amend flows refuse to start during another Git operation.
 
+### Staging
+
+`staging_diff` reads HEAD versus index or index versus worktree. Stage and unstage operations use the same isolated index and
+lock as commit. A hunk operation re-reads the patch under the lock, then applies the selected hunk to the index with
+`git apply --cached` (reversed for unstaging). The worktree is untouched. **Commit Staged** uses the current index with native
+Git hooks and signing. The existing file selection uses the full working-tree version of each selected file.
+
 ### Pull
 
 ```rust

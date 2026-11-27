@@ -93,6 +93,7 @@ actions!(
     // The activity bar's project settings button: the settings of the open project take the main area, or give it back.
     ToggleProjectSettings,
     ShowBranchStashes,
+    CommitStagedChanges,
     ContinueGitOperation,
     SkipGitOperation,
     AbortGitOperation,

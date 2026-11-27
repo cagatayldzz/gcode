@@ -535,6 +535,11 @@ impl Workspace {
                 detail.map(|detail| Label::new(detail).flex_1().min_w_0().text_size(FONT_SIZE_SM).text_color(palette.text_secondary).truncate()),
               ),
           )
+          .when(change.staged, |row| {
+            row.child(
+              Label::new(if change.unstaged { "Partially Staged" } else { "Staged" }).text_size(FONT_SIZE_SM).text_color(palette.text_secondary),
+            )
+          })
           .child(Icon::empty().path(change_kind_icon(change.kind)).size_4().flex_none().text_color(kind_color(change.kind, &palette)))
           .on_click(cx.listener({
             let file = file.clone();
@@ -652,6 +657,8 @@ impl Workspace {
       cx.defer(move |cx| this.update(cx, |_, cx| cx.notify()));
     }
     let summary_filled = !self.commit_summary.read(cx).value().trim().is_empty();
+    let staged_count = git.changes.iter().filter(|change| change.staged).count();
+    let stage_busy = self.stage_task.is_some();
     let label = match chosen {
       1 => format!("Commit 1 file to {}", git.branch),
       count => format!("Commit {count} files to {}", git.branch),
@@ -715,6 +722,23 @@ impl Workspace {
             )
           }),
       )
+      .when(staged_count > 0, |area| {
+        area.child(
+          Button::new("commit-staged")
+            .small()
+            .w_full()
+            .label(format!("Commit Staged ({staged_count})"))
+            .disabled(
+              !summary_filled
+                || stage_busy
+                || self.committing
+                || self.discarding
+                || git.operation != ws_git::Operation::Idle
+                || self.merge_task.is_some(),
+            )
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::CommitStagedChanges), cx)),
+        )
+      })
       .child(
         div()
           .id("commit-wrapper")
@@ -728,6 +752,7 @@ impl Workspace {
               .disabled(
                 chosen == 0
                   || !summary_filled
+                  || stage_busy
                   || self.committing
                   || self.discarding
                   || git.operation != ws_git::Operation::Idle

@@ -418,6 +418,7 @@ pub struct Workspace {
   /// A branch is being merged into the current one.
   merge_task: Option<Task<()>>,
   stash_task: Option<Task<()>>,
+  stage_task: Option<Task<()>>,
   merge_dialog: Option<(PathBuf, Entity<MergeDialog>, Subscription)>,
   selected_commit: Option<String>,
   commit_view: Entity<CommitView>,
@@ -635,6 +636,7 @@ impl Workspace {
       compare_epoch: 0,
       merge_task: None,
       stash_task: None,
+      stage_task: None,
       merge_dialog: None,
       selected_commit: None,
       commit_view: commit_view.clone(),
@@ -715,6 +717,9 @@ impl Workspace {
         // A double click on a line of a diff opens the file at that line.
         cx.subscribe_in(&change_view, window, |this, _, event: &crate::change_view::OpenInEditor, window, cx| {
           this.open_change_line_in_editor(&event.file, event.line, window, cx);
+        }),
+        cx.subscribe_in(&change_view, window, |this, _, request: &crate::change_view::StageRequest, window, cx| {
+          this.stage_change(request, window, cx);
         }),
         // The commit button is enabled once there is a summary.
         cx.subscribe(&commit_summary, |_, _, _: &InputEvent, cx| cx.notify()),
@@ -1054,6 +1059,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::go_to_file))
       .on_action(cx.listener(Self::open_command_palette))
       .on_action(cx.listener(Self::show_branch_stashes))
+      .on_action(cx.listener(Self::commit_staged_changes))
       .on_action(cx.listener(Self::continue_git_operation))
       .on_action(cx.listener(Self::skip_git_operation))
       .on_action(cx.listener(Self::abort_git_operation))

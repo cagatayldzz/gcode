@@ -13,7 +13,7 @@ pub use branch::{
 };
 
 mod commit;
-pub use commit::{amend_commit, commit, CommitOutcome};
+pub use commit::{amend_commit, commit, commit_staged, CommitOutcome};
 
 mod commit_actions;
 pub use commit_actions::{add_to_gitignore, branch_from_commit, cherry_pick, revert_commit};
@@ -22,6 +22,8 @@ mod compare;
 
 mod merge;
 mod operation;
+mod staging;
+pub use staging::{change_index, staging_diff, StageDiff, StageSide};
 
 pub use operation::{operation, resume_operation, Operation, OperationStep};
 
@@ -58,6 +60,8 @@ impl ChangeKind {
 pub struct Change {
   pub path: PathBuf,
   pub kind: ChangeKind,
+  pub staged: bool,
+  pub unstaged: bool,
   /// Where a renamed file was before, relative to the repository.
   pub from: Option<PathBuf>,
 }
@@ -189,7 +193,10 @@ pub fn summary(path: &Path) -> Option<Summary> {
           let path =
             rename.as_ref().and_then(|delta| delta.new_file().path()).map(Path::to_path_buf).or_else(|| entry.path().ok().map(PathBuf::from))?;
           let from = rename.as_ref().and_then(|delta| delta.old_file().path()).map(Path::to_path_buf);
-          Some(Change { path, kind, from })
+          let staged =
+            status.intersects(Status::INDEX_NEW | Status::INDEX_MODIFIED | Status::INDEX_DELETED | Status::INDEX_RENAMED | Status::INDEX_TYPECHANGE);
+          let unstaged = status.intersects(Status::WT_NEW | Status::WT_MODIFIED | Status::WT_DELETED | Status::WT_RENAMED | Status::WT_TYPECHANGE);
+          Some(Change { path, kind, from, staged, unstaged })
         })
         .collect()
     })
@@ -1073,7 +1080,7 @@ pub fn commit_detail(path: &Path, id: &str) -> Result<CommitDetail, String> {
         _ => ChangeKind::Modified,
       };
       let file = if kind == ChangeKind::Deleted { delta.old_file().path() } else { delta.new_file().path() }?;
-      Some(Change { path: file.to_path_buf(), kind, from: None })
+      Some(Change { path: file.to_path_buf(), kind, from: None, staged: false, unstaged: false })
     })
     .collect();
   files.sort_by(|a, b| a.path.cmp(&b.path));

@@ -65,6 +65,15 @@ The button in the Changes header opens every file's diff in **one scrollable pan
   shows added and removed line counts.
 - Viewed marks are kept while the project is open and are independent of the checkboxes used to select files for a commit.
 
+## Staging part of a file
+
+1. Open a file in **Changes** and choose **Unstaged** to compare the index with the working copy.
+2. Choose **Stage Hunk** and pick the range shown in the diff. **Stage File** adds the whole file.
+3. Switch to **Staged** to compare the last commit with the index. Use **Unstage Hunk** or **Unstage File** to move changes back.
+4. Review what is staged and choose **Commit Staged**. This includes staging done in the terminal and leaves the other working-copy edits in place.
+
+New files, deletions, renames, and binary or mode changes use the whole-file buttons.
+
 ## Committing
 
 1. **Tick** the files that belong in the commit (the header checkbox ticks them all; it shows a mixed state when only some are ticked).

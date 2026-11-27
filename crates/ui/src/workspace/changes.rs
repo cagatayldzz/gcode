@@ -187,13 +187,57 @@ impl Workspace {
       .collect()
   }
 
-  /// Commits the changed files that are ticked, with the summary and description typed below the list.
-  pub(super) fn commit_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
-    if self.committing || self.discarding || git.operation != ws_git::Operation::Idle || self.merge_task.is_some() {
+  pub(super) fn stage_change(&mut self, request: &crate::change_view::StageRequest, window: &mut Window, cx: &mut Context<Self>) {
+    if self.projects.active.as_ref() != Some(&request.root)
+      || self.stage_task.is_some()
+      || self.committing
+      || self.discarding
+      || self.merge_task.is_some()
+      || self.switching_branch.is_some()
+      || self.remote_work.is_some()
+      || self.stash_task.is_some()
+    {
       return;
     }
-    let files = self.selected_commit_files(git);
+    let (root, files, side, hunk) = (request.root.clone(), request.files.clone(), request.side, request.hunk.clone());
+    let work = cx.background_executor().spawn({
+      let root = root.clone();
+      async move { ws_git::change_index(&root, &files, side, hunk.as_ref().map(|(diff, index)| (diff.as_ref(), *index))) }
+    });
+    self.stage_task = Some(cx.spawn_in(window, async move |this, cx| {
+      let result = work.await;
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.stage_task = None;
+        if this.settle_job(&root, cx) {
+          this.change_view.update(cx, |view, cx| view.reload(cx));
+        }
+        if let Err(message) = result {
+          window.push_notification(crate::failure(this.say_where(&root, message)), cx);
+        }
+        cx.notify();
+      });
+    }));
+    cx.notify();
+  }
+
+  pub(super) fn commit_staged_changes(&mut self, _: &crate::CommitStagedChanges, window: &mut Window, cx: &mut Context<Self>) {
+    self.run_commit(true, window, cx);
+  }
+
+  /// Commits the changed files that are ticked, with the summary and description typed below the list.
+  pub(super) fn commit_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.run_commit(false, window, cx);
+  }
+
+  fn run_commit(&mut self, staged: bool, window: &mut Window, cx: &mut Context<Self>) {
+    let (Some(root), Some(git)) = (self.projects.active.clone(), self.git.as_ref()) else { return };
+    if self.committing || self.discarding || self.stage_task.is_some() || git.operation != ws_git::Operation::Idle || self.merge_task.is_some() {
+      return;
+    }
+    if staged && !git.changes.iter().any(|change| change.staged) {
+      return;
+    }
+    let files = if staged { Vec::new() } else { self.selected_commit_files(git) };
     let summary = self.commit_summary.read(cx).value().to_string();
     let description = self.commit_description.read(cx).value().to_string();
     self.committing = true;
@@ -206,7 +250,8 @@ impl Workspace {
     let work = cx.background_executor().spawn({
       let (root, files) = (root.clone(), files.clone());
       async move {
-        let commit = ws_git::commit(&root, &files, &summary, &description)?;
+        let commit =
+          if staged { ws_git::commit_staged(&root, &summary, &description)? } else { ws_git::commit(&root, &files, &summary, &description)? };
         let pushed = (push && commit.warning.is_none()).then(|| ws_git::push(&root, credentials_for_repository(&accounts, &root).as_ref(), |_| {}));
         Ok::<_, String>((commit, pushed))
       }
