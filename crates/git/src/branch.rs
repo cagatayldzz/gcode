@@ -149,6 +149,7 @@ pub fn delete_branch(path: &Path, name: &str) -> Result<(), String> {
   if branch.is_head() {
     return Err("The branch you are on cannot be deleted. Switch to another branch first.".into());
   }
+  super::worktrees::require_branch_available(&repository, name)?;
   branch.delete().map_err(message)
 }
 
@@ -185,6 +186,7 @@ pub fn rename_branch(path: &Path, old: &str, new: &str) -> Result<(), String> {
     return Err(format!("A branch named {new} already exists."));
   }
   let mut branch = repository.find_branch(old, BranchType::Local).map_err(|_| format!("There is no local branch named {old}."))?;
+  super::worktrees::require_branch_available(&repository, old)?;
   branch.rename(new, false).map(|_| ()).map_err(message)
 }
 

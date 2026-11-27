@@ -102,6 +102,18 @@ Continue, Skip and Abort for rebase, cherry-pick and revert. Resolve and stage c
 application are shown as active operations with terminal guidance. Commit, amend, undo, branch switching and Git discard
 check the state again before changing the repository.
 
+### History rewriting and linked worktrees
+
+History reset and branch rebase use native Git. The confirmation captures the full HEAD reference and commit ID, which the
+background operation checks again with the operation state before running. Rebase targets a resolved local or remote-tracking
+commit, preserves merge structure, and leaves conflicts in the shared operation flow. It disables automatic stashing and
+updates to other branch refs.
+
+The Worktrees dialog uses the NUL-delimited native Git worktree listing and opens a linked folder as its own project. Creation
+can use an existing local branch or one created at HEAD. Removal validates the selected worktree again and checks for local
+changes, including ignored files, before calling Git without force. Branch checkout, rename, and deletion check whether another
+worktree has the branch checked out.
+
 ### Switching branches
 
 ```text

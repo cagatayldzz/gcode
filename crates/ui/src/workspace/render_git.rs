@@ -1007,6 +1007,8 @@ impl Workspace {
         })
         .on_click(cx.listener(move |this, _, _, cx| this.select_commit(id.clone(), cx)))
         .context_menu(move |menu, window, cx| {
+          let (reset_id, reset_root) = (menu_id.clone(), menu_root.clone());
+          let reset_focus = menu_workspace.read(cx).focus_handle.clone();
           let (undo_workspace, undo_id) = (menu_workspace.clone(), menu_id.clone());
           let (tag_workspace, tag_id) = (menu_workspace.clone(), menu_id.clone());
           let copy_id = menu_id.clone();
@@ -1032,6 +1034,15 @@ impl Workspace {
                   PopupMenuItem::new(entry.name)
                     .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.cherry_pick_commit(id.clone(), branch.clone(), window, cx))),
                 )
+              })
+            })
+            .submenu("Reset to This Commit", window, cx, move |submenu, _, _| {
+              use ws_git::ResetMode::{Hard, Mixed, Soft};
+              [("Soft Reset…", Soft), ("Mixed Reset…", Mixed), ("Hard Reset…", Hard)].into_iter().fold(submenu, |submenu, (label, mode)| {
+                let focus = reset_focus.clone();
+                let action =
+                  history_edit::RewriteHistory { root: reset_root.clone(), rewrite: history_edit::Rewrite::Reset { id: reset_id.clone(), mode } };
+                submenu.item(PopupMenuItem::new(label).on_click(move |_, window, cx| focus.dispatch_action(&action, window, cx)))
               })
             })
             .separator()

@@ -3,6 +3,7 @@
 use crate::Operation;
 use git2::{Oid, Repository};
 use std::{
+  ffi::OsStr,
   path::Path,
   process::{Command, Output, Stdio},
 };
@@ -11,10 +12,13 @@ fn message(error: git2::Error) -> String {
   error.message().to_string()
 }
 
-pub(crate) fn git(path: &Path, arguments: &[&str]) -> Result<Output, String> {
+pub(crate) fn git(path: &Path, arguments: &[impl AsRef<OsStr>]) -> Result<Output, String> {
   ws_activity::timed(
     "git",
-    || crate::describe_git(path, arguments),
+    || {
+      let arguments: Vec<_> = arguments.iter().map(|argument| argument.as_ref().to_string_lossy()).collect();
+      crate::describe_git(path, &arguments.iter().map(|argument| argument.as_ref()).collect::<Vec<_>>())
+    },
     || {
       let mut command = Command::new("git");
       crate::shell_path::apply(&mut command);

@@ -82,6 +82,7 @@ mod entries;
 mod file_actions;
 mod git;
 mod helpers;
+mod history_edit;
 mod missing_project;
 mod profiles;
 mod project_scripts;
@@ -93,6 +94,7 @@ mod render_panels;
 mod render_problems;
 mod search;
 mod terminals;
+mod worktrees;
 
 use file_actions::FileActions;
 use helpers::*;
@@ -421,6 +423,8 @@ pub struct Workspace {
   compare_epoch: u64,
   /// A branch is being merged into the current one.
   merge_task: Option<Task<()>>,
+  worktree_task: Option<Task<()>>,
+  worktree_list: Option<worktrees::WorktreeList>,
   stash_task: Option<Task<()>>,
   stage_task: Option<Task<()>>,
   merge_dialog: Option<(PathBuf, Entity<MergeDialog>, Subscription)>,
@@ -653,6 +657,8 @@ impl Workspace {
       compare_filter: compare_filter.clone(),
       compare_epoch: 0,
       merge_task: None,
+      worktree_task: None,
+      worktree_list: None,
       stash_task: None,
       stage_task: None,
       merge_dialog: None,
@@ -1104,6 +1110,7 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::show_branch_stashes))
       .on_action(cx.listener(Self::commit_staged_changes))
       .on_action(cx.listener(Self::continue_git_operation))
+      .on_action(cx.listener(Self::confirm_history_rewrite))
       .on_action(cx.listener(Self::skip_git_operation))
       .on_action(cx.listener(Self::abort_git_operation))
       .on_action(cx.listener(Self::confirm_enable_language_servers))
@@ -1126,6 +1133,8 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::toggle_editor_split))
       .on_action(cx.listener(Self::toggle_terminal_dock))
       .on_action(cx.listener(Self::show_project_scripts))
+      .on_action(cx.listener(Self::show_worktrees))
+      .on_action(cx.listener(Self::manage_worktree))
       .on_action(cx.listener(Self::control_script))
       .on_action(cx.listener(Self::format_document))
       .on_action(cx.listener(Self::find_in_file))

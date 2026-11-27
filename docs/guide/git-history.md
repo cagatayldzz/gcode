@@ -36,6 +36,7 @@ Right-click a commit:
 | **Revert Changes in Commit…** | Asks, then adds a **new commit that undoes** this one. Nothing is rewritten. A merge commit is reverted against its first parent. |
 | **Create Branch from Commit…** | Asks for a name, creates a branch at that commit and switches to it. |
 | **Cherry-pick Commit to ▸** | Lists your other local branches. Choosing one switches to it and copies the commit onto it. Only a commit with one parent can be cherry-picked. |
+| **Reset to This Commit ▸** | Moves HEAD to the selected commit after confirming the reset mode. |
 | **Undo Commit…** | Only the **last** commit, and only while the remote does not have it. It goes back like `git reset --soft`: the changes return to Changes and the message to the commit box. |
 | **Create Tag…** | Adds a lightweight tag to the commit. It stays local until you push it. |
 | **Copy SHA** | Copies the full commit id. |
@@ -53,6 +54,17 @@ started on and tells you which files conflicted. **Nothing is left half done.**
                                switch back to the original branch
                                "… conflicts in a.txt. Nothing was changed."
 ```
+
+## Resetting to a commit
+
+Right-click a commit and choose **Reset to This Commit**. The confirmation shows the current branch and target. A reset moves local
+history. For a published commit that needs to be undone, **Revert Changes in Commit…** creates a new commit on top of it.
+
+| Mode | Staging area | Working files |
+| --- | --- | --- |
+| **Soft Reset** | Preserved | Preserved |
+| **Mixed Reset** | Reset to the selected commit | Preserved |
+| **Hard Reset** | Reset to the selected commit | Tracked files reset. Obstructing untracked or ignored files can be removed. |
 
 ## Comparing branches
 

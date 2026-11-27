@@ -147,6 +147,7 @@ impl Workspace {
     }
     let workspace = cx.entity();
     let current = SharedString::from(self.git.as_ref()?.branch.to_string());
+    let root = self.projects.active.as_ref()?;
     let slot = self.branch_trigger_bounds.get();
     let theme = cx.theme().clone();
     let panel = {
@@ -212,6 +213,11 @@ impl Workspace {
             let workspace = workspace.clone();
             let menu_workspace = workspace.clone();
             let (menu_name, menu_remote) = (name.clone(), remote.clone());
+            let rebase = history_edit::RewriteHistory {
+              root: root.clone(),
+              rewrite: history_edit::Rewrite::Rebase { branch: name.clone(), remote: remote.clone() },
+            };
+            let focus = self.focus_handle.clone();
             h_flex()
               .id(SharedString::from(format!("branch-{name}")))
               .gap_2()
@@ -258,9 +264,16 @@ impl Workspace {
               })
               .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.switch_branch(name.clone(), window, cx)))
               .context_menu(move |menu, _, _| {
+                let focus = focus.clone();
+                let rebase = rebase.clone();
                 let (rename_workspace, rename_name) = (menu_workspace.clone(), menu_name.clone());
                 let (delete_workspace, delete_name, delete_remote) = (menu_workspace.clone(), menu_name.clone(), menu_remote.clone());
                 menu
+                  .item(
+                    PopupMenuItem::new("Rebase Current Branch onto This…")
+                      .disabled(selected)
+                      .on_click(move |_, window, cx| focus.dispatch_action(&rebase, window, cx)),
+                  )
                   .item(
                     PopupMenuItem::new("Rename…")
                       .icon(Icon::empty().path("icons/pencil.svg"))
@@ -314,7 +327,14 @@ impl Workspace {
                 .border_b_1()
                 .border_color(palette.border)
                 .child(div().flex_1().child(crate::components::soft_input(&filter, cx)))
-                .child(new_branch),
+                .child(new_branch)
+                .child({
+                  let focus = self.focus_handle.clone();
+                  Button::new("branch-worktrees")
+                    .outline()
+                    .label("Worktrees")
+                    .on_click(move |_, window, cx| focus.dispatch_action(&crate::ShowWorktrees, window, cx))
+                }),
             )
             .child(Self::scrolling_list(
               div().id("branch-list").max_h(list_height).overflow_y_scroll().track_scroll(&self.branch_scroll).child(

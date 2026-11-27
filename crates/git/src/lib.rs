@@ -20,11 +20,15 @@ pub use commit_actions::{add_to_gitignore, branch_from_commit, cherry_pick, reve
 
 mod compare;
 
+mod history_edit;
 mod merge;
 mod operation;
 mod staging;
+mod worktrees;
 pub use staging::{change_index, change_index_hunks, staging_diff, HunkSpan, StageDiff, StageSide};
+pub use worktrees::{add_worktree, remove_worktree, worktrees, Worktree};
 
+pub use history_edit::{history_head, rebase_onto, reset_to_commit, HistoryHead, ResetMode};
 pub use operation::{operation, resume_operation, Operation, OperationStep};
 
 pub mod shell_path;
@@ -445,6 +449,7 @@ pub fn create_branch(path: &Path, name: &str) -> Result<(), String> {
 pub fn switch_branch(path: &Path, name: &str) -> Result<(), String> {
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
   operation::require_idle(&repository)?;
+  worktrees::require_branch_available(&repository, name)?;
   // A branch only a remote has gets a local branch that follows it, like `git switch` does.
   if repository.find_branch(name, git2::BranchType::Local).is_err() {
     branch::track_remote_branch(&repository, name)?;

@@ -361,3 +361,30 @@ fn project_scripts_run_only_on_request_and_keep_the_terminal_output(cx: &mut Tes
   })
   .unwrap();
 }
+
+#[gpui_kit::test]
+fn the_worktree_manager_opens_a_linked_worktree_as_a_project(cx: &mut TestAppContext) {
+  let (data, handle) = open_window_with_project(cx);
+  let root = data.path().join("project");
+  let git = |args: &[&str]| {
+    let output = std::process::Command::new("git").arg("-C").arg(&root).args(args).output().unwrap();
+    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+  };
+  git(&["init", "--initial-branch=main"]);
+  git(&["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "initial"]);
+  let linked = ws_git::add_worktree(&root, &data.path().join("linked project"), "topic").unwrap();
+
+  cx.dispatch_action(handle, ws_ui::ShowWorktrees);
+  draw_every_window(cx);
+  cx.update_window(handle, |_, window, cx| {
+    window.render_frame(cx);
+    assert!(window.try_find("add-worktree").is_some());
+    window.click(format!("open-worktree-{}", linked.display()), cx);
+  })
+  .unwrap();
+  draw_every_window(cx);
+
+  let projects = ws_storage::ProjectList::load(&data.path().join("projects.json"));
+  assert_eq!(projects.active.as_ref(), Some(&linked));
+  assert!(projects.projects.iter().any(|project| project.path == root));
+}

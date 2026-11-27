@@ -69,6 +69,7 @@ fn commands() -> Vec<Entry> {
     entry("Add Project", &["open folder", "clone", "new"], AddProject),
     entry("Save File", &["write"], SaveFile),
     entry("Toggle Split Editor", &["editor", "side"], crate::ToggleEditorSplit),
+    entry("Git: Manage Worktrees", &["worktree", "branch", "project"], crate::ShowWorktrees),
     entry("Show Project Scripts", &["run", "task", "package.json", "cargo"], crate::ShowProjectScripts),
     entry("Toggle Terminal Dock", &["terminal", "bottom", "maximize"], crate::ToggleTerminalDock),
     entry("Format Document", &["formatter", "indent"], crate::FormatDocument),

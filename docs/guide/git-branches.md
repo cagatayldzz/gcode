@@ -62,6 +62,7 @@ was made. The menu reaches from the button down to the bottom of the window, and
 
 | Item | Does |
 | --- | --- |
+| **Rebase Current Branch onto This…** | Replays the current branch on the selected local or remote-tracking branch after confirmation. |
 | **Rename…** | Renames a local branch. The name must be valid and not taken; a branch that follows a remote keeps following it. Disabled for remote-only branches. |
 | **Delete…** | Asks first. A local branch is deleted (its commits stay until Git cleans up). If it also exists on its remote you can delete it **there too**. A remote-only branch is deleted on the remote. The branch you are on cannot be deleted. |
 
@@ -89,6 +90,27 @@ When you switch to a branch with stashed changes, the stash list opens. Choose *
 
 Without changes, the switch happens immediately. A plain safe checkout never overwrites anything: when files are in the way the
 message says *"Your changes would be overwritten by switching to …"*.
+
+### Rebasing
+
+Right-click the branch to use as the base and select **Rebase Current Branch onto This…**. Git uses the base already available
+locally and preserves merge structure. Changes to tracked files must be committed or set aside first. Rebasing can change commit
+IDs, including IDs that have already been shared.
+
+If the rebase stops on a conflict, resolve and stage the files, then use **Continue** in the Git toolbar. **Skip** leaves out
+the current commit. **Abort** restores the pre-rebase branch and discards the conflict resolutions.
+
+### Worktrees
+
+Choose **Worktrees** in the branch menu or **Git: Manage Worktrees** in the Command Palette. A worktree has its own working files
+and staging area and shares the repository's history and branches. If a branch is checked out in another worktree, open that
+worktree to make changes on the branch.
+
+- **Add Worktree** checks out an existing local branch or starts a new branch at the current HEAD. Enter an absolute path to a new
+  folder.
+- **Open Project** opens the worktree as a separate project with its own editor and terminal views.
+- **Remove…** deletes a clean linked working folder and keeps its branch. It also removes the deleted folder from the project
+  list. The current and main worktrees, locked worktrees, and worktrees with local changes or ignored files are protected.
 
 ### Pull requests
 

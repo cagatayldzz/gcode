@@ -74,6 +74,7 @@ actions!(
     ToggleEditorSplit,
     ToggleTerminalDock,
     ShowProjectScripts,
+    ShowWorktrees,
     // In the editor: comment out, comment in, or switch the comments of the selected lines.
     AddLineComment,
     RemoveLineComment,
