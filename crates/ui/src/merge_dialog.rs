@@ -29,6 +29,8 @@ pub(crate) enum MergeEvent {
 enum Operation {
   Refresh,
   Choose(String, MergeSide),
+  /// Takes the same side for several files at once.
+  ChooseAll(Vec<String>, MergeSide),
   Undo(String),
   Finish(bool),
 }
@@ -80,6 +82,7 @@ impl MergeDialog {
       let result = match &operation {
         Operation::Refresh => state.refresh(&root).map(Some),
         Operation::Choose(file, side) => state.resolve(&root, file, *side).map(Some),
+        Operation::ChooseAll(files, side) => files.iter().try_fold(state.clone(), |current, file| current.resolve(&root, file, *side)).map(Some),
         Operation::Undo(file) => state.undo(&root, file).map(Some),
         Operation::Finish(abort) => state.finish(&root, *abort).map(|()| None),
       };
@@ -91,6 +94,12 @@ impl MergeDialog {
         this.task = None;
         match result {
           Ok(Some(state)) => {
+            if let Operation::ChooseAll(files, side) = &operation {
+              for file in files {
+                this.deleted.remove(file);
+                this.paths.insert(file.clone(), Some(*side));
+              }
+            }
             if let Operation::Choose(file, side) = operation {
               let kept =
                 this
@@ -155,6 +164,7 @@ impl MergeDialog {
     let menu_path = name.clone();
     let editor_path = name.clone();
     let undo_path = path.to_string();
+    let review_path = name.clone();
     let workspace = self.root.clone();
     let view = cx.entity().downgrade();
     let sides = file.filter(|file| file.can_choose_side).map(|file| (file.ours, file.theirs));
@@ -299,6 +309,22 @@ impl MergeDialog {
             row.child(Label::new(detail).text_xs().font_weight(FontWeight::MEDIUM).text_color(color).flex_none())
           })
           .children(resolve)
+          .when(file.is_none() && !self.deleted.contains(path), |row| {
+            let view = view.clone();
+            row.child(
+              Button::new(SharedString::from(format!("review-merge-{name}")))
+                .small()
+                .ghost()
+                .icon(Icon::empty().path("icons/pencil.svg"))
+                .label("Review")
+                .tooltip("Open the merged file in the editor. The merge stays in progress.")
+                .disabled(busy)
+                .on_click(move |_, _, cx| {
+                  let path = review_path.clone();
+                  let _ = view.update(cx, |_, cx| cx.emit(MergeEvent::OpenFile(path)));
+                }),
+            )
+          })
           .when(file.is_none() && chosen.is_some(), |row| {
             row.child(
               Button::new(SharedString::from(format!("undo-merge-{name}")))
@@ -336,6 +362,10 @@ impl Render for MergeDialog {
     let muted = cx.theme().muted_foreground;
     // The files that still need a decision come first.
     let (open, done): (Vec<_>, Vec<_>) = self.paths.clone().into_iter().partition(|(path, _)| self.state.files.iter().any(|file| &file.path == path));
+    let total = self.paths.len();
+    let resolved = total.saturating_sub(remaining);
+    let bulk: Vec<String> =
+      self.state.files.iter().filter(|file| file.can_choose_side && file.ours && file.theirs).map(|file| file.path.clone()).collect();
     let bold = |text: SharedString| Label::new(text).font_weight(FontWeight::SEMIBOLD);
     v_flex()
       .gap_3()
@@ -383,14 +413,54 @@ impl Render for MergeDialog {
             .child(Label::new("All conflicted files have been resolved.")),
         )
       })
-      .child(Label::new(format!("{remaining} conflicted file{}", if remaining == 1 { "" } else { "s" })).font_weight(FontWeight::SEMIBOLD))
+      .child(
+        v_flex()
+          .gap_2()
+          .child(
+            h_flex()
+              .justify_between()
+              .items_center()
+              .child(Label::new(format!("{resolved} of {total} resolved")).font_weight(FontWeight::SEMIBOLD))
+              .when(remaining > 0, |row| {
+                row.child(
+                  Label::new(format!("{remaining} still need{} a decision", if remaining == 1 { "s" } else { "" }))
+                    .text_sm()
+                    .text_color(palette.conflicted),
+                )
+              }),
+          )
+          .child(
+            div().h_1().w_full().rounded_full().bg(palette.border).child(div().h_full().rounded_full().bg(palette.new).w(relative(if total == 0 {
+              1.
+            } else {
+              resolved as f32 / total as f32
+            }))),
+          ),
+      )
+      .when(bulk.len() > 1, |body| {
+        let count = bulk.len();
+        let buttons =
+          [(MergeSide::Current, self.state.current_branch.clone()), (MergeSide::Incoming, self.source.to_string())].map(|(side, branch)| {
+            let files = bulk.clone();
+            Button::new(SharedString::from(format!("merge-all-{side:?}")))
+              .small()
+              .outline()
+              .label(format!("Use {branch} for all {count}"))
+              .tooltip(format!("Resolve {count} conflicted files with the version from {branch}"))
+              .disabled(busy)
+              .on_click(cx.listener(move |this, _, window, cx| this.run(Operation::ChooseAll(files.clone(), side), window, cx)))
+          });
+        body.child(h_flex().gap_2().flex_wrap().children(buttons))
+      })
       .child(
         v_flex()
           .id("merge-files")
           .max_h(rems(24.))
           .overflow_y_scrollbar()
           .gap_2()
+          .when(!open.is_empty() && !done.is_empty(), |list| list.child(Label::new("Needs resolution").text_xs().text_color(muted)))
           .children(open.iter().map(|(path, side)| self.file_row(path, *side, cx)))
+          .when(!open.is_empty() && !done.is_empty(), |list| list.child(Label::new("Resolved").text_xs().text_color(muted).pt_2()))
           .children(done.iter().map(|(path, side)| self.file_row(path, *side, cx))),
       )
       .child(
@@ -420,6 +490,7 @@ impl Render for MergeDialog {
           .pt_3()
           .border_t_1()
           .border_color(palette.border)
+          .when(remaining > 0, |row| row.child(Label::new(format!("Resolve {remaining} more to continue")).text_sm().text_color(muted).flex_1()))
           .child(
             Button::new("abort-merge")
               .label("Abort merge")

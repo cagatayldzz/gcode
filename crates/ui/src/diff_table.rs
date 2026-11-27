@@ -3,7 +3,7 @@
 //! changed (never the indentation) emphasized. The lines come from [`crate::diff_model`]; this file is only the drawing.
 
 use crate::{
-  diff_model::{self, Edge, Expansion, Layout, LineKind, Patch, Row},
+  diff_model::{self, ChangeGroup, Edge, Expansion, Layout, LineKind, Patch, Row},
   diff_view::{highlight_theme, set_wraps, styles_of, wraps},
   editor::language_for,
   settings::{code_font_size, SettingsModel},
@@ -14,6 +14,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
     button::{Button, ButtonVariants as _},
+    checkbox::Checkbox,
     h_flex,
     highlighter::HighlightTheme,
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
@@ -31,6 +32,9 @@ const MONO_ADVANCE: f32 = 0.62;
 /// What a line-number column has beside its digits.
 const NUMBER_PADDING: Pixels = px(28.);
 
+/// The column of check boxes beside the diff of a file that can be staged.
+const CHECK_WIDTH: Pixels = px(28.);
+
 /// The column with the `+` or `−` sign, and the room around the code, for the width of a line that is not wrapped.
 const SIGN_WIDTH: Pixels = px(20.);
 const CODE_PADDING: Pixels = px(16.);
@@ -41,11 +45,31 @@ const LINE_HEIGHT: f32 = 1.6;
 /// Syntax colors for the lines of a patch, one list for each line.
 type LineStyles = Vec<Vec<(Range<usize>, HighlightStyle)>>;
 
+/// Whether a run of changed lines is in the index: none of it, some of it, or all of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Staging {
+  Unstaged,
+  Partial,
+  Staged,
+}
+
+/// A click on the check box of a run of changed lines (the number is the run's position in the diff).
+pub(crate) struct ToggleGroup(pub usize);
+
+impl EventEmitter<ToggleGroup> for DiffTable {}
+
 /// A patch read and colored, ready to be shown; made on a background thread, since coloring a long file takes a while.
 pub(crate) struct PreparedDiff {
   patch: Patch,
   language: &'static str,
   styles: LineStyles,
+}
+
+impl PreparedDiff {
+  /// Where each run of changed lines changes the old and the new file, to tell which of them the index holds.
+  pub fn spans(&self) -> Vec<(Range<u32>, Range<u32>)> {
+    self.patch.change_groups().into_iter().map(|group| (group.old, group.new)).collect()
+  }
 }
 
 /// Reads `patch`, the diff of `file`, and colors its lines. Fails when the patch has no text lines to show.
@@ -169,6 +193,10 @@ pub(crate) struct DiffTable {
   /// Text chosen by dragging over it: where the choice began and where it is now.
   text_selection: Option<(Spot, Spot)>,
   selecting_text: bool,
+  /// The runs of changed lines, the run each line is in, and whether each run is staged; none when the file cannot be staged here.
+  groups: Vec<ChangeGroup>,
+  line_group: Vec<Option<usize>>,
+  staging: Option<Vec<Staging>>,
 }
 
 /// A double click on a line: its line number in the new version of the file, to open the file there.
@@ -194,6 +222,11 @@ impl DiffTable {
     let widest = patch.lines.iter().map(|line| line.text.chars().count()).max().unwrap_or(0);
     let has_old = patch.lines.iter().any(|line| line.old.is_some());
     let has_new = patch.lines.iter().any(|line| line.new.is_some());
+    let groups = patch.change_groups();
+    let mut line_group = vec![None; patch.lines.len()];
+    for (ix, group) in groups.iter().enumerate() {
+      line_group[group.lines.clone()].fill(Some(ix));
+    }
     Self {
       settings,
       patch,
@@ -216,6 +249,17 @@ impl DiffTable {
       dragging: false,
       text_selection: None,
       selecting_text: false,
+      groups,
+      line_group,
+      staging: None,
+    }
+  }
+
+  /// Shows which runs of changed lines are staged (none: no check boxes).
+  pub fn set_staging(&mut self, staging: Option<Vec<Staging>>, cx: &mut Context<Self>) {
+    if self.staging != staging {
+      self.staging = staging;
+      cx.notify();
     }
   }
 
@@ -357,7 +401,9 @@ impl DiffTable {
   fn row(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
     let size = code_font_size(&self.settings, cx);
     match self.layout.rows[ix].clone() {
-      Row::Line(line) => div().w_full().flex().child(self.cell(line, Numbers::Both, size, cx)).into_any_element(),
+      Row::Line(line) => {
+        div().w_full().flex().child(self.check_cell(ix, Some(line), size, cx)).child(self.cell(line, Numbers::Both, size, cx)).into_any_element()
+      }
       Row::Pair(old, new) => {
         let palette = colors(cx);
         let side = |line: Option<usize>, numbers: Numbers, cx: &mut Context<Self>| match line {
@@ -376,6 +422,7 @@ impl DiffTable {
           .id(("diff-pair", ix))
           .w_full()
           .items_stretch()
+          .child(self.check_cell(ix, old.or(new), size, cx))
           .child(side(old, Numbers::Old, cx))
           .child(div().w_px().flex_none().self_stretch().bg(palette.border))
           .child(side(new, Numbers::New, cx))
@@ -383,6 +430,42 @@ impl DiffTable {
       }
       Row::Fold { hidden, base, edge, label } => self.fold_row(hidden, base, edge, label, size, cx),
     }
+  }
+
+  /// The column of the check box that stages a run of changed lines: the box sits on the run's first line, the rest of the run only
+  /// continues the gutter. Nothing when the file cannot be staged.
+  fn check_cell(&self, row: usize, line: Option<usize>, size: Pixels, cx: &mut Context<Self>) -> AnyElement {
+    let Some(staging) = &self.staging else { return div().into_any_element() };
+    let palette = colors(cx);
+    let group = line.and_then(|line| self.line_group[line]);
+    let background = match line.map(|line| self.patch.lines[line].kind) {
+      Some(LineKind::Added) => palette.diff_added_gutter,
+      Some(LineKind::Removed) => palette.diff_removed_gutter,
+      _ => Hsla::transparent_black(),
+    };
+    let first = group.is_some_and(|group| line == Some(self.groups[group].lines.start) || self.row_has(row, self.groups[group].lines.start));
+    let cell = div().id(("diff-check", row)).w(CHECK_WIDTH).flex_none().self_stretch().flex().items_center().justify_center().bg(background);
+    match group.filter(|_| first) {
+      Some(group) => {
+        let state = staging.get(group).copied().unwrap_or(Staging::Unstaged);
+        cell
+          .h(size * LINE_HEIGHT)
+          .child(
+            Checkbox::new(SharedString::from(format!("stage-group-{group}")))
+              .checked(state == Staging::Staged)
+              .indeterminate(state == Staging::Partial)
+              .tooltip(if state == Staging::Staged { "Unstage these changes" } else { "Stage these changes" })
+              .on_click(cx.listener(move |_, _: &bool, _, cx| cx.emit(ToggleGroup(group)))),
+          )
+          .into_any_element()
+      }
+      None => cell.into_any_element(),
+    }
+  }
+
+  /// Whether the layout row `row` holds line `line` (a side by side row holds two).
+  fn row_has(&self, row: usize, line: usize) -> bool {
+    matches!(&self.layout.rows[row], Row::Pair(old, new) if *old == Some(line) || *new == Some(line))
   }
 
   /// The width of one line-number column.
@@ -393,11 +476,12 @@ impl DiffTable {
   /// The width of the table when lines do not wrap: the longest line with the columns around it, twice in side by side.
   fn content_width(&self, size: Pixels) -> Pixels {
     let numbers = self.number_width(size);
+    let check = if self.staging.is_some() { CHECK_WIDTH } else { Pixels::ZERO };
     let code = px(self.widest as f32 * MONO_ADVANCE * f32::from(size)) + CODE_PADDING + SIGN_WIDTH;
     if self.split {
-      (numbers + code) * 2. + px(1.)
+      (numbers + code) * 2. + px(1.) + check
     } else {
-      numbers * (usize::from(self.has_old) + usize::from(self.has_new)).max(1) as f32 + code
+      numbers * (usize::from(self.has_old) + usize::from(self.has_new)).max(1) as f32 + code + check
     }
   }
 
@@ -537,6 +621,7 @@ impl DiffTable {
       .h(size * LINE_HEIGHT)
       .items_center()
       .bg(palette.diff_band)
+      .when(self.staging.is_some(), |band| band.child(div().w(CHECK_WIDTH).flex_none().h_full().bg(palette.diff_band_button)))
       .child(
         h_flex()
           .w(width * 2.)

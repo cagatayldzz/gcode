@@ -239,7 +239,7 @@ impl Workspace {
     let (root, files, side, hunk) = (request.root.clone(), request.files.clone(), request.side, request.hunk.clone());
     let work = cx.background_executor().spawn({
       let root = root.clone();
-      async move { ws_git::change_index(&root, &files, side, hunk.as_ref().map(|(diff, index)| (diff.as_ref(), *index))) }
+      async move { ws_git::change_index_hunks(&root, &files, side, hunk.as_ref().map(|(diff, positions)| (diff.as_ref(), positions.as_slice()))) }
     });
     self.stage_task = Some(cx.spawn_in(window, async move |this, cx| {
       let result = work.await;

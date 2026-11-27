@@ -118,3 +118,19 @@ fn characters_can_be_compared_instead_of_words() {
   let (old, new) = changed_runs("let colour = 1;", "let color = 1;", Unit::Word);
   assert_eq!((old.iter().map(digit).collect::<Vec<_>>(), new.iter().map(digit).collect::<Vec<_>>()), (vec![(4, 10)], vec![(4, 9)]));
 }
+
+#[test]
+fn runs_of_changed_lines_are_groups_with_their_places_in_both_files() {
+  let patch = Patch::parse(&whole_file_patch());
+  let groups = patch.change_groups();
+  assert_eq!(groups.len(), 1);
+  assert_eq!((groups[0].lines.clone(), groups[0].old.clone(), groups[0].new.clone()), (19..22, 20..21, 20..22));
+
+  let mut text = String::from("diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1,6 +1,6 @@\n");
+  text.push_str(" a\n+added\n b\n c\n-gone\n d\n");
+  let groups = Patch::parse(&text).change_groups();
+  assert_eq!(groups.len(), 2);
+  // An added line sits before old line 2; a removed one was where new line 5 now is.
+  assert_eq!((groups[0].old.clone(), groups[0].new.clone()), (2..2, 2..3));
+  assert_eq!((groups[1].old.clone(), groups[1].new.clone()), (4..5, 5..5));
+}

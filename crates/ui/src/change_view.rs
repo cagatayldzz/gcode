@@ -3,23 +3,24 @@
 
 use crate::{
   commit_view::Load,
-  diff_table::{prepare, table_controls, DiffTable, OpenLine},
+  diff_table::{prepare, table_controls, DiffTable, OpenLine, Staging, ToggleGroup},
   settings::SettingsModel,
   theme::colors,
 };
-use gpui_kit::{base::Selectable as _, prelude::FluentBuilder as _};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
   component::{
     button::{Button, ButtonVariants as _},
+    checkbox::Checkbox,
     h_flex,
     label::Label,
-    menu::{DropdownMenu as _, PopupMenuItem},
     spinner::Spinner,
     v_flex, ActiveTheme as _, Sizable as _,
   },
   *,
 };
 use std::{
+  ops::Range,
   path::{Path, PathBuf},
   sync::Arc,
 };
@@ -29,9 +30,72 @@ use ws_git::{StageDiff, StageSide};
 const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 
 enum ChangeDiff {
-  Empty,
   Text(Entity<DiffTable>),
   Image(ImageChanges),
+}
+
+/// What the index holds of a file's changes: both of its diffs, and for each run of changed lines of the shown diff whether it is staged.
+#[derive(Clone, PartialEq, Eq)]
+struct IndexInfo {
+  unstaged: Arc<StageDiff>,
+  staged: Arc<StageDiff>,
+  states: Vec<Staging>,
+  file: Staging,
+}
+
+/// Where a run of changed lines changes the old and the new file.
+type Spans = (Range<u32>, Range<u32>);
+
+/// The hunks of a diff that a request to the index covers, with the diff they belong to.
+pub(crate) type HunkChoice = (Arc<StageDiff>, Vec<usize>);
+
+impl IndexInfo {
+  /// A diff that cannot be cut into hunks (a new or deleted file, a mode change) stands for every run when it has changes.
+  fn covers(diff: &StageDiff, meets: impl Fn(&ws_git::HunkSpan) -> bool, spans: &[ws_git::HunkSpan]) -> bool {
+    if diff.hunks().next().is_none() {
+      diff.has_changes()
+    } else {
+      spans.iter().any(meets)
+    }
+  }
+
+  fn new(unstaged: StageDiff, staged: StageDiff, groups: &[Spans]) -> Self {
+    let (unstaged_spans, staged_spans) = (unstaged.changed_spans(), staged.changed_spans());
+    let states = groups
+      .iter()
+      .map(|(old, new)| {
+        let unstaged_part = Self::covers(&unstaged, |span| span.meets_new(new), &unstaged_spans);
+        let staged_part = Self::covers(&staged, |span| span.meets_old(old), &staged_spans);
+        match (unstaged_part, staged_part) {
+          (true, true) => Staging::Partial,
+          (true, false) => Staging::Unstaged,
+          _ => Staging::Staged,
+        }
+      })
+      .collect();
+    let file = match (unstaged.has_changes(), staged.has_changes()) {
+      (true, true) => Staging::Partial,
+      (true, false) => Staging::Unstaged,
+      _ => Staging::Staged,
+    };
+    Self { unstaged: Arc::new(unstaged), staged: Arc::new(staged), states, file }
+  }
+
+  /// What clicking the check box of a run of changed lines asks of the index: a staged run is unstaged, any other is staged, by the
+  /// hunks of the diff that touch it (the whole file when the diff has none).
+  fn request(&self, group: usize, groups: &[Spans]) -> (StageSide, Option<HunkChoice>) {
+    let Some((old, new)) = groups.get(group) else { return (StageSide::Unstaged, None) };
+    let staged = self.states.get(group) == Some(&Staging::Staged);
+    let (side, diff) = if staged { (StageSide::Staged, &self.staged) } else { (StageSide::Unstaged, &self.unstaged) };
+    let positions: Vec<usize> = diff
+      .changed_spans()
+      .iter()
+      .enumerate()
+      .filter(|(_, span)| if staged { span.meets_old(old) } else { span.meets_new(new) })
+      .map(|(position, _)| position)
+      .collect();
+    (side, (!positions.is_empty()).then(|| (diff.clone(), positions)))
+  }
 }
 
 struct ImageChanges {
@@ -92,8 +156,9 @@ pub(crate) struct ChangeView {
   /// What kind of change the file has, for the mark at the end of the path.
   kind: Option<ws_git::ChangeKind>,
   diff: Load<ChangeDiff>,
-  stage_side: Option<StageSide>,
-  stage_diff: Option<Arc<StageDiff>>,
+  /// What the index holds of the file, and where each run of changed lines of the shown diff is; none while the file is in conflict.
+  index: Option<IndexInfo>,
+  spans: Vec<Spans>,
   task: Option<Task<()>>,
   show_preview: bool,
   svg_preview: Option<Load<ImageChanges>>,
@@ -102,7 +167,7 @@ pub(crate) struct ChangeView {
   patch: String,
   /// Which read the answer being awaited belongs to.
   epoch: u64,
-  _table_subscription: Option<Subscription>,
+  _table_subscriptions: Vec<Subscription>,
 }
 
 /// A double click on a line of the diff: open the file in the editor at that line.
@@ -116,7 +181,7 @@ pub(crate) struct StageRequest {
   pub root: PathBuf,
   pub files: Vec<PathBuf>,
   pub side: StageSide,
-  pub hunk: Option<(Arc<StageDiff>, usize)>,
+  pub hunk: Option<HunkChoice>,
 }
 
 impl EventEmitter<StageRequest> for ChangeView {}
@@ -132,15 +197,15 @@ impl ChangeView {
       from: None,
       kind: None,
       diff: Load::Loading,
-      stage_side: None,
-      stage_diff: None,
+      index: None,
+      spans: Vec::new(),
       task: None,
       show_preview: false,
       svg_preview: None,
       preview_task: None,
       patch: String::new(),
       epoch: 0,
-      _table_subscription: None,
+      _table_subscriptions: Vec::new(),
     }
   }
 
@@ -152,7 +217,8 @@ impl ChangeView {
     self.file = file;
     self.from = change.and_then(|change| change.from.clone());
     self.kind = change.map(|change| change.kind);
-    self.stage_diff = None;
+    self.index = None;
+    self.spans.clear();
     self.diff = Load::Loading;
     self.show_preview = false;
     self.svg_preview = None;
@@ -166,56 +232,68 @@ impl ChangeView {
     std::iter::once(self.file.clone()).chain(self.from.clone()).collect()
   }
 
-  fn select_side(&mut self, side: Option<StageSide>, cx: &mut Context<Self>) {
-    if self.stage_side != side {
-      self.stage_side = side;
-      self.stage_diff = None;
-      self.diff = Load::Loading;
-      self.patch.clear();
-      self.show_preview = false;
-      self.svg_preview = None;
-      self.preview_task = None;
-      self.reload(cx);
-      cx.notify();
+  fn stage(&self, side: StageSide, hunk: Option<HunkChoice>, cx: &mut Context<Self>) {
+    cx.emit(StageRequest { root: self.root.clone(), files: self.stage_paths(), side, hunk });
+  }
+
+  /// The check box of a run of changed lines of the diff was clicked.
+  fn toggle_group(&self, group: usize, cx: &mut Context<Self>) {
+    if let Some(index) = &self.index {
+      let (side, hunk) = index.request(group, &self.spans);
+      self.stage(side, hunk, cx);
     }
   }
 
-  fn stage(&self, side: StageSide, hunk: Option<(Arc<StageDiff>, usize)>, cx: &mut Context<Self>) {
-    cx.emit(StageRequest { root: self.root.clone(), files: self.stage_paths(), side, hunk });
+  /// The check box of the whole file: a staged file is unstaged, any other is staged.
+  fn toggle_file(&self, cx: &mut Context<Self>) {
+    if let Some(index) = &self.index {
+      self.stage(if index.file == Staging::Staged { StageSide::Staged } else { StageSide::Unstaged }, None, cx);
+    }
   }
 
   /// Reads the file's changes again, and redraws only if they differ from what is shown.
   pub fn reload(&mut self, cx: &mut Context<Self>) {
     self.epoch += 1;
     let (epoch, root, file, from) = (self.epoch, self.root.clone(), self.file.clone(), self.from.clone());
-    let side = self.stage_side;
     let files = self.stage_paths();
-    let previous_stage = self.stage_diff.clone();
+    let stageable = self.kind != Some(ws_git::ChangeKind::Conflicted);
+    let (previous_index, previous_spans) = (self.index.clone(), self.spans.clone());
     let previous = matches!(self.diff, Load::Ready(_)).then(|| self.patch.clone());
     let renderer = cx.svg_renderer();
     let theme = crate::diff_view::highlight_theme(cx);
     let work = cx.background_executor().spawn(async move {
-      let stage_diff = side.map(|side| ws_git::staging_diff(&root, &files, side)).transpose()?;
-      let patch = match (&stage_diff, &from) {
-        (Some(diff), _) if diff.is_untracked() => ws_git::file_diff(&root, &file)?,
-        (Some(diff), _) => diff.text(),
-        (None, Some(from)) => ws_git::renamed_file_diff(&root, &file, from)?,
-        (None, None) => ws_git::file_diff(&root, &file)?,
+      let patch = match &from {
+        Some(from) => ws_git::renamed_file_diff(&root, &file, from)?,
+        None => ws_git::file_diff(&root, &file)?,
       };
-      if previous.as_deref() == Some(patch.as_str()) && stage_diff.as_ref() == previous_stage.as_deref() {
+      let same_patch = previous.as_deref() == Some(patch.as_str());
+      let (prepared, spans) = if same_patch {
+        (None, previous_spans)
+      } else {
+        crate::diff_view::warm(&theme, &patch);
+        let prepared = prepare(&theme, &patch, &file);
+        let spans = prepared.as_ref().map(|prepared| prepared.spans()).unwrap_or_default();
+        (Some(prepared), spans)
+      };
+      // A file that cannot be read from the index is shown without check boxes rather than not at all.
+      let index = stageable
+        .then(|| Some((ws_git::staging_diff(&root, &files, StageSide::Unstaged).ok()?, ws_git::staging_diff(&root, &files, StageSide::Staged).ok()?)))
+        .flatten()
+        .map(|(unstaged, staged)| IndexInfo::new(unstaged, staged, &spans));
+      if same_patch && index == previous_index {
         return Ok(None);
       }
-      crate::diff_view::warm(&theme, &patch);
-      let prepared = prepare(&theme, &patch, &file);
-      let image = ImageChanges::format(&file)
-        .filter(|_| stage_diff.is_none() && patch.lines().any(|line| line.starts_with("Binary files ")))
+      let image = prepared
+        .as_ref()
+        .and_then(|_| ImageChanges::format(&file))
+        .filter(|_| patch.lines().any(|line| line.starts_with("Binary files ")))
         .map(|format| {
           ImageChanges::load(&root, &file, |bytes| {
             Image::from_bytes(format, bytes).to_image_data(renderer.clone()).map_err(|error| error.to_string())
           })
         })
         .transpose();
-      Ok::<_, String>(Some((patch, image, prepared, stage_diff)))
+      Ok::<_, String>(Some((patch, same_patch, image, prepared, spans, index)))
     });
     self.task = Some(cx.spawn(async move |this, cx| {
       let result = work.await;
@@ -226,27 +304,37 @@ impl ChangeView {
         this.task = None;
         match result {
           Ok(None) => return,
-          Ok(Some((patch, image, prepared, stage_diff))) => {
+          Ok(Some((_, true, _, _, _, index))) => {
+            // Only the index changed: the diff, and its scroll position, stay.
+            this.index = index;
+            this.show_staging(cx);
+          }
+          Ok(Some((patch, _, image, prepared, spans, index))) => {
             this.diff = match image {
-              _ if stage_diff.is_some() && patch.is_empty() => Load::Ready(ChangeDiff::Empty),
               Ok(Some(image)) if image.original.is_some() || image.current.is_some() => Load::Ready(ChangeDiff::Image(image)),
               Err(error) => Load::Failed(format!("Could not preview the image: {error}").into()),
               _ => match prepared {
-                Ok(prepared) => {
+                Some(Ok(prepared)) => {
                   let settings = this.settings.clone();
                   let table = cx.new(|cx| DiffTable::new(prepared, settings, cx));
-                  this._table_subscription = Some(cx.subscribe(&table, |this, _, event: &OpenLine, cx| {
-                    cx.emit(OpenInEditor { file: this.file.clone(), line: event.0 });
-                  }));
+                  this._table_subscriptions = vec![
+                    cx.subscribe(&table, |this, _, event: &OpenLine, cx| {
+                      cx.emit(OpenInEditor { file: this.file.clone(), line: event.0 });
+                    }),
+                    cx.subscribe(&table, |this, _, event: &ToggleGroup, cx| this.toggle_group(event.0, cx)),
+                  ];
                   Load::Ready(ChangeDiff::Text(table))
                 }
-                Err(message) => Load::Failed(message.into()),
+                Some(Err(message)) => Load::Failed(message.into()),
+                None => Load::Loading,
               },
             };
             this.patch = patch;
-            this.stage_diff = stage_diff.map(Arc::new);
+            this.spans = spans;
+            this.index = index;
             this.preview_task = None;
             this.svg_preview = None;
+            this.show_staging(cx);
             if this.show_preview && matches!(this.diff, Load::Ready(ChangeDiff::Text(_))) {
               this.load_svg_preview(cx);
             }
@@ -256,6 +344,14 @@ impl ChangeView {
         cx.notify();
       });
     }));
+  }
+
+  /// Hands the staging of each run of changed lines to the diff table, which draws the check boxes.
+  fn show_staging(&self, cx: &mut Context<Self>) {
+    if let Load::Ready(ChangeDiff::Text(table)) = &self.diff {
+      let states = self.index.as_ref().map(|index| index.states.clone());
+      table.update(cx, |table, cx| table.set_staging(states, cx));
+    }
   }
 
   fn load_svg_preview(&mut self, cx: &mut Context<Self>) {
@@ -284,13 +380,23 @@ impl Render for ChangeView {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = cx.theme().clone();
     let palette = colors(cx);
-    let can_preview = self.stage_side.is_none()
-      && self.file.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("svg"))
-      && matches!(self.diff, Load::Ready(ChangeDiff::Text(_)));
+    let can_preview =
+      self.file.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("svg")) && matches!(self.diff, Load::Ready(ChangeDiff::Text(_)));
+    // One box for the whole file, as in the list of changes: ticked when everything of it is staged, a dash when some of it is.
+    let file_box = self.index.as_ref().map(|index| {
+      Checkbox::new("stage-file")
+        .label("Staged")
+        .checked(index.file == Staging::Staged)
+        .indeterminate(index.file == Staging::Partial)
+        .tooltip(if index.file == Staging::Staged { "Unstage this file" } else { "Stage this file" })
+        .on_click(cx.listener(|this, _: &bool, _, cx| this.toggle_file(cx)))
+    });
     let header = h_flex()
       .flex_none()
+      .gap_3()
       .px_4()
       .py_1p5()
+      .items_center()
       .border_b_1()
       .border_color(palette.border)
       .child(crate::components::file_path_bar(
@@ -300,6 +406,7 @@ impl Render for ChangeView {
         cx,
       ))
       .child(div().flex_1())
+      .children(file_box)
       .when(can_preview, |header| {
         header.child(Button::new("toggle-svg-change-preview").ghost().small().label(if self.show_preview { "Source" } else { "Preview" }).on_click(
           cx.listener(|this, _, _, cx| {
@@ -311,53 +418,13 @@ impl Render for ChangeView {
           }),
         ))
       })
-      // The previous/next/options buttons of a text diff sit at the right end of the path.
+      // The previous/next/options buttons of a text diff sit at the right end.
       .children(match &self.diff {
         Load::Ready(ChangeDiff::Text(table)) if !self.show_preview => Some(table_controls(table)),
         _ => None,
       })
       // The mark of the change, as in the Changes list.
-      .children(self.kind.map(|kind| div().ml_2().child(crate::components::change_kind_mark(kind, cx))));
-    let mut index_bar = h_flex().gap_2().px_4().py_1().border_b_1().border_color(palette.border);
-    for (key, label, side) in [
-      ("all-diff", "All Changes", None),
-      ("unstaged-diff", "Unstaged", Some(StageSide::Unstaged)),
-      ("staged-diff", "Staged", Some(StageSide::Staged)),
-    ] {
-      index_bar = index_bar.child(
-        Button::new(key)
-          .small()
-          .ghost()
-          .selected(self.stage_side == side)
-          .label(label)
-          .on_click(cx.listener(move |this, _, _, cx| this.select_side(side, cx))),
-      );
-    }
-    if let Some(side) =
-      self.stage_side.filter(|_| self.kind != Some(ws_git::ChangeKind::Conflicted) && self.stage_diff.as_ref().is_some_and(|diff| diff.has_changes()))
-    {
-      let (file_label, hunk_label) = match side {
-        StageSide::Unstaged => ("Stage File", "Stage Hunk"),
-        StageSide::Staged => ("Unstage File", "Unstage Hunk"),
-      };
-      index_bar = index_bar
-        .child(div().flex_1())
-        .child(Button::new("change-index-file").small().label(file_label).on_click(cx.listener(move |this, _, _, cx| this.stage(side, None, cx))));
-      if let Some(diff) = self.stage_diff.clone().filter(|diff| diff.hunks().next().is_some()) {
-        let owner = cx.entity().downgrade();
-        let root = self.root.clone();
-        let files = self.stage_paths();
-        index_bar = index_bar.child(Button::new("change-index-hunk").small().label(hunk_label).dropdown_menu(move |menu, _, _| {
-          diff.hunks().enumerate().fold(menu, |menu, (number, header)| {
-            let (owner, diff, root, files) = (owner.clone(), diff.clone(), root.clone(), files.clone());
-            menu.item(PopupMenuItem::new(SharedString::from(header.to_owned())).on_click(move |_, _, cx| {
-              let _ = owner
-                .update(cx, |_, cx| cx.emit(StageRequest { root: root.clone(), files: files.clone(), side, hunk: Some((diff.clone(), number)) }));
-            }))
-          })
-        }));
-      }
-    }
+      .children(self.kind.map(|kind| div().child(crate::components::change_kind_mark(kind, cx))));
     let loading = || {
       h_flex()
         .gap_2()
@@ -377,15 +444,8 @@ impl Render for ChangeView {
         Some(Load::Failed(message)) => failed(message),
         _ => loading(),
       },
-      // The path is in the header above: the diff does not repeat it.
-      Load::Ready(ChangeDiff::Empty) => {
-        Label::new(if self.stage_side == Some(StageSide::Staged) { "No staged changes in this file." } else { "No unstaged changes in this file." })
-          .p_4()
-          .text_color(theme.muted_foreground)
-          .into_any_element()
-      }
       Load::Ready(ChangeDiff::Text(table)) => div().size_full().child(table.clone()).into_any_element(),
     };
-    v_flex().size_full().bg(theme.background).child(header).child(index_bar).child(v_flex().flex_1().min_h_0().child(body))
+    v_flex().size_full().bg(theme.background).child(header).child(v_flex().flex_1().min_h_0().child(body))
   }
 }

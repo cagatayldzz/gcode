@@ -33,6 +33,14 @@ pub(crate) struct Line {
   pub text: String,
 }
 
+/// A run of changed lines of a patch, and the lines it changes in the old and the new file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ChangeGroup {
+  pub lines: Range<usize>,
+  pub old: Range<u32>,
+  pub new: Range<u32>,
+}
+
 /// A patch of one file: its lines in order, and for each the byte ranges of its text that differ from the line it was paired with.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Patch {
@@ -91,6 +99,44 @@ impl Patch {
   pub fn digits(&self) -> usize {
     let widest = self.lines.iter().flat_map(|line| [line.old, line.new]).flatten().max().unwrap_or(1);
     widest.max(1).to_string().len()
+  }
+
+  /// The runs of changed lines, each with the lines it changes on both sides in half open ranges: the old range holds the removed
+  /// lines (or the place the added ones come in), the new range the added lines (or the place the removed ones were). This is what
+  /// a check box beside the diff stands for, since the patch of a file is one hunk with all of the file as context.
+  pub fn change_groups(&self) -> Vec<ChangeGroup> {
+    let mut groups = Vec::new();
+    let mut start = None;
+    for ix in 0..=self.lines.len() {
+      let changed = self.lines.get(ix).is_some_and(|line| line.kind != LineKind::Context);
+      match (start, changed) {
+        (None, true) => start = Some(ix),
+        (Some(first), false) => {
+          groups.push(self.group(first..ix));
+          start = None;
+        }
+        _ => {}
+      }
+    }
+    groups
+  }
+
+  fn group(&self, lines: Range<usize>) -> ChangeGroup {
+    let span = |number: fn(&Line) -> Option<u32>| {
+      let own: Vec<u32> = self.lines[lines.clone()].iter().filter_map(number).collect();
+      match (own.first(), own.last()) {
+        (Some(first), Some(last)) => *first..*last + 1,
+        _ => {
+          let at = self.lines[lines.end..]
+            .iter()
+            .find_map(number)
+            .or_else(|| self.lines[..lines.start].iter().rev().find_map(number).map(|before| before + 1))
+            .unwrap_or(1);
+          at..at
+        }
+      }
+    };
+    ChangeGroup { old: span(|line| line.old), new: span(|line| line.new), lines }
   }
 
   /// The lines of each hunk, as ranges of `lines`.

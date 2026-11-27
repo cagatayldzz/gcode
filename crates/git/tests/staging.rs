@@ -115,3 +115,34 @@ fn restaging_a_rename_updates_the_destination_when_the_source_is_already_out_of_
   assert!(git(root, &["diff", "--cached", "--name-only"]).is_empty());
   assert_eq!(fs::read_to_string(root.join(&files[0])).unwrap(), "updated rename");
 }
+
+#[test]
+fn changed_spans_tell_which_lines_each_hunk_changes_and_where_hunks_meet() {
+  let (dir, base) = repository();
+  let root = dir.path();
+  let files = [PathBuf::from("file[1].txt")];
+  let edited = base.replace("line 2\n", "first edit\n").replace("line 30\n", "");
+  fs::write(root.join("file[1].txt"), &edited).unwrap();
+  let spans = staging_diff(root, &files, StageSide::Unstaged).unwrap().changed_spans();
+  assert_eq!(spans.len(), 2);
+  assert_eq!((spans[0].old.clone(), spans[0].new.clone()), (2..3, 2..3));
+  assert_eq!((spans[1].old.clone(), spans[1].new.clone()), (30..31, 30..30));
+  assert!(spans[0].meets_old(&(2..3)) && !spans[0].meets_old(&(30..31)));
+  assert!(spans[1].meets_new(&(30..30)) && spans[1].meets_new(&(30..31)));
+}
+
+#[test]
+fn several_hunks_can_be_staged_in_one_step() {
+  let (dir, base) = repository();
+  let root = dir.path();
+  let file = PathBuf::from("file[1].txt");
+  let files = [file.clone()];
+  let edited = base.replace("line 2\n", "first edit\n").replace("line 16\n", "middle edit\n").replace("line 30\n", "second edit\n");
+  fs::write(root.join(&file), &edited).unwrap();
+  let patch = staging_diff(root, &files, StageSide::Unstaged).unwrap();
+  assert_eq!(patch.hunks().count(), 3);
+  ws_git::change_index_hunks(root, &files, StageSide::Unstaged, Some((&patch, &[0, 2]))).unwrap();
+  let expected = base.replace("line 2\n", "first edit\n").replace("line 30\n", "second edit\n");
+  assert_eq!(git(root, &["show", ":file[1].txt"]), expected);
+  assert_eq!(fs::read_to_string(root.join(&file)).unwrap(), edited);
+}

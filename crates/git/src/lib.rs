@@ -23,7 +23,7 @@ mod compare;
 mod merge;
 mod operation;
 mod staging;
-pub use staging::{change_index, staging_diff, StageDiff, StageSide};
+pub use staging::{change_index, change_index_hunks, staging_diff, HunkSpan, StageDiff, StageSide};
 
 pub use operation::{operation, resume_operation, Operation, OperationStep};
 

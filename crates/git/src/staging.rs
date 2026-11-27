@@ -39,6 +39,12 @@ impl StageDiff {
     self.ranges.iter().filter_map(|range| std::str::from_utf8(&self.patch[range.clone()]).ok()?.lines().next())
   }
 
+  /// Where each hunk changes lines, in the numbers of both sides: the old range holds the removed lines (or the place the added
+  /// ones come in), the new range the added lines (or the place the removed ones were). Ranges are half open.
+  pub fn changed_spans(&self) -> Vec<HunkSpan> {
+    self.ranges.iter().filter_map(|range| std::str::from_utf8(&self.patch[range.clone()]).ok().map(span_of)).collect()
+  }
+
   fn new(patch: Vec<u8>, single_file: bool) -> Self {
     let mut starts = Vec::new();
     let mut position = 0;
@@ -73,6 +79,63 @@ impl StageDiff {
   }
 }
 
+/// Which lines a hunk changes, on each side of the diff.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HunkSpan {
+  pub old: Range<u32>,
+  pub new: Range<u32>,
+}
+
+impl HunkSpan {
+  /// Whether the two hunks change the same place on the old side.
+  pub fn meets_old(&self, other: &Range<u32>) -> bool {
+    touches(&self.old, other)
+  }
+
+  /// Whether the two hunks change the same place on the new side.
+  pub fn meets_new(&self, other: &Range<u32>) -> bool {
+    touches(&self.new, other)
+  }
+}
+
+/// Whether two half open ranges share a line; an empty one stands for the line it sits before.
+fn touches(a: &Range<u32>, b: &Range<u32>) -> bool {
+  let widen = |range: &Range<u32>| range.start..range.end.max(range.start + 1);
+  let (a, b) = (widen(a), widen(b));
+  a.start < b.end && b.start < a.end
+}
+
+/// The changed lines of one hunk (its `@@` line first) as ranges of both sides.
+fn span_of(hunk: &str) -> HunkSpan {
+  let mut lines = hunk.lines();
+  let header = lines.next().unwrap_or_default();
+  let numbers = header.strip_prefix("@@ -").and_then(|rest| rest.split_once(" +"));
+  let first = |text: &str| text.split([',', ' ']).next().and_then(|n| n.parse::<u32>().ok()).unwrap_or(1);
+  let (mut old, mut new) = numbers.map(|(old, new)| (first(old), first(new))).unwrap_or((1, 1));
+  let (mut removed, mut added): (Option<Range<u32>>, Option<Range<u32>>) = (None, None);
+  let (mut old_gap, mut new_gap) = (None, None);
+  for line in lines {
+    match line.as_bytes().first() {
+      Some(b'-') => {
+        removed = Some(removed.map_or(old..old + 1, |range| range.start..old + 1));
+        new_gap.get_or_insert(new);
+        old += 1;
+      }
+      Some(b'+') => {
+        added = Some(added.map_or(new..new + 1, |range| range.start..new + 1));
+        old_gap.get_or_insert(old);
+        new += 1;
+      }
+      Some(b' ') => {
+        old += 1;
+        new += 1;
+      }
+      _ => {}
+    }
+  }
+  HunkSpan { old: removed.unwrap_or_else(|| old_gap.map_or(0..0, |at| at..at)), new: added.unwrap_or_else(|| new_gap.map_or(0..0, |at| at..at)) }
+}
+
 fn diff(workdir: &Path, index: &Path, files: &[PathBuf], side: StageSide) -> Result<StageDiff, String> {
   let mut args: Vec<OsString> =
     ["--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--full-index", "--src-prefix=a/", "--dst-prefix=b/", "-U3"]
@@ -102,6 +165,14 @@ pub fn staging_diff(path: &Path, files: &[PathBuf], side: StageSide) -> Result<S
 
 /// Moves a whole file or one hunk between the staged and unstaged views. The working tree is untouched.
 pub fn change_index(path: &Path, files: &[PathBuf], side: StageSide, hunk: Option<(&StageDiff, usize)>) -> Result<(), String> {
+  match hunk {
+    Some((diff, position)) => change_index_hunks(path, files, side, Some((diff, &[position]))),
+    None => change_index_hunks(path, files, side, None),
+  }
+}
+
+/// Like [`change_index`], for several hunks of the same diff at once.
+pub fn change_index_hunks(path: &Path, files: &[PathBuf], side: StageSide, hunk: Option<(&StageDiff, &[usize])>) -> Result<(), String> {
   validate_selection(files)?;
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
   let workdir = repository.workdir().ok_or("The repository has no working folder.")?;
@@ -109,16 +180,24 @@ pub fn change_index(path: &Path, files: &[PathBuf], side: StageSide, hunk: Optio
   crate::operation::require_idle(&repository)?;
   let head = Head::read(&repository)?;
   let shadow = &index.shadow;
-  if let Some((expected, position)) = hunk {
+  if let Some((expected, positions)) = hunk {
     let current = diff(workdir, shadow, files, side)?;
     if current != *expected {
       return Err("The diff changed. Review the refreshed changes before trying again.".into());
     }
-    let range = current.ranges.get(position).ok_or("That hunk is no longer available.")?;
+    if positions.is_empty() {
+      return Err("Choose at least one hunk.".into());
+    }
     let header = current.ranges.first().ok_or("This change can only be staged as a whole file.")?.start;
     let patch_path = index.scratch.path().join("selection.patch");
     let mut patch = current.patch[..header].to_vec();
-    patch.extend_from_slice(&current.patch[range.clone()]);
+    let mut ordered = positions.to_vec();
+    ordered.sort_unstable();
+    ordered.dedup();
+    for position in ordered {
+      let range = current.ranges.get(position).ok_or("That hunk is no longer available.")?;
+      patch.extend_from_slice(&current.patch[range.clone()]);
+    }
     fs::write(&patch_path, patch).map_err(|error| error.to_string())?;
     let mut arguments = vec![OsStr::new("--cached"), OsStr::new("--whitespace=nowarn")];
     if side == StageSide::Staged {
