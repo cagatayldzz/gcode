@@ -48,9 +48,11 @@ Highlighting comes from tree-sitter grammars through GPUI Kit, plus a few line-b
 
 The status bar shows the language of the open file.
 
-To use JavaScript and TypeScript diagnostics and Go to Definition, open the Command Palette with ⇧⌘P and choose
+To use JavaScript and TypeScript diagnostics, completion, hover and Go to Definition, open the Command Palette with ⇧⌘P and choose
 **Enable Language Servers for This Project**. Confirm only for a project whose code you trust. Approval lasts until you switch
-projects or close the window. **Disable Language Servers for This Project** ends it immediately.
+projects or close the window. **Disable Language Servers for This Project** ends it immediately. Completion suggestions appear while typing, or with **Control-Space**.
+Hover over a symbol to see its type and documentation. Suggestions support plain-text edits. Automatic imports requiring additional edits
+or a separate completion-resolution request are outside this workflow.
 
 ### Images
 

@@ -313,6 +313,7 @@ pub(crate) struct EditorPanel {
   trusted_language_root: Option<PathBuf>,
   /// The language server of each project (by its root) that has one, or `None` when it would not start.
   languages: HashMap<PathBuf, Option<ProjectLanguage>>,
+  retried_languages: HashSet<PathBuf>,
   /// The server each open file belongs to, or `None` when no server handles the file.
   servers: HashMap<PathBuf, Option<Server>>,
   /// The errors and warnings of each file, as the server last reported them.
@@ -428,6 +429,7 @@ impl EditorPanel {
       occurrences: None,
       trusted_language_root: None,
       languages: HashMap::new(),
+      retried_languages: HashSet::new(),
       servers: HashMap::new(),
       problems: HashMap::new(),
       sync_tasks: HashMap::new(),
@@ -809,7 +811,7 @@ impl EditorPanel {
     self.evict(path);
     self.sync_problems(path, window, cx);
     if let Some(state) = self.files.get(path).map(|file| file.state.clone()) {
-      self.enable_definitions(path, &state, cx);
+      self.enable_language_features(path, &state, cx);
     }
   }
 

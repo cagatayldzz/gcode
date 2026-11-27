@@ -77,9 +77,16 @@ canonical root. That approval is local to the window and ends on project switch 
 pending sync tasks and diagnostics. `find_server` requires the file to resolve inside the approved root and looks up to that root for the
 project's own TypeScript (`node_modules/@typescript/typescript-<platform>/lib/tsc --lsp --stdio`, then `node_modules/.bin/typescript-language-server`),
 then for a `typescript-language-server` on the path. One server runs per discovered project folder
-(`languages`), as a child process with a reader thread, and the editor never waits for it:
+(`languages`), with a FIFO writer, a framed reader and a watchdog. The transport limits incoming frame size, queued writes,
+pending requests and diagnostic updates. The watchdog closes stalled initialization and expires unanswered requests. An unexpected
+disconnect clears that server's diagnostics and triggers one delayed restart while the approval remains active:
 
-- a file is sent when its editor is built, and again 300 ms after typing pauses (`SYNC_DELAY`);
+- while initializing, the client coalesces edits into the latest document snapshot. It enqueues `initialized` and `didOpen` under the
+  same lock before accepting changes or position requests;
+- a file is sent when its editor is built, and again 300 ms after typing pauses (`SYNC_DELAY`); completions, hover and definition
+  synchronize the current text before issuing their request;
+- the wire uses UTF-16 columns. Provider responses and diagnostics are translated to the editor's character columns; versioned
+  diagnostics for older text are dropped;
 - the server answers a `textDocument/diagnostic` request (or pushes `publishDiagnostics`) and the result arrives through a channel;
 - errors and warnings become the editor's own diagnostics (underlines and hover text) and fill the counts in the status bar and the
   Problems panel, which the counts open. A row in the panel opens the file at the problem.

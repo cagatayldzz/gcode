@@ -1,6 +1,6 @@
 use crate::{file_path, file_uri, Location, Problem, Severity};
 use futures::channel::{
-  mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
+  mpsc::{channel, Receiver, Sender},
   oneshot,
 };
 use serde_json::{json, Value};
@@ -8,14 +8,16 @@ use std::{
   collections::HashMap,
   io::{self, BufRead, BufReader, Read, Write},
   path::{Path, PathBuf},
-  process::{Child, ChildStdin, Command, Stdio},
-  sync::{Arc, Mutex},
+  process::{Child, Command, Stdio},
+  sync::{mpsc, Arc, Mutex},
+  time::{Duration, Instant},
 };
 
 /// The problems of one file, as the server last reported them. An empty list means the file is clean.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Update {
   pub path: PathBuf,
+  pub version: i64,
   pub problems: Vec<Problem>,
 }
 
@@ -83,41 +85,87 @@ pub fn find_server(file: &Path, trusted_root: Option<&Path>) -> Option<Server> {
     .map(|program| Server { program, args: vec!["--stdio".into()], root: fallback_root.to_path_buf() })
 }
 
+const MAX_HEADER: u64 = 8 * 1024;
+const MAX_BODY: usize = 16 * 1024 * 1024;
+const MAX_QUEUED: usize = 128;
+const MAX_PENDING: usize = 64;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
+const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(12);
+
+struct Document {
+  version: i64,
+  text: String,
+}
+
+enum Reply {
+  Request(oneshot::Sender<Value>),
+  Diagnostic(PathBuf, i64),
+}
+
+struct Pending {
+  deadline: Instant,
+  reply: Reply,
+}
+
 #[derive(Default)]
 struct State {
-  /// The server answered `initialize`; until then messages wait in `queue`.
   ready: bool,
-  queue: Vec<Value>,
-  versions: HashMap<PathBuf, i64>,
-  /// Requests for problems that are not answered yet: the file and the version asked about.
-  pending: HashMap<i64, (PathBuf, i64)>,
-  /// Requests for where a name is defined that are not answered yet.
-  definitions: HashMap<i64, oneshot::Sender<Vec<Location>>>,
+  stopped: bool,
+  supports_pull_diagnostics: bool,
+  incremental_sync: bool,
+  documents: HashMap<PathBuf, Document>,
+  pending: HashMap<i64, Pending>,
   next_id: i64,
 }
 
+impl State {
+  fn stop(&mut self) {
+    self.stopped = true;
+    self.pending.clear();
+    self.documents.clear();
+  }
+
+  fn request_id(&mut self, reply: Reply) -> Option<i64> {
+    if self.stopped || self.pending.len() >= MAX_PENDING {
+      return None;
+    }
+    self.next_id += 1;
+    self.pending.insert(self.next_id, Pending { deadline: Instant::now() + REQUEST_TIMEOUT, reply });
+    Some(self.next_id)
+  }
+}
+
 struct Shared {
-  stdin: Mutex<ChildStdin>,
+  outgoing: mpsc::SyncSender<Value>,
   state: Mutex<State>,
 }
 
 impl Shared {
-  fn write(&self, message: &Value) {
-    let body = message.to_string();
-    if let Ok(mut stdin) = self.stdin.lock() {
-      // A server that has gone away is noticed by the reader; a failed write needs no report of its own.
-      let _ = write!(stdin, "Content-Length: {}\r\n\r\n{body}", body.len()).and_then(|()| stdin.flush());
+  fn stop(&self) {
+    if let Ok(mut state) = self.state.lock() {
+      state.stop();
     }
   }
 
-  /// Sends a message now, or when the server is ready.
-  fn send(&self, message: Value) {
-    let Ok(mut state) = self.state.lock() else { return };
-    if state.ready {
-      drop(state);
-      self.write(&message);
-    } else {
-      state.queue.push(message);
+  fn write(&self, state: &mut State, message: Value) {
+    if !state.stopped && self.outgoing.try_send(message).is_err() {
+      state.stop();
+    }
+  }
+
+  fn diagnostics(&self, state: &mut State, path: &Path, version: i64) {
+    if !state.supports_pull_diagnostics {
+      return;
+    }
+    state.pending.retain(|_, pending| !matches!(&pending.reply, Reply::Diagnostic(other, _) if other == path));
+    if let Some(id) = state.request_id(Reply::Diagnostic(path.to_path_buf(), version)) {
+      self.write(
+        state,
+        json!({
+          "jsonrpc": "2.0", "id": id, "method": "textDocument/diagnostic",
+          "params": { "textDocument": { "uri": file_uri(path) } },
+        }),
+      );
     }
   }
 }
@@ -125,12 +173,12 @@ impl Shared {
 /// A running language server for one project.
 pub struct Session {
   shared: Arc<Shared>,
-  child: Mutex<Child>,
+  child: Arc<Mutex<Option<Child>>>,
 }
 
 impl Session {
-  /// Starts `server` in its project folder. Problems arrive from the returned channel; it ends when the server does.
-  pub fn start(server: &Server) -> io::Result<(Session, UnboundedReceiver<Update>)> {
+  /// Problems arrive until the server exits or the connection is closed.
+  pub fn start(server: &Server) -> io::Result<(Session, Receiver<Update>)> {
     let mut child = Command::new(&server.program)
       .args(&server.args)
       .current_dir(&server.root)
@@ -139,197 +187,302 @@ impl Session {
       .stderr(Stdio::null())
       .spawn()?;
     let missing = || io::Error::new(io::ErrorKind::BrokenPipe, "the language server has no pipes");
-    let stdin = child.stdin.take().ok_or_else(missing)?;
+    let mut stdin = child.stdin.take().ok_or_else(missing)?;
     let stdout = child.stdout.take().ok_or_else(missing)?;
-    let shared = Arc::new(Shared { stdin: Mutex::new(stdin), state: Mutex::new(State::default()) });
-    let (sender, receiver) = unbounded();
-    let reader = shared.clone();
-    std::thread::Builder::new().name("language-server".into()).spawn(move || read_messages(BufReader::new(stdout), &reader, &sender))?;
-    shared.write(&json!({
-      "jsonrpc": "2.0",
-      "id": 0,
-      "method": "initialize",
+    let (outgoing, messages) = mpsc::sync_channel(MAX_QUEUED + 1);
+    let shared = Arc::new(Shared { outgoing, state: Mutex::new(State::default()) });
+    let child = Arc::new(Mutex::new(Some(child)));
+    let session = Session { shared: shared.clone(), child: child.clone() };
+    let monitor = shared.clone();
+    let (mut sender, receiver) = channel(MAX_PENDING);
+    let mut watchdog_updates = sender.clone();
+    std::thread::Builder::new().name("lsp-watchdog".into()).spawn(move || {
+      let started = Instant::now();
+      loop {
+        {
+          let Ok(mut state) = monitor.state.lock() else { break };
+          if !state.ready && started.elapsed() >= INITIALIZE_TIMEOUT {
+            state.stop();
+          }
+          let now = Instant::now();
+          state.pending.retain(|_, request| request.deadline > now && !matches!(&request.reply, Reply::Request(sender) if sender.is_canceled()));
+          if state.stopped {
+            break;
+          }
+        }
+        if child.lock().is_ok_and(|mut child| child.as_mut().is_some_and(|child| child.try_wait().is_ok_and(|status| status.is_some()))) {
+          monitor.stop();
+          break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+      }
+      watchdog_updates.close_channel();
+      let process = child.lock().ok().and_then(|mut child| child.take());
+      if let Some(mut process) = process {
+        let _ = process.kill();
+        let _ = process.wait();
+      }
+    })?;
+    let writer = Arc::downgrade(&shared);
+    std::thread::Builder::new().name("lsp-writer".into()).spawn(move || {
+      for message in messages {
+        let body = message.to_string();
+        if write!(stdin, "Content-Length: {}\r\n\r\n{body}", body.len()).and_then(|()| stdin.flush()).is_err() {
+          if let Some(shared) = writer.upgrade() {
+            shared.stop();
+          }
+          break;
+        }
+      }
+    })?;
+    let initialized = json!({
+      "jsonrpc": "2.0", "id": 0, "method": "initialize",
       "params": {
         "processId": std::process::id(),
         "rootUri": file_uri(&server.root),
         "capabilities": {
+          "general": { "positionEncodings": ["utf-16"] },
           "textDocument": {
             "synchronization": { "didSave": false },
-            "publishDiagnostics": { "relatedInformation": false },
+            "publishDiagnostics": { "versionSupport": true },
             "diagnostic": { "dynamicRegistration": false },
+            "completion": { "completionItem": { "snippetSupport": false, "documentationFormat": ["markdown", "plaintext"] } },
+            "hover": { "contentFormat": ["markdown", "plaintext"] }
           },
-          "workspace": { "configuration": true },
+          "workspace": { "configuration": true }
         },
-        "workspaceFolders": [{ "uri": file_uri(&server.root), "name": "project" }],
-      },
-    }));
-    Ok((Session { shared, child: Mutex::new(child) }, receiver))
+        "workspaceFolders": [{ "uri": file_uri(&server.root), "name": "project" }]
+      }
+    });
+    if let Ok(mut state) = shared.state.lock() {
+      shared.write(&mut state, initialized);
+    }
+    std::thread::Builder::new().name("lsp-reader".into()).spawn(move || {
+      read_messages(BufReader::new(stdout), &shared, &mut sender);
+      shared.stop();
+    })?;
+    Ok((session, receiver))
   }
 
-  /// Tells the server the text of a file (opening it the first time) and asks for its problems.
+  /// Opens or updates the document before later requests for it are enqueued.
   pub fn sync(&self, path: &Path, text: &str) {
     let Some(language) = language_id(path) else { return };
-    let uri = file_uri(path);
-    let (version, id, opened) = {
-      let Ok(mut state) = self.shared.state.lock() else { return };
-      let opened = !state.versions.contains_key(path);
-      let version = state.versions.get(path).copied().unwrap_or(0) + 1;
-      state.versions.insert(path.to_path_buf(), version);
-      state.next_id += 1;
-      let id = state.next_id;
-      state.pending.insert(id, (path.to_path_buf(), version));
-      (version, id, opened)
-    };
-    if opened {
-      self.shared.send(json!({
-        "jsonrpc": "2.0",
-        "method": "textDocument/didOpen",
-        "params": { "textDocument": { "uri": uri, "languageId": language, "version": version, "text": text } },
-      }));
-    } else {
-      self.shared.send(json!({
-        "jsonrpc": "2.0",
-        "method": "textDocument/didChange",
-        "params": { "textDocument": { "uri": uri, "version": version }, "contentChanges": [{ "text": text }] },
-      }));
+    let Ok(mut state) = self.shared.state.lock() else { return };
+    if state.stopped || state.documents.get(path).is_some_and(|document| document.text == text) {
+      return;
     }
-    self.shared.send(json!({
-      "jsonrpc": "2.0",
-      "id": id,
-      "method": "textDocument/diagnostic",
-      "params": { "textDocument": { "uri": uri } },
-    }));
+    let uri = file_uri(path);
+    // A single monotonically increasing counter also prevents late replies after a close and reopen.
+    state.next_id += 1;
+    let version = state.next_id;
+    let previous = state.documents.insert(path.to_path_buf(), Document { version, text: text.to_owned() });
+    if !state.ready {
+      return;
+    }
+    let message = if let Some(previous) = previous {
+      let mut change = json!({ "text": text });
+      if state.incremental_sync {
+        let mut lines = previous.text.split('\n');
+        let last = lines.next_back().unwrap_or_default().trim_end_matches('\r');
+        change["range"] = json!({ "start": { "line": 0, "character": 0 },
+          "end": { "line": lines.count(), "character": last.encode_utf16().count() } });
+      }
+      json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange",
+        "params": { "textDocument": { "uri": uri, "version": version }, "contentChanges": [change] },
+      })
+    } else {
+      open_message(path, language, version, text)
+    };
+    self.shared.write(&mut state, message);
+    self.shared.diagnostics(&mut state, path, version);
   }
 
-  /// Asks where the name at a position is defined. The answer is empty when there is none or the server fails.
-  pub fn definition(&self, path: &Path, line: u32, column: u32) -> oneshot::Receiver<Vec<Location>> {
+  /// Sends a request and resolves it or cancels the receiver at its deadline.
+  pub fn request(&self, method: &str, params: Value) -> oneshot::Receiver<Value> {
     let (sender, receiver) = oneshot::channel();
-    let id = {
-      let Ok(mut state) = self.shared.state.lock() else { return receiver };
-      state.next_id += 1;
-      let id = state.next_id;
-      state.definitions.insert(id, sender);
-      id
-    };
-    self.shared.send(json!({
-      "jsonrpc": "2.0",
-      "id": id,
-      "method": "textDocument/definition",
-      "params": { "textDocument": { "uri": file_uri(path) }, "position": { "line": line, "character": column } },
-    }));
+    let Ok(mut state) = self.shared.state.lock() else { return receiver };
+    if state.ready {
+      if let Some(id) = state.request_id(Reply::Request(sender)) {
+        self.shared.write(&mut state, json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }));
+      }
+    }
     receiver
   }
 
-  /// Tells the server a file is no longer open.
+  pub fn matches_document(&self, path: &Path, version: i64, text: &str) -> bool {
+    self
+      .shared
+      .state
+      .lock()
+      .is_ok_and(|state| !state.stopped && state.documents.get(path).is_some_and(|document| document.version == version && document.text == text))
+  }
+
+  pub fn is_running(&self) -> bool {
+    self.shared.state.lock().is_ok_and(|state| !state.stopped)
+  }
+
+  pub fn shutdown(&self) {
+    self.shared.stop();
+    if let Ok(mut child) = self.child.lock() {
+      if let Some(child) = child.as_mut() {
+        let _ = child.kill();
+      }
+    }
+  }
+
   pub fn close(&self, path: &Path) {
-    let was_open = self.shared.state.lock().is_ok_and(|mut state| state.versions.remove(path).is_some());
-    if was_open {
-      self.shared.send(json!({
-        "jsonrpc": "2.0",
-        "method": "textDocument/didClose",
-        "params": { "textDocument": { "uri": file_uri(path) } },
-      }));
+    let Ok(mut state) = self.shared.state.lock() else { return };
+    if state.documents.remove(path).is_some() && state.ready {
+      self.shared.write(
+        &mut state,
+        json!({
+          "jsonrpc": "2.0", "method": "textDocument/didClose",
+          "params": { "textDocument": { "uri": file_uri(path) } },
+        }),
+      );
     }
   }
 }
 
 impl Drop for Session {
   fn drop(&mut self) {
-    if let Ok(mut child) = self.child.lock() {
-      let _ = child.kill();
-      let _ = child.wait();
-    }
+    self.shutdown();
   }
 }
 
-fn read_messages(mut input: BufReader<impl Read>, shared: &Shared, updates: &UnboundedSender<Update>) {
+fn open_message(path: &Path, language: &str, version: i64, text: &str) -> Value {
+  json!({
+    "jsonrpc": "2.0", "method": "textDocument/didOpen",
+    "params": { "textDocument": { "uri": file_uri(path), "languageId": language, "version": version, "text": text } },
+  })
+}
+
+fn read_messages(mut input: BufReader<impl Read>, shared: &Shared, updates: &mut Sender<Update>) {
   loop {
     let mut length = None;
+    let mut budget = MAX_HEADER;
     loop {
       let mut line = String::new();
-      match input.read_line(&mut line) {
-        Ok(0) | Err(_) => return,
-        Ok(_) => {}
+      let Ok(read) = (&mut input).take(budget).read_line(&mut line) else { return };
+      if read == 0 || !line.ends_with('\n') {
+        return;
       }
+      budget -= read as u64;
       let line = line.trim();
       if line.is_empty() {
         break;
       }
       if let Some((name, value)) = line.split_once(':') {
         if name.eq_ignore_ascii_case("content-length") {
+          if length.is_some() {
+            return;
+          }
           length = value.trim().parse::<usize>().ok();
+          if length.is_none_or(|length| length == 0 || length > MAX_BODY) {
+            return;
+          }
         }
       }
     }
-    let Some(length) = length else { continue };
+    let Some(length) = length else { return };
     let mut body = vec![0; length];
     if input.read_exact(&mut body).is_err() {
       return;
     }
-    let Ok(message) = serde_json::from_slice::<Value>(&body) else { continue };
+    let Ok(message) = serde_json::from_slice::<Value>(&body) else { return };
     handle(&message, shared, updates);
   }
 }
 
-fn handle(message: &Value, shared: &Shared, updates: &UnboundedSender<Update>) {
+fn handle(message: &Value, shared: &Shared, updates: &mut Sender<Update>) {
+  let Ok(mut state) = shared.state.lock() else { return };
+  if state.stopped {
+    return;
+  }
   let method = message.get("method").and_then(Value::as_str);
   let id = message.get("id");
   match (method, id) {
-    // A request from the server (registering a capability, asking for settings): nothing here needs a real answer.
     (Some(method), Some(id)) => {
       let result = if method == "workspace/configuration" {
         let count = message.pointer("/params/items").and_then(Value::as_array).map_or(0, Vec::len);
-        Value::Array(vec![Value::Null; count])
+        json!({ "result": vec![Value::Null; count] })
+      } else if matches!(method, "client/registerCapability" | "client/unregisterCapability" | "window/workDoneProgress/create") {
+        json!({ "result": null })
       } else {
-        Value::Null
+        json!({ "error": { "code": -32601, "message": "Method not supported" } })
       };
-      shared.write(&json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+      let mut response = json!({ "jsonrpc": "2.0", "id": id });
+      response.as_object_mut().unwrap().extend(result.as_object().unwrap().clone());
+      shared.write(&mut state, response);
     }
     (Some("textDocument/publishDiagnostics"), None) => {
       let params = &message["params"];
       let Some(path) = params["uri"].as_str().and_then(file_path) else { return };
-      let problems = params["diagnostics"].as_array().map(|items| items.iter().filter_map(problem).collect()).unwrap_or_default();
-      let _ = updates.unbounded_send(Update { path, problems });
+      let Some(document) = state.documents.get(&path) else { return };
+      if params["version"].as_i64().is_some_and(|version| version != document.version) {
+        return;
+      }
+      if !report(updates, path, document.version, &params["diagnostics"]) {
+        state.stop();
+      }
     }
-    (Some(_), None) => {}
     (None, Some(id)) => {
       let Some(id) = id.as_i64() else { return };
       if id == 0 {
-        shared.write(&json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }));
-        let queued = shared.state.lock().map(|mut state| {
-          state.ready = true;
-          std::mem::take(&mut state.queue)
-        });
-        for message in queued.unwrap_or_default() {
-          shared.write(&message);
+        if state.ready {
+          return;
         }
-        return;
-      }
-      let answered = shared.state.lock().ok().and_then(|mut state| state.definitions.remove(&id));
-      if let Some(sender) = answered {
-        let _ = sender.send(parse_locations(&message["result"]));
-        return;
-      }
-      let Some((path, version)) = shared.state.lock().ok().and_then(|mut state| {
-        let asked = state.pending.remove(&id)?;
-        // An answer about text that has changed since is out of date; the newer request will answer.
-        (state.versions.get(&asked.0) == Some(&asked.1)).then_some(asked)
-      }) else {
-        return;
-      };
-      let _ = version;
-      let result = &message["result"];
-      if result["kind"].as_str() == Some("full") {
-        let problems = result["items"].as_array().map(|items| items.iter().filter_map(problem).collect()).unwrap_or_default();
-        let _ = updates.unbounded_send(Update { path, problems });
+        if !message["result"].is_object()
+          || message.pointer("/result/capabilities/positionEncoding").and_then(Value::as_str).is_some_and(|encoding| encoding != "utf-16")
+        {
+          state.stop();
+          return;
+        }
+        state.supports_pull_diagnostics = message.pointer("/result/capabilities/diagnosticProvider").is_some_and(Value::is_object);
+        shared.write(&mut state, json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }));
+        let sync = &message["result"]["capabilities"]["textDocumentSync"];
+        state.incremental_sync = sync.as_u64().or_else(|| sync["change"].as_u64()) == Some(2);
+        // While holding the same lock used by sync and requests, enqueue didOpen for the latest copy of each file.
+        let documents = std::mem::take(&mut state.documents);
+        for (path, document) in &documents {
+          if let Some(language) = language_id(path) {
+            shared.write(&mut state, open_message(path, language, document.version, &document.text));
+            shared.diagnostics(&mut state, path, document.version);
+          }
+        }
+        if !state.stopped {
+          state.documents = documents;
+          state.ready = true;
+        }
+      } else if let Some(pending) = state.pending.remove(&id).filter(|pending| pending.deadline > Instant::now()) {
+        match pending.reply {
+          Reply::Request(sender) => {
+            let _ = sender.send(message["result"].clone());
+          }
+          Reply::Diagnostic(path, version) => {
+            if state.documents.get(&path).is_some_and(|document| document.version == version)
+              && message["result"]["kind"].as_str() == Some("full")
+              && !report(updates, path, version, &message["result"]["items"])
+            {
+              state.stop();
+            }
+          }
+        }
       }
     }
-    (None, None) => {}
+    _ => {}
   }
 }
 
+fn report(updates: &mut Sender<Update>, path: PathBuf, version: i64, diagnostics: &Value) -> bool {
+  const MAX_DIAGNOSTICS: usize = 5000;
+  let problems = diagnostics.as_array().map(|items| items.iter().take(MAX_DIAGNOSTICS).filter_map(problem).collect()).unwrap_or_default();
+  updates.try_send(Update { path, version, problems }).is_ok()
+}
+
 fn problem(item: &Value) -> Option<Problem> {
-  let number = |pointer: &str| item.pointer(pointer).and_then(Value::as_u64).map(|value| value as u32);
+  let number = |pointer: &str| item.pointer(pointer).and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok());
   Some(Problem {
     line: number("/range/start/line")?,
     column: number("/range/start/character")?,
@@ -357,10 +510,10 @@ pub fn parse_locations(result: &Value) -> Vec<Location> {
   items
     .into_iter()
     .filter_map(|item| {
-      let number = |pointer: &str| item.pointer(pointer).and_then(Value::as_u64).map(|value| value as u32);
+      let number = |pointer: &str| item.pointer(pointer).and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok());
       let (uri, range) = if item.get("targetUri").is_some() { ("/targetUri", "/targetSelectionRange") } else { ("/uri", "/range") };
       let origin = (|| {
-        let from = |pointer: &str| item.pointer(pointer).and_then(Value::as_u64).map(|value| value as u32);
+        let from = |pointer: &str| item.pointer(pointer).and_then(Value::as_u64).and_then(|value| u32::try_from(value).ok());
         Some((
           from("/originSelectionRange/start/line")?,
           from("/originSelectionRange/start/character")?,
