@@ -388,3 +388,87 @@ fn the_worktree_manager_opens_a_linked_worktree_as_a_project(cx: &mut TestAppCon
   assert_eq!(projects.active.as_ref(), Some(&linked));
   assert!(projects.projects.iter().any(|project| project.path == root));
 }
+
+#[gpui_kit::test]
+fn an_agent_starts_in_its_own_worktree_and_its_changes_open_in_git(cx: &mut TestAppContext) {
+  use std::os::unix::fs::PermissionsExt as _;
+
+  let data = scratch_data_dir();
+  let source = data.path().join("project");
+  fs::create_dir(&source).unwrap();
+  let git = |args: &[&str]| {
+    let output = std::process::Command::new("git").arg("-C").arg(&source).args(args).output().unwrap();
+    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+  };
+  git(&["init", "--initial-branch=main"]);
+  git(&["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "initial"]);
+  fs::write(data.path().join("projects.json"), serde_json::json!({ "projects": [{ "path": source }], "active": source }).to_string()).unwrap();
+  let extension = data.path().join("extensions/ai-agent");
+  fs::create_dir_all(&extension).unwrap();
+  fs::write(extension.join("manifest.json"), include_str!("../../../extensions/ai-agent/manifest.json")).unwrap();
+
+  let shell = data.path().join("mock-shell");
+  fs::write(
+    &shell,
+    "#!/bin/sh\nif [ \"$#\" -eq 6 ]; then\n  export PATH=\"${0%/*}:$PATH\"\n  export GIT_WORK_TREE=/\n  cd /\n  exec /bin/sh -c \"$4\" \"$5\" \"$6\"\nfi\nexec /bin/sh\n",
+  )
+  .unwrap();
+  let agent = data.path().join("codex");
+  fs::write(&agent, "#!/bin/sh\ngit rev-parse --show-toplevel > agent-output.txt\n").unwrap();
+  for executable in [&shell, &agent] {
+    fs::set_permissions(executable, fs::Permissions::from_mode(0o700)).unwrap();
+  }
+
+  struct RestoreShell(Option<std::ffi::OsString>);
+  impl Drop for RestoreShell {
+    fn drop(&mut self) {
+      match &self.0 {
+        Some(value) => std::env::set_var("SHELL", value),
+        None => std::env::remove_var("SHELL"),
+      }
+    }
+  }
+  let previous_shell = RestoreShell(std::env::var_os("SHELL"));
+  std::env::set_var("SHELL", &shell);
+  allow_shell_threads(cx);
+  cx.update(|cx| {
+    gpui_kit::init(cx);
+    ws_ui::init(cx);
+    ws_ui::open_window(Profile::default_profile(), cx);
+  });
+  draw_every_window(cx);
+  let handle = cx.windows()[0];
+
+  cx.dispatch_action(handle, ws_ui::NewCodexWorktree);
+  draw_every_window(cx);
+  let sessions = ws_storage::AgentWorktree::list(&Profile::default_profile(), &source).unwrap();
+  let [(checkout, session)] = sessions.as_slice() else { panic!("expected one agent worktree, got {sessions:?}") };
+  let output = checkout.join("agent-output.txt");
+  let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+  while fs::read_to_string(&output).unwrap_or_default().trim().is_empty() && std::time::Instant::now() < deadline {
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    cx.run_until_parked();
+  }
+  assert_eq!(Path::new(fs::read_to_string(output).unwrap().trim()), checkout);
+  assert!(!source.join("agent-output.txt").exists());
+  draw_every_window(cx);
+
+  cx.dispatch_action(handle, ws_ui::ShowAgentChanges);
+  draw_every_window(cx);
+  cx.update_window(handle, |_, window, cx| {
+    window.render_frame(cx);
+    window.click(format!("review-{}", session.branch), cx);
+  })
+  .unwrap();
+  draw_every_window(cx);
+  cx.update_window(handle, |_, window, cx| {
+    window.render_frame(cx);
+    assert!(window.try_find("all-changes-files").is_some());
+    window.click("open-agent-git", cx);
+  })
+  .unwrap();
+  draw_every_window(cx);
+  let projects = ws_storage::ProjectList::load(&data.path().join("projects.json"));
+  assert_eq!(projects.active.as_ref(), Some(checkout));
+  drop(previous_shell);
+}

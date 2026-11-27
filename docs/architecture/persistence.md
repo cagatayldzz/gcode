@@ -15,9 +15,16 @@ Everything gCode owns lives in one data directory:
 ├── projects.json            ┐
 ├── accounts.json            ├─ the "default" profile keeps these directly here
 ├── preferences.json         ┘
+├── agent-worktrees/<profile>/<session>/{session.json,checkout/}
 ├── editor-recovery/         private unsaved editor snapshots for the default profile
 └── profiles/<id>/           another profile: its own projects.json, accounts.json, preferences.json, editor-recovery/
 ```
+
+## Agent worktrees
+
+Each session directory holds a durable record of the source project, agent type, new branch and starting commit. The checkout is a
+native Git linked worktree. Records are scoped by profile; the checkouts sit outside the profile settings folder so removing a profile
+cannot erase working files. A successful removal through Git leaves the checkout absent and its record out of the review list.
 
 ## Crash reports
 

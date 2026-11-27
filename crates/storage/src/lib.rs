@@ -1,5 +1,6 @@
 //! Persistent state for the app, stored under `~/Library/Application Support/<name>`.
 
+mod agent_worktrees;
 mod crash_log;
 mod files;
 mod paths;
@@ -10,6 +11,7 @@ mod recent;
 mod recovery;
 mod window;
 
+pub use agent_worktrees::AgentWorktree;
 pub use crash_log::{format_report, install_panic_hook, logs_dir, write_report, KEPT_REPORTS};
 pub use files::{read_json, write_atomic, write_if_current, write_json, write_new, FileVersion};
 pub use paths::{data_dir, index_dir, migrate_legacy_data_dir};

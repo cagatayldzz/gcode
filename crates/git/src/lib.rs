@@ -26,7 +26,7 @@ mod operation;
 mod staging;
 mod worktrees;
 pub use staging::{change_index, change_index_hunks, staging_diff, HunkSpan, StageDiff, StageSide};
-pub use worktrees::{add_worktree, remove_worktree, worktrees, Worktree};
+pub use worktrees::{add_worktree, add_worktree_at_commit, head_commit_id, remove_worktree, worktrees, Worktree};
 
 pub use history_edit::{history_head, rebase_onto, reset_to_commit, HistoryHead, ResetMode};
 pub use operation::{operation, resume_operation, Operation, OperationStep};
@@ -270,27 +270,36 @@ pub fn clone(url: &str, parent: &Path, credentials: Option<&Credentials>) -> Res
 /// The unified diff of one file against the last commit (staged and unstaged changes together, untracked
 /// files as new), with the whole file as context. `file` is relative to the repository.
 pub fn file_diff(path: &Path, file: &Path) -> Result<String, String> {
-  working_tree_patch(path, Some(file), None)
+  working_tree_patch(path, Some(file), None, None)
 }
 
 /// [`file_diff`] of a renamed file: `from` is where it was before, so the patch shows what changed inside it instead of a deleted
 /// file and a new one.
 pub fn renamed_file_diff(path: &Path, file: &Path, from: &Path) -> Result<String, String> {
-  working_tree_patch(path, Some(file), Some(from))
+  working_tree_patch(path, Some(file), Some(from), None)
 }
 
 /// Every staged and unstaged change against HEAD, including untracked files.
 pub fn all_changes_diff(path: &Path) -> Result<String, String> {
-  working_tree_patch(path, None, None)
+  working_tree_patch(path, None, None, None)
+}
+
+/// The net changes on disk since a fixed starting commit, including committed and untracked files.
+pub fn changes_since(path: &Path, base: &str) -> Result<String, String> {
+  let id = git2::Oid::from_str(base).map_err(|error| error.to_string())?;
+  working_tree_patch(path, None, None, Some(id))
 }
 
 /// Context lines that cover any file: a diff of one file carries the whole file, so that the interface can expand the unchanged lines
 /// between and around the changes (it collapses them to a few lines at first).
 const WHOLE_FILE: u32 = u32::MAX;
 
-fn working_tree_patch(path: &Path, file: Option<&Path>, from: Option<&Path>) -> Result<String, String> {
+fn working_tree_patch(path: &Path, file: Option<&Path>, from: Option<&Path>, base: Option<git2::Oid>) -> Result<String, String> {
   let repository = Repository::discover(path).map_err(|error| error.message().to_string())?;
-  let head = repository.head().ok().and_then(|head| head.peel_to_tree().ok());
+  let head = match base {
+    Some(id) => Some(repository.find_commit(id).and_then(|commit| commit.tree()).map_err(|error| error.to_string())?),
+    None => repository.head().ok().and_then(|head| head.peel_to_tree().ok()),
+  };
   let mut options = DiffOptions::new();
   options.include_untracked(true).show_untracked_content(true).recurse_untracked_dirs(true);
   if let Some(file) = file {
@@ -308,7 +317,7 @@ fn working_tree_patch(path: &Path, file: Option<&Path>, from: Option<&Path>) -> 
     repository.diff_tree_to_workdir_with_index(head.as_ref(), Some(&mut options))
   }
   .map_err(|error| error.message().to_string())?;
-  if from.is_some() {
+  if from.is_some() || base.is_some() {
     diff.find_similar(Some(git2::DiffFindOptions::new().renames(true).for_untracked(true))).map_err(|error| error.message().to_string())?;
   }
   patch_text(&diff)

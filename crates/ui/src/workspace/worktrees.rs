@@ -188,6 +188,10 @@ impl Workspace {
       return;
     }
     if let WorktreeAction::Remove(tree) = &operation {
+      if self.agent_worktree_running(&tree.path) {
+        window.push_notification(crate::failure("Close the agent session before removing its worktree."), cx);
+        return;
+      }
       if self.has_pending_editor_changes(&tree.path, cx) {
         window.push_notification(crate::failure("Save the affected editor files before removing the worktree."), cx);
         return;

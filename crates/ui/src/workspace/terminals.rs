@@ -248,7 +248,7 @@ impl Workspace {
   }
 
   /// Whether the AI Agent extension is missing: then the view of the extensions opens, with a note, since that is where it is installed.
-  fn agents_missing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+  pub(super) fn agents_missing(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
     if !extensions::enabled_agents(cx).is_empty() {
       return false;
     }
@@ -274,15 +274,46 @@ impl Workspace {
       return;
     }
     let Some(root) = self.projects.active.clone() else { return };
+    self.start_agent_tab(root, kind, None, window, cx);
+  }
+
+  pub(super) fn start_agent_tab(
+    &mut self,
+    root: PathBuf,
+    kind: AgentKind,
+    worktree: Option<PathBuf>,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> bool {
     let shell = std::env::var("SHELL").ok().filter(|shell| !shell.is_empty()).unwrap_or_else(|| "/bin/zsh".to_owned());
-    let program = (shell, vec!["-l".to_owned(), "-i".to_owned(), "-c".to_owned(), kind.shell_line()]);
-    let Some(terminal) = self.start_program(root.clone(), Some(program), kind.label(), window, cx) else { return };
-    self.agent_tabs.entry(root).or_insert_with(AgentTabs::new).add(kind, terminal.clone());
-    self.leave_project_settings();
-    self.terminal_open = false;
-    self.agent_open = true;
-    self.focus_pane(&terminal, window, cx);
+    let mut arguments = vec!["-l".into(), "-i".into(), "-c".into()];
+    if let Some(checkout) = &worktree {
+      let Some(checkout) = checkout.to_str() else {
+        window.push_notification(crate::failure("The agent worktree path is not valid UTF-8."), cx);
+        return false;
+      };
+      // Preserve the worktree after loading login settings, which can change the directory or set Git overrides.
+      arguments.push(format!(
+        "unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PREFIX GIT_IMPLICIT_WORK_TREE; cd -- \"$1\" || exit; {}",
+        kind.shell_line()
+      ));
+      arguments.extend(["agent".into(), checkout.into()]);
+    } else {
+      arguments.push(kind.shell_line());
+    }
+    let program = (shell, arguments);
+    let cwd = worktree.clone().unwrap_or_else(|| root.clone());
+    let Some(terminal) = self.start_program(cwd, Some(program), kind.label(), window, cx) else { return false };
+    let active = self.projects.active.as_ref() == Some(&root);
+    self.agent_tabs.entry(root).or_insert_with(AgentTabs::new).add(kind, terminal.clone(), worktree);
+    if active {
+      self.leave_project_settings();
+      self.terminal_open = false;
+      self.agent_open = true;
+      self.focus_pane(&terminal, window, cx);
+    }
     cx.notify();
+    true
   }
 
   /// `⇧⌘M` in the AI view or in the terminals: opens the project list for the shown session or the focused pane.

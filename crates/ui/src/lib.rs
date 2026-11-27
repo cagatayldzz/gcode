@@ -107,6 +107,9 @@ actions!(
     // The AI view: a new Codex or Claude session in the open project.
     NewCodex,
     NewClaude,
+    NewCodexWorktree,
+    NewClaudeWorktree,
+    ShowAgentChanges,
     ToggleAllChanges,
     // Terminal panes: split side by side, split one above the other.
     SplitRight,

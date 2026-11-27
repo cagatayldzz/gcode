@@ -1,6 +1,8 @@
 //! The AI agents the app opens in their own view, and how a project's agent sessions are arranged: tabs, one session each.
 //! Pure data, so that the rules (which tab opens next, which one takes a closed tab's place) can be tested without a window.
 
+use std::path::PathBuf;
+
 /// A command-line agent that the app can start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AgentKind {
@@ -34,7 +36,6 @@ impl AgentKind {
     }
   }
 
-  /// A short line about what the agent is, for the empty view.
   pub fn description(self) -> &'static str {
     match self {
       AgentKind::Codex => "OpenAI's coding agent",
@@ -62,6 +63,7 @@ impl AgentKind {
 pub(crate) struct AgentTab<T> {
   pub kind: AgentKind,
   pub session: T,
+  pub worktree: Option<PathBuf>,
 }
 
 /// The agent sessions of one project, as tabs.
@@ -81,8 +83,8 @@ impl<T: PartialEq> AgentTabs<T> {
   }
 
   /// Adds a session after the others and shows it.
-  pub fn add(&mut self, kind: AgentKind, session: T) {
-    self.tabs.push(AgentTab { kind, session });
+  pub fn add(&mut self, kind: AgentKind, session: T, worktree: Option<PathBuf>) {
+    self.tabs.push(AgentTab { kind, session, worktree });
     self.active = self.tabs.len() - 1;
   }
 

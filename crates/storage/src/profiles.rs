@@ -36,6 +36,11 @@ impl Profile {
     }
   }
 
+  /// Checkouts are kept outside the profile directory so removing a profile cannot delete working files.
+  pub fn agent_worktrees_path(&self) -> PathBuf {
+    data_dir().join("agent-worktrees").join(&self.id)
+  }
+
   pub fn projects_path(&self) -> PathBuf {
     self.dir().join("projects.json")
   }

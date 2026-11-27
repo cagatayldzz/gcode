@@ -55,6 +55,7 @@ pub(crate) struct AllChanges {
   settings: Entity<SettingsModel>,
   diff: Option<ShownDiff>,
   patch: Option<Arc<str>>,
+  open_in_explorer: bool,
   /// The files marked as viewed, with the fingerprint of their change at that time: a file that changes afterwards needs a new review.
   viewed: HashMap<SharedString, u64>,
   /// The fingerprint of each file's change in the diff on screen.
@@ -71,6 +72,7 @@ impl AllChanges {
       settings,
       diff: None,
       patch: None,
+      open_in_explorer: true,
       viewed: HashMap::new(),
       fingerprints: HashMap::new(),
       error: None,
@@ -85,14 +87,29 @@ impl AllChanges {
     cx.notify();
   }
 
+  pub fn for_agent(settings: Entity<SettingsModel>) -> Self {
+    Self { open_in_explorer: false, ..Self::new(settings) }
+  }
+
   pub fn reload(&mut self, root: PathBuf, cx: &mut Context<Self>) {
+    self.read_patch(root, None, cx);
+  }
+
+  pub fn reload_agent(&mut self, root: PathBuf, base: String, cx: &mut Context<Self>) {
+    self.read_patch(root, Some(base), cx);
+  }
+
+  fn read_patch(&mut self, root: PathBuf, base: Option<String>, cx: &mut Context<Self>) {
     if self.task.is_some() {
       return;
     }
     let previous = self.patch.clone();
     let theme = crate::diff_view::highlight_theme(cx);
     let work = cx.background_executor().spawn(async move {
-      let patch = ws_git::all_changes_diff(&root)?;
+      let patch = match base {
+        Some(base) => ws_git::changes_since(&root, &base)?,
+        None => ws_git::all_changes_diff(&root)?,
+      };
       if previous.as_deref() == Some(patch.as_str()) {
         return Ok(None);
       }
@@ -123,6 +140,7 @@ impl AllChanges {
           }
           Err(error) => {
             this.patch = None;
+            this.diff = None;
             this.error = Some(format!("Could not read all changes: {error}").into());
           }
         }
@@ -480,7 +498,7 @@ fn file_header(file: &DiffFile, view: &WeakEntity<AllChanges>, cx: &App) -> Div 
   };
   let path = file.path().clone();
   let checked = view.upgrade().is_some_and(|view| view.read(cx).viewed.contains_key(&path));
-  let modified = file.modified_path().cloned();
+  let modified = view.upgrade().filter(|view| view.read(cx).open_in_explorer).and_then(|_| file.modified_path().cloned());
   let title = match (file.original_path(), file.modified_path()) {
     (Some(old), Some(new)) if old != new => SharedString::from(format!("{old} → {new}")),
     _ => path.clone(),

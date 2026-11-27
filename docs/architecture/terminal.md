@@ -43,7 +43,9 @@ wrapped at the screen edge.
 ## Agents are terminals
 
 An AI agent session is simply a `Terminal` whose shell line is `$SHELL -l -i -c "exec codex"` (or `claude`), so the user's PATH finds the
-agent. See [Window layout → The AI view](./window-layout.md#the-ai-view).
+agent. A worktree session starts in a fresh linked checkout on a new branch at a recorded starting commit. The login-shell command
+restores the checkout directory before launching the agent. The tab belongs to its source project while its PTY runs in the checkout.
+See [Window layout → The AI view](./window-layout.md#the-ai-view).
 
 
 ## Project scripts

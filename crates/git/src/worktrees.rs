@@ -1,7 +1,7 @@
 //! Management of native Git linked worktrees.
 
 use crate::commit_actions::{failure, git};
-use git2::Repository;
+use git2::{Oid, Repository};
 use std::{
   ffi::{OsStr, OsString},
   os::unix::ffi::OsStringExt,
@@ -50,7 +50,21 @@ pub(crate) fn require_branch_available(repository: &Repository, branch: &str) ->
   Ok(())
 }
 
+pub fn head_commit_id(root: &Path) -> Result<String, String> {
+  let repository = Repository::discover(root).map_err(|error| error.to_string())?;
+  crate::operation::require_idle(&repository)?;
+  repository.head().and_then(|head| head.peel_to_commit()).map(|commit| commit.id().to_string()).map_err(|error| error.to_string())
+}
+
 pub fn add_worktree(root: &Path, path: &Path, branch: &str) -> Result<PathBuf, String> {
+  create_worktree(root, path, branch, None)
+}
+
+pub fn add_worktree_at_commit(root: &Path, path: &Path, branch: &str, base: &str) -> Result<PathBuf, String> {
+  create_worktree(root, path, branch, Some(base))
+}
+
+fn create_worktree(root: &Path, path: &Path, branch: &str, base: Option<&str>) -> Result<PathBuf, String> {
   if !path.is_absolute() || path.file_name().is_none() {
     return Err("Enter an absolute path to a new worktree folder.".into());
   }
@@ -67,11 +81,19 @@ pub fn add_worktree(root: &Path, path: &Path, branch: &str) -> Result<PathBuf, S
     Err(error) if error.code() == git2::ErrorCode::NotFound => false,
     Err(error) => return Err(error.to_string()),
   };
+  let start = match base {
+    Some(_) if exists => return Err(format!("A branch named {branch} already exists.")),
+    Some(base) => {
+      let id = Oid::from_str(base).map_err(|error| error.to_string())?;
+      repository.find_commit(id).map_err(|error| error.to_string())?.id().to_string()
+    }
+    None => if exists { branch } else { "HEAD" }.to_owned(),
+  };
   let mut arguments: Vec<&OsStr> = vec![OsStr::new("worktree"), OsStr::new("add"), OsStr::new("--no-guess-remote")];
   if !exists {
     arguments.extend([OsStr::new("-b"), OsStr::new(branch)]);
   }
-  arguments.extend([OsStr::new("--"), path.as_os_str(), OsStr::new(if exists { branch } else { "HEAD" })]);
+  arguments.extend([OsStr::new("--"), path.as_os_str(), OsStr::new(&start)]);
   let output = git(root, &arguments)?;
   if !output.status.success() {
     return Err(failure(&output, "Git could not create the worktree."));

@@ -501,24 +501,11 @@ impl Workspace {
       return Label::new("No project is open.").text_color(theme.muted_foreground).p_3().into_any_element();
     };
     let project = SharedString::from(root.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default());
-    let workspace = cx.entity();
-    let enabled_agents = extensions::enabled_agents(cx);
-    let picker =
-      Button::new("agent-new").ghost().xsmall().icon(Icon::empty().path("icons/plus.svg").size_4()).tooltip("New agent session").dropdown_menu(
-        move |menu, _, _| {
-          enabled_agents.iter().copied().fold(menu, |menu, kind| {
-            let workspace = workspace.clone();
-            menu.item(
-              PopupMenuItem::new(kind.label())
-                .icon(Icon::empty().path(kind.icon()))
-                .on_click(move |_, window, cx| workspace.update(cx, |this, cx| this.new_agent(kind, window, cx))),
-            )
-          })
-        },
-      );
+    let review = self.agent_review_button();
     let Some(tabs) = self.agents() else {
-      return self.render_agent_empty(&project, cx);
+      return self.render_agent_empty(&project, review, cx);
     };
+    let picker = self.agent_picker(false, cx);
     let strip_tabs = tabs.tabs.iter().enumerate().map(|(index, tab)| {
       let key = tab.session.entity_id().to_string();
       let close = Button::new(SharedString::from(format!("close-agent-tab-{key}")))
@@ -531,13 +518,20 @@ impl Workspace {
           cx.stop_propagation();
           this.close_agent_tab(index, window, cx);
         }));
-      let label = h_flex().gap_1p5().items_center().child(Icon::empty().path(tab.kind.icon()).size_4()).child(tab.kind.label());
+      let label = h_flex().gap_1p5().items_center().child(Icon::empty().path(tab.kind.icon()).size_4()).child(
+        tab
+          .worktree
+          .as_ref()
+          .and_then(|path| path.parent()?.file_name())
+          .map_or_else(|| tab.kind.label().to_owned(), |name| format!("{} · {}", tab.kind.label(), name.to_string_lossy())),
+      );
       strip_tab(SharedString::from(format!("agent-tab-{key}")), label, index == tabs.active, close, cx)
         .on_click(cx.listener(move |this, _, window, cx| this.select_agent_tab(index, window, cx)))
     });
     let header = strip(cx)
       .child(h_flex().flex_1().min_w_0().h_full().children(strip_tabs))
       .child(div().px_1().child(picker))
+      .child(review)
       .child(Label::new(project).text_size(FONT_SIZE_SM).text_color(theme.muted_foreground).pr_3());
     let shown = tabs.current().map(|tab| tab.session.clone());
     v_flex()
@@ -548,18 +542,58 @@ impl Workspace {
       .into_any_element()
   }
 
-  /// The AI view with no session: the agents to start.
-  pub(super) fn render_agent_empty(&self, project: &SharedString, cx: &mut Context<Self>) -> AnyElement {
-    let buttons = AgentKind::ALL.map(|kind| {
-      let button = Button::new(SharedString::from(format!("agent-start-{}", kind.command())))
+  fn agent_picker(&self, only_worktrees: bool, cx: &App) -> AnyElement {
+    let focus = self.focus_handle.clone();
+    let busy = self.agent_worktree_task.is_some();
+    let enabled_agents = extensions::enabled_agents(cx);
+    Button::new("agent-new")
+      .ghost()
+      .small()
+      .icon(Icon::empty().path("icons/plus.svg").size_4())
+      .label(if only_worktrees { "New Worktree" } else { "New Session" })
+      .dropdown_menu(move |menu, _, _| {
+        enabled_agents.iter().copied().fold(menu, |menu, kind| {
+          let (normal, isolated) = (focus.clone(), focus.clone());
+          let menu = if only_worktrees {
+            menu
+          } else {
+            menu.item(PopupMenuItem::new(kind.label()).icon(Icon::empty().path(kind.icon())).on_click(move |_, window, cx| match kind {
+              AgentKind::Codex => normal.dispatch_action(&NewCodex, window, cx),
+              AgentKind::Claude => normal.dispatch_action(&NewClaude, window, cx),
+            }))
+          };
+          menu.item(PopupMenuItem::new(format!("{} in New Worktree", kind.label())).disabled(busy).on_click(move |_, window, cx| match kind {
+            AgentKind::Codex => isolated.dispatch_action(&crate::NewCodexWorktree, window, cx),
+            AgentKind::Claude => isolated.dispatch_action(&crate::NewClaudeWorktree, window, cx),
+          }))
+        })
+      })
+      .into_any_element()
+  }
+
+  fn agent_review_button(&self) -> Button {
+    let focus = self.focus_handle.clone();
+    Button::new("agent-review")
+      .ghost()
+      .small()
+      .label("Agent Changes")
+      .disabled(self.agent_review_task.is_some())
+      .on_click(move |_, window, cx| focus.dispatch_action(&crate::ShowAgentChanges, window, cx))
+  }
+
+  /// The AI view with no session: entry points to start an agent or review earlier work.
+  fn render_agent_empty(&self, project: &SharedString, review: Button, cx: &App) -> AnyElement {
+    let buttons = extensions::enabled_agents(cx).into_iter().map(|kind| {
+      let focus = self.focus_handle.clone();
+      Button::new(SharedString::from(format!("agent-start-{}", kind.command())))
         .outline()
         .icon(Icon::empty().path(kind.icon()).size_4())
-        .label(SharedString::from(format!("Start {}", kind.label())))
-        .tooltip(kind.description());
-      match kind {
-        AgentKind::Codex => button.on_click(cx.listener(|this, _, window, cx| this.new_codex(&NewCodex, window, cx))),
-        AgentKind::Claude => button.on_click(cx.listener(|this, _, window, cx| this.new_claude(&NewClaude, window, cx))),
-      }
+        .label(format!("Start {}", kind.label()))
+        .tooltip(kind.description())
+        .on_click(move |_, window, cx| match kind {
+          AgentKind::Codex => focus.dispatch_action(&NewCodex, window, cx),
+          AgentKind::Claude => focus.dispatch_action(&NewClaude, window, cx),
+        })
     });
     Empty::new()
       .size_full()
@@ -570,6 +604,7 @@ impl Workspace {
           .description(EmptyDescription::new().child(SharedString::from(format!("Start Codex or Claude in {project}.")))),
       )
       .child(h_flex().gap_2().children(buttons))
+      .child(h_flex().gap_2().child(self.agent_picker(true, cx)).child(review))
       .into_any_element()
   }
 

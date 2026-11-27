@@ -82,7 +82,9 @@ the shell that has the keyboard, and a terminal's right-click menu uses the same
 
 Same area as the terminals, but organized by session. The header holds one tab per session (agent icon and name), a menu to start another
 agent, and the project name — no splits. A session is a `Terminal` that runs `$SHELL -l -i -c "exec codex"` (or `claude`) in the project
-folder. `NewCodex` and `NewClaude` start one. With no session the view shows the choice of agents (`render_agent_empty`); when the last
+folder. `NewCodex` and `NewClaude` start one there. Worktree variants start the terminal in a linked checkout.
+**Agent Changes** displays the persisted sessions and reuses the All Changes diff in a review dialog, with a button to open the
+checkout's Git view. With no session the view shows the choice of agents (`render_agent_empty`). When the last
 session ends it stays open and shows it again. Sessions live in `Workspace.agent_tabs` per project and keep running while another project
 or view is shown.
 

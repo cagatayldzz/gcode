@@ -10,8 +10,8 @@ fn sessions(tabs: &AgentTabs<u32>) -> Vec<(AgentKind, u32)> {
 #[test]
 fn a_new_session_is_shown() {
   let mut tabs = AgentTabs::new();
-  tabs.add(AgentKind::Codex, 1);
-  tabs.add(AgentKind::Claude, 2);
+  tabs.add(AgentKind::Codex, 1, None);
+  tabs.add(AgentKind::Claude, 2, None);
   assert_eq!(sessions(&tabs), [(AgentKind::Codex, 1), (AgentKind::Claude, 2)]);
   assert_eq!(tabs.current().map(|tab| tab.session), Some(2));
 }
@@ -19,7 +19,7 @@ fn a_new_session_is_shown() {
 #[test]
 fn selecting_a_missing_tab_changes_nothing() {
   let mut tabs = AgentTabs::new();
-  tabs.add(AgentKind::Codex, 1);
+  tabs.add(AgentKind::Codex, 1, None);
   tabs.select(5);
   assert_eq!(tabs.active, 0);
 }
@@ -28,7 +28,7 @@ fn selecting_a_missing_tab_changes_nothing() {
 fn closing_the_shown_session_shows_its_left_neighbor() {
   let mut tabs = AgentTabs::new();
   for session in 1..=3 {
-    tabs.add(AgentKind::Codex, session);
+    tabs.add(AgentKind::Codex, session, None);
   }
   assert!(tabs.remove(&3));
   assert_eq!(tabs.current().map(|tab| tab.session), Some(2));
@@ -38,7 +38,7 @@ fn closing_the_shown_session_shows_its_left_neighbor() {
 fn closing_an_earlier_session_keeps_the_shown_one() {
   let mut tabs = AgentTabs::new();
   for session in 1..=3 {
-    tabs.add(AgentKind::Claude, session);
+    tabs.add(AgentKind::Claude, session, None);
   }
   assert!(tabs.remove(&1));
   assert_eq!(tabs.current().map(|tab| tab.session), Some(3));
@@ -47,8 +47,8 @@ fn closing_an_earlier_session_keeps_the_shown_one() {
 #[test]
 fn closing_the_first_shown_session_shows_the_next() {
   let mut tabs = AgentTabs::new();
-  tabs.add(AgentKind::Codex, 1);
-  tabs.add(AgentKind::Codex, 2);
+  tabs.add(AgentKind::Codex, 1, None);
+  tabs.add(AgentKind::Codex, 2, None);
   tabs.select(0);
   assert!(tabs.remove(&1));
   assert_eq!(tabs.current().map(|tab| tab.session), Some(2));

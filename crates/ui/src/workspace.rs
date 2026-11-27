@@ -72,6 +72,7 @@ use ws_hosting::{Connection, PullRequest, RepoRef, TokenStore as _};
 use ws_storage::{Category, Profile, Project, ProjectList, WindowMode, WindowPlacement};
 
 mod accounts;
+mod agent_worktrees;
 mod branches;
 mod changes;
 mod command_palette;
@@ -488,6 +489,8 @@ pub struct Workspace {
   tab_swapped_at: Option<Instant>,
   /// The agent sessions of each project; the sessions keep running while another project or view is shown.
   agent_tabs: HashMap<PathBuf, AgentTabs<Entity<Terminal>>>,
+  agent_worktree_task: Option<Task<()>>,
+  agent_review_task: Option<Task<()>>,
   /// A commit message is being generated.
   generating: bool,
   /// What each project holds, read when the project menu opens and while it is open.
@@ -701,6 +704,8 @@ impl Workspace {
       tab_swaps: 0,
       tab_swapped_at: None,
       agent_tabs: HashMap::new(),
+      agent_worktree_task: None,
+      agent_review_task: None,
       generating: false,
       project_status: HashMap::new(),
       project_status_read: None,
@@ -1122,6 +1127,11 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::toggle_project_settings))
       .on_action(cx.listener(Self::new_codex))
       .on_action(cx.listener(Self::new_claude))
+      .on_action(cx.listener(Self::new_codex_worktree))
+      .on_action(cx.listener(Self::new_claude_worktree))
+      .on_action(cx.listener(Self::show_agent_changes))
+      .on_action(cx.listener(Self::review_agent_worktree))
+      .on_action(cx.listener(Self::open_agent_git))
       .on_action(cx.listener(Self::toggle_all_changes))
       .on_action(cx.listener(Self::open_changed_file))
       .on_action(cx.listener(Self::run_file_command))
