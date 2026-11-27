@@ -77,6 +77,7 @@ mod changes;
 mod command_palette;
 mod commit;
 mod editor_save;
+mod editor_split;
 mod entries;
 mod file_actions;
 mod git;
@@ -246,6 +247,8 @@ struct ProjectView {
   sidebar_tab: SidebarTab,
   git_view: GitView,
   terminal_open: bool,
+  terminal_docked: bool,
+  split_open: bool,
   agent_open: bool,
   expanded: HashSet<PathBuf>,
   selected_entry: Option<PathBuf>,
@@ -465,6 +468,8 @@ pub struct Workspace {
   /// The activity log panel at the bottom of the window (the debug button), while it is open, with what hears its close button.
   activity_log: Option<(Entity<crate::activity_panel::ActivityLog>, Subscription)>,
   terminal_open: bool,
+  terminal_docked: bool,
+  split_open: bool,
   /// The AI view (Codex, Claude) fills the main area, like the terminals do; the two never show together.
   agent_open: bool,
   /// The project tab that was last picked up; it counts as held while the pointer still drags something.
@@ -534,6 +539,10 @@ pub struct Workspace {
   recovering: bool,
   dock: Entity<DockArea>,
   editor_panel: Entity<EditorPanel>,
+  split_editor: Option<Entity<EditorPanel>>,
+  split_focused: bool,
+  _primary_editor_focus: Subscription,
+  split_subscriptions: Vec<Subscription>,
   editor_saves: HashMap<PathBuf, Task<()>>,
   editor_formats: HashMap<PathBuf, Task<()>>,
   save_dialog_task: Option<Task<()>>,
@@ -674,6 +683,8 @@ impl Workspace {
       problems_open: false,
       activity_log: None,
       terminal_open: false,
+      terminal_docked: false,
+      split_open: false,
       agent_open: false,
       dragged_tab: None,
       tab_bounds: Rc::default(),
@@ -702,8 +713,10 @@ impl Workspace {
       _window_bounds: cx.observe_window_bounds(window, |this, window, cx| this.remember_window(window, cx)),
       _placement_on_quit: cx.on_app_quit(|this, cx| {
         this.save_placement_now();
-        if let Err(error) = this.editor_panel.update(cx, |editor, cx| editor.flush_recovery(cx)) {
-          eprintln!("Could not checkpoint unsaved edits: {error}");
+        for editor in this.editor_panels() {
+          if let Err(error) = editor.update(cx, |editor, cx| editor.flush_recovery(cx)) {
+            eprintln!("Could not checkpoint unsaved edits: {error}");
+          }
         }
         async {}
       }),
@@ -764,6 +777,13 @@ impl Workspace {
       ],
       dock,
       editor_panel: editor_panel.clone(),
+      split_editor: None,
+      split_focused: false,
+      _primary_editor_focus: cx.on_focus_in(&editor_panel.read(cx).focus_handle(cx), window, |this, _, cx| {
+        this.split_focused = false;
+        cx.notify();
+      }),
+      split_subscriptions: Vec::new(),
       editor_saves: HashMap::new(),
       editor_formats: HashMap::new(),
       save_dialog_task: None,
@@ -799,10 +819,7 @@ impl Workspace {
         cx.notify();
       }),
       _open_location: cx.subscribe_in(&editor_panel, window, |this, _, target: &OpenLocation, window, cx| {
-        let path = target.path.clone();
-        this.editor_panel.update(cx, |editor, _| editor.allow_large(&path));
-        this.open_file(path.clone(), window, cx);
-        this.editor_panel.update(cx, |editor, cx| editor.reveal_range(&path, target.start, target.end, window, cx));
+        this.open_definition(target, window, cx);
       }),
       _activation: cx.observe_window_activation(window, |this, window, cx| {
         this.window_active = window.is_window_active();
@@ -887,9 +904,10 @@ impl Workspace {
       self.focus_handle.focus(window, cx);
       return;
     }
-    if self.editor_panel.update(cx, |editor, cx| editor.close_by_shortcut(cx)) {
+    let editor = self.focused_editor(window, cx);
+    if editor.update(cx, |editor, cx| editor.close_by_shortcut(cx)) {
       // The closed tab held the focus; without a focused element in the window the next ⌘W would reach nothing.
-      self.focus_handle.focus(window, cx);
+      editor.update(cx, |editor, cx| editor.focus_document(window, cx));
     }
   }
 
@@ -910,21 +928,21 @@ impl Workspace {
 
   /// Add Next Occurrence (⌘D in the editor): see `EditorPanel::select_next_occurrence`.
   pub fn select_next_occurrence(&mut self, _: &SelectNextOccurrence, window: &mut Window, cx: &mut Context<Self>) {
-    self.editor_panel.update(cx, |editor, cx| editor.select_next_occurrence(window, cx));
+    self.focused_editor(window, cx).update(cx, |editor, cx| editor.select_next_occurrence(window, cx));
   }
 
   /// Find (⌘F in the editor): see `EditorPanel::open_find`.
   pub fn find_in_file(&mut self, _: &FindInFile, window: &mut Window, cx: &mut Context<Self>) {
-    self.editor_panel.update(cx, |editor, cx| editor.open_find(false, window, cx));
+    self.focused_editor(window, cx).update(cx, |editor, cx| editor.open_find(false, window, cx));
   }
 
   /// Replace (⌥⌘F in the editor): the find widget with the replace row open.
   pub fn replace_in_file(&mut self, _: &ReplaceInFile, window: &mut Window, cx: &mut Context<Self>) {
-    self.editor_panel.update(cx, |editor, cx| editor.open_find(true, window, cx));
+    self.focused_editor(window, cx).update(cx, |editor, cx| editor.open_find(true, window, cx));
   }
 
   fn comment_lines(&mut self, mode: CommentMode, window: &mut Window, cx: &mut Context<Self>) {
-    if let Err(message) = self.editor_panel.update(cx, |editor, cx| editor.comment_lines(mode, window, cx)) {
+    if let Err(message) = self.focused_editor(window, cx).update(cx, |editor, cx| editor.comment_lines(mode, window, cx)) {
       window.push_notification(Notification::info(message), cx);
     }
   }
@@ -933,7 +951,10 @@ impl Workspace {
     if !self.editor_saves.is_empty() || !self.editor_formats.is_empty() {
       return Err(std::io::Error::other("Wait for the current save to finish"));
     }
-    self.editor_panel.update(cx, |editor, cx| editor.flush_recovery(cx))
+    for editor in self.editor_panels() {
+      editor.update(cx, |editor, cx| editor.flush_recovery(cx))?;
+    }
+    Ok(())
   }
 }
 
@@ -979,18 +1000,28 @@ impl Render for Workspace {
             .description(EmptyDescription::new().child(description)),
         )
         .into_any_element()
+    } else if let Some(side) = self.split_editor.as_ref().filter(|_| self.split_open) {
+      h_resizable("editable-editor-split")
+        .child(resizable_panel().child(self.dock.clone()))
+        .child(resizable_panel().child(side.clone()))
+        .into_any_element()
     } else if let Some(side) = self.file_actions.visible_side(cx) {
       h_resizable("editor-side-split").child(resizable_panel().child(self.dock.clone())).child(resizable_panel().child(side)).into_any_element()
     } else {
       self.dock.clone().into_any_element()
     };
     // The terminals take the whole main area, like a terminal window; the sidebar stays beside it.
-    let main_area = if self.active_project_missing() && !self.editor_panel.read(cx).has_unsaved_tabs() {
+    let main_area = if self.active_project_missing() && !self.editor_panels().any(|panel| panel.read(cx).has_unsaved_tabs()) {
       self.render_missing_project(cx)
     } else if let Some(settings) = &self.project_settings {
       settings.clone().into_any_element()
     } else if let Some(settings) = &self.app_settings {
       settings.clone().into_any_element()
+    } else if self.terminal_open && self.terminal_docked {
+      v_resizable("bottom-terminal-split")
+        .child(resizable_panel().child(editor_area))
+        .child(resizable_panel().size(window.rem_size() * 15.).child(self.render_terminal_area(cx)))
+        .into_any_element()
     } else if self.terminal_open {
       self.render_terminal_area(cx).into_any_element()
     } else if self.agent_open && !extensions::enabled_agents(cx).is_empty() {
@@ -1011,7 +1042,7 @@ impl Render for Workspace {
           .min_w_0()
           .h_full()
           .child(div().flex_1().min_h_0().w_full().child(main_area))
-          .when(terminal_shown, |column| column.child(self.render_status_bar(cx)))
+          .when(terminal_shown, |column| column.child(self.render_status_bar(window, cx)))
           .into_any_element()
       } else {
         // The group's content (the all-changes toolbar, for one) has a minimum width; `min_w_0` keeps it from pushing the group past
@@ -1038,7 +1069,7 @@ impl Render for Workspace {
                     .child(div().flex_1().min_h_0().min_w_0().w_full().overflow_hidden().child(main_area))
                     .when(self.problems_open && self.sidebar_tab != SidebarTab::Git, |column| column.children(self.render_problems_panel(cx)))
                     // The Git view has the branch in its own bar: no status bar there.
-                    .when(self.sidebar_tab != SidebarTab::Git, |column| column.child(self.render_status_bar(cx))),
+                    .when(self.sidebar_tab != SidebarTab::Git, |column| column.child(self.render_status_bar(window, cx))),
                 ),
               ),
           )
@@ -1087,6 +1118,8 @@ impl Render for Workspace {
       .on_action(cx.listener(Self::view_on_host))
       .on_action(cx.listener(Self::split_down))
       .on_action(cx.listener(Self::save_file))
+      .on_action(cx.listener(Self::toggle_editor_split))
+      .on_action(cx.listener(Self::toggle_terminal_dock))
       .on_action(cx.listener(Self::format_document))
       .on_action(cx.listener(Self::find_in_file))
       .on_action(cx.listener(Self::replace_in_file))

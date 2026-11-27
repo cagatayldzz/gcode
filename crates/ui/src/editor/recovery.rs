@@ -45,6 +45,7 @@ impl EditorPanel {
     let journal = RecoveryJournal::new(&profile.dir());
     let writer = Arc::new(RecoveryWriter::new(journal));
     self.recovery = Some(writer.clone());
+    self.recovery_loading = true;
     let roots: Vec<_> = projects.projects.iter().map(|project| project.path.clone()).collect();
     self.set_root(projects.active.clone(), cx);
     self._recovery_task = Some(cx.spawn_in(window, async move |this, cx| {
@@ -61,24 +62,41 @@ impl EditorPanel {
           Ok::<_, io::Error>((drafts, unreadable))
         })
         .await;
-      let _ = this.update_in(cx, |this, window, cx| match loaded {
-        Ok((drafts, unreadable)) => {
-          let restored = this.restore_drafts(drafts, &roots, window, cx);
-          if restored > 0 {
-            window.push_notification(
-              gpui_kit::component::notification::Notification::info(format!("Recovered unsaved edits in {restored} file(s).")),
-              cx,
-            );
+      let _ = this.update_in(cx, |this, window, cx| {
+        this.recovery_loading = false;
+        match loaded {
+          Ok((drafts, unreadable)) => {
+            let restored = this.restore_drafts(drafts, &roots, window, cx);
+            if restored > 0 {
+              window.push_notification(
+                gpui_kit::component::notification::Notification::info(format!("Recovered unsaved edits in {restored} file(s).")),
+                cx,
+              );
+            }
+            if unreadable > 0 {
+              window.push_notification(
+                crate::failure(format!("Could not read {unreadable} recovery file(s). They remain in the profile’s recovery folder.")),
+                cx,
+              );
+            }
           }
-          if unreadable > 0 {
-            window.push_notification(
-              crate::failure(format!("Could not read {unreadable} recovery file(s). They remain in the profile’s recovery folder.")),
-              cx,
-            );
-          }
+          Err(error) => window.push_notification(crate::failure(format!("Could not load editor recovery: {error}")), cx),
         }
-        Err(error) => window.push_notification(crate::failure(format!("Could not load editor recovery: {error}")), cx),
       });
+    }));
+    self.start_checkpointing(window, cx);
+  }
+
+  pub(crate) fn share_recovery(&mut self, primary: &Entity<EditorPanel>, window: &mut Window, cx: &mut Context<Self>) {
+    let primary = primary.read(cx);
+    self.recovery = primary.recovery.clone();
+    self.replacement_files.clone_from(&primary.replacement_files);
+    self.start_checkpointing(window, cx);
+  }
+
+  fn start_checkpointing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(writer) = self.recovery.clone() else { return };
+    self._checkpoint_task = Some(cx.spawn_in(window, async move |this, cx| {
       let mut reported = false;
       loop {
         cx.background_executor().timer(CHECKPOINT_INTERVAL).await;

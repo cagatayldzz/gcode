@@ -54,8 +54,8 @@ impl Workspace {
   pub(super) fn open_change_line_in_editor(&mut self, file: &Path, line: u32, window: &mut Window, cx: &mut Context<Self>) {
     self.open_change_in_editor(file, window, cx);
     let Some(path) = self.projects.active.as_deref().and_then(|root| Self::changed_file_path(root, &file.to_string_lossy())) else { return };
-    self.editor_panel.update(cx, |editor, cx| editor.reveal_position(&path, line.saturating_sub(1) as usize, 0, window, cx));
-    window.focus(&self.editor_panel.focus_handle(cx), cx);
+    self.editor_for_path(&path, cx).update(cx, |editor, cx| editor.reveal_position(&path, line.saturating_sub(1) as usize, 0, window, cx));
+    self.editor_for_path(&path, cx).update(cx, |editor, cx| editor.focus_document(window, cx));
   }
 
   pub(super) fn show_change_in_finder(root: PathBuf, file: PathBuf, window: &mut Window, cx: &mut App) {
@@ -148,7 +148,7 @@ impl Workspace {
         let active = this.projects.active.as_ref() == Some(&root);
         for (path, file) in &discarded {
           if let Some(path) = path {
-            this.editor_panel.update(cx, |editor, cx| {
+            this.editor_for_path(path, cx).update(cx, |editor, cx| {
               if !editor.is_dirty(path) {
                 editor.forget(path, cx);
               }
@@ -267,7 +267,7 @@ impl Workspace {
               this.selected_change.clone().filter(|open| files.contains(open) && job_scope::lands_here(this.projects.active.as_deref(), &root))
             {
               if let Some(path) = ws_git::workdir_file(&root, &open) {
-                this.editor_panel.update(cx, |editor, cx| {
+                this.editor_for_path(&path, cx).update(cx, |editor, cx| {
                   if !editor.is_dirty(&path) {
                     editor.forget(&path, cx);
                   }

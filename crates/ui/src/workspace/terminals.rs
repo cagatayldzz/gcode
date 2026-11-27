@@ -105,6 +105,16 @@ impl Workspace {
     }
   }
 
+  pub(super) fn toggle_terminal_dock(&mut self, _: &crate::ToggleTerminalDock, window: &mut Window, cx: &mut Context<Self>) {
+    if self.projects.active.is_none() {
+      window.push_notification(Notification::info("Open a project to show its terminal."), cx);
+      return;
+    }
+    self.terminal_docked = !self.terminal_open || !self.terminal_docked;
+    self.app_settings = None;
+    self.show_terminal(window, cx);
+  }
+
   /// ⌘T: opens a shell in a tab of its own in the open project and shows the terminals.
   pub fn new_terminal(&mut self, _: &NewTerminal, window: &mut Window, cx: &mut Context<Self>) {
     let Some(root) = self.projects.active.clone() else { return };
@@ -209,7 +219,7 @@ impl Workspace {
   /// A full-width view is showing: the terminals, the AI view or the project settings. The sidebar, the editor and the status bar
   /// are hidden then.
   pub(super) fn full_area_open(&self) -> bool {
-    self.terminal_open || self.agent_open || self.project_settings.is_some() || self.app_settings.is_some()
+    (self.terminal_open && !self.terminal_docked) || self.agent_open || self.project_settings.is_some() || self.app_settings.is_some()
   }
 
   /// Gives the keyboard to the shown agent session, once it is drawn.

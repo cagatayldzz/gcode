@@ -14,8 +14,8 @@ impl Workspace {
     if self.file_actions.focused_side(window, cx).is_some() {
       return;
     }
-    if let Some(path) = self.editor_panel.read(cx).active_file().map(Path::to_path_buf) {
-      if ws_language::language_id(&path).is_some() && self.editor_panel.read(cx).editor_preferences(&path).format_on_save {
+    if let Some(path) = self.focused_editor(window, cx).read(cx).active_file().map(Path::to_path_buf) {
+      if ws_language::language_id(&path).is_some() && self.editor_for_path(&path, cx).read(cx).editor_preferences(&path).format_on_save {
         self.run_formatter(path, true, window, cx);
       } else {
         self.save_editor_file(path, None, window, cx);
@@ -25,7 +25,7 @@ impl Workspace {
 
   pub(super) fn format_document(&mut self, _: &crate::FormatDocument, window: &mut Window, cx: &mut Context<Self>) {
     if self.file_actions.focused_side(window, cx).is_none() {
-      if let Some(path) = self.editor_panel.read(cx).active_file().map(Path::to_path_buf) {
+      if let Some(path) = self.focused_editor(window, cx).read(cx).active_file().map(Path::to_path_buf) {
         self.run_formatter(path, false, window, cx);
       }
     }
@@ -35,7 +35,7 @@ impl Workspace {
     if self.editor_formats.contains_key(&path) || self.editor_saves.contains_key(&path) {
       return;
     }
-    let work = match self.editor_panel.read(cx).request_format(&path, cx) {
+    let work = match self.editor_for_path(&path, cx).read(cx).request_format(&path, cx) {
       Ok(work) => work,
       Err(message) => {
         window.push_notification(crate::failure(message), cx);
@@ -53,7 +53,7 @@ impl Workspace {
           this.editor_formats.remove(&path);
           match result {
             Ok(result) => {
-              if !this.editor_panel.update(cx, |editor, cx| editor.apply_format(&path, result, window, cx)) {
+              if !this.editor_for_path(&path, cx).update(cx, |editor, cx| editor.apply_format(&path, result, window, cx)) {
                 window.push_notification(crate::failure("The file changed while formatting. Try again with the current text."), cx);
                 return;
               }
@@ -74,7 +74,7 @@ impl Workspace {
     if self.editor_saves.contains_key(&path) {
       return;
     }
-    let request = match self.editor_panel.update(cx, |editor, cx| editor.prepare_save(&path, approval, cx)) {
+    let request = match self.editor_for_path(&path, cx).update(cx, |editor, cx| editor.prepare_save(&path, approval, cx)) {
       Ok(Some(request)) => request,
       Ok(None) => return,
       Err(error) => {
@@ -95,11 +95,11 @@ impl Workspace {
           this.editor_saves.remove(&path);
           match result {
             Ok(SaveOutcome::Saved(version)) => {
-              this.editor_panel.update(cx, |editor, cx| editor.finish_save(&path, request, version, cx));
+              this.editor_for_path(&path, cx).update(cx, |editor, cx| editor.finish_save(&path, request, version, cx));
               crate::recent::record_file(&this.profile.id, &path, cx);
               this.refresh_in_background(cx);
             }
-            Ok(SaveOutcome::Conflict(version)) if this.editor_panel.read(cx).active_file() == Some(path.as_path()) => {
+            Ok(SaveOutcome::Conflict(version)) if this.editor_for_path(&path, cx).read(cx).active_file() == Some(path.as_path()) => {
               this.show_disk_conflict(path, version, None, window, cx);
             }
             Ok(SaveOutcome::Conflict(_)) => window.push_notification(
@@ -166,7 +166,7 @@ impl Workspace {
   }
 
   fn compare_disk_conflict(&mut self, path: PathBuf, approved: Option<FileVersion>, window: &mut Window, cx: &mut Context<Self>) {
-    let Some(local) = self.editor_panel.read(cx).buffer_text(&path, cx) else { return };
+    let Some(local) = self.editor_for_path(&path, cx).read(cx).buffer_text(&path, cx) else { return };
     let input = path.clone();
     let work = cx.background_executor().spawn(async move {
       let (disk, current) = match read_editor_text(&input) {
@@ -199,7 +199,7 @@ impl Workspace {
   }
 
   fn reload_conflict(&mut self, path: PathBuf, version: Option<&FileVersion>, window: &mut Window, cx: &mut Context<Self>) {
-    match self.editor_panel.update(cx, |editor, cx| editor.reload_from_disk(&path, version, window, cx)) {
+    match self.editor_for_path(&path, cx).update(cx, |editor, cx| editor.reload_from_disk(&path, version, window, cx)) {
       Ok(true) => {}
       Ok(false) => match FileVersion::read(&path) {
         Ok(current) => self.show_disk_conflict(path, current, None, window, cx),
@@ -218,7 +218,7 @@ impl Workspace {
         Ok(Ok(Some(destination))) if this.editor_saves.contains_key(&destination) => {
           window.push_notification(crate::failure("Wait for the current save to finish before choosing that destination."), cx);
         }
-        Ok(Ok(Some(destination))) => match this.editor_panel.update(cx, |editor, cx| editor.save_copy(&path, &destination, cx)) {
+        Ok(Ok(Some(destination))) => match this.editor_for_path(&path, cx).update(cx, |editor, cx| editor.save_copy(&path, &destination, cx)) {
           Ok(true) => {
             this.open_file_as(destination.clone(), false, window, cx);
             crate::recent::record_file(&this.profile.id, &destination, cx);

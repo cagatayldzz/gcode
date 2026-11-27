@@ -4,6 +4,10 @@ The terminal button in the activity bar (or `⌘J`) makes the terminals fill the
 with no sidebar and no status bar. Choosing Explorer or Git, or pressing the button or `⌘J` again, gives the area back to the
 editor. **The shells keep running while the editor is shown.**
 
+Choose **Dock Terminal** in the terminal header or press **⌥⌘J** to put the terminal below the editor. Drag the divider to
+resize it. **Maximize Terminal** restores the full view and **Hide Terminal** or **⌘J** hides it. The same shells, tabs and
+panes continue running as you change layouts. Each open project remembers its layout while the window is open.
+
 Each project starts with one `zsh` (your login shell) in the project folder and keeps its **own** tabs and panes.
 
 ## Tabs and panes

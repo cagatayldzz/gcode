@@ -23,9 +23,9 @@ impl Workspace {
   }
 
   /// Shows the branch, the sync button and the problem counts on the left, and the open file status on the right.
-  pub(super) fn render_status_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+  pub(super) fn render_status_bar(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
     let palette = colors(cx);
-    let file = self.editor_panel.read(cx).status(cx);
+    let file = self.focused_editor(window, cx).read(cx).status(cx);
     let mut bar = StatusBar::new().bg(palette.surface_alt).border_color(palette.border).text_color(palette.text_secondary);
     if let Some(git) = &self.git {
       // A `*` marks uncommitted changes and a `+` commits waiting to be pushed.
@@ -42,8 +42,11 @@ impl Workspace {
             .on_click(cx.listener(|this, _, window, cx| this.sync_remote(window, cx))),
         );
     }
-    if let Some(root) = self.projects.active.as_ref().filter(|_| self.editor_panel.read(cx).has_language_server()) {
-      let (errors, warnings) = self.editor_panel.read(cx).problem_counts(root);
+    if let Some(root) = self.projects.active.as_ref().filter(|_| self.editor_panels().any(|panel| panel.read(cx).has_language_server())) {
+      let (errors, warnings) = self
+        .editor_panels()
+        .map(|panel| panel.read(cx).problem_counts(root))
+        .fold((0, 0), |(errors, warnings), (next_errors, next_warnings)| (errors + next_errors, warnings + next_warnings));
       bar = bar.left(
         Button::new("status-problems")
           .ghost()

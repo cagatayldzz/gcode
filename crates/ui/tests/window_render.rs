@@ -189,7 +189,11 @@ fn recovered_edits_open_as_a_tab_and_require_approval_to_overwrite_a_changed_dis
   let handle = cx.windows()[0];
   cx.update_window(handle, |_, window, cx| {
     window.render_frame(cx);
-    assert!(window.try_find(gpui_kit::SharedString::from(format!("close-tab:{}", path.display()))).is_some());
+    assert!(
+      window.try_find(gpui_kit::SharedString::from(format!("close-tab:{}", path.display()))).is_some(),
+      "after docking: {}",
+      path.file_name().unwrap().to_string_lossy()
+    );
   })
   .unwrap();
 
@@ -241,4 +245,86 @@ fn project_editor_settings_save_changes_from_the_editor_page(cx: &mut TestAppCon
 
   let projects = ws_storage::ProjectList::load(&data.path().join("projects.json"));
   assert!(projects.projects[0].editor.format_on_save);
+}
+
+#[gpui_kit::test]
+fn the_split_editor_saves_its_focused_file_with_the_terminal_docked(cx: &mut TestAppContext) {
+  use gpui_kit::test::{TestEventExt as _, TestQueryExt as _};
+
+  let data = scratch_data_dir();
+  let project = data.path().join("project");
+  fs::create_dir(&project).unwrap();
+  let first = project.join("first.txt");
+  let second = project.join("second.txt");
+  fs::write(&first, "first source").unwrap();
+  fs::write(&second, "second source").unwrap();
+  let mut projects = ws_storage::ProjectList::default();
+  projects.add(project);
+  projects.save(&data.path().join("projects.json")).unwrap();
+  allow_shell_threads(cx);
+  cx.update(|cx| {
+    gpui_kit::init(cx);
+    ws_ui::init(cx);
+    ws_ui::open_window(Profile::default_profile(), cx);
+  });
+  draw_every_window(cx);
+  let handle = cx.windows()[0];
+  let open = |cx: &mut TestAppContext, path: &Path| {
+    cx.update_window(handle, |_, window, cx| {
+      window.render_frame(cx);
+      let row = gpui_kit::ElementId::from(gpui_kit::SharedString::from(format!("entry-{}", path.display())));
+      let point = window.elements().into_iter().find(|element| element.path().contains(&row)).expect("file in the explorer").bounds().center();
+      window.pointer_move(point, None, cx);
+      window.pointer_down(point, gpui_kit::MouseButton::Left, cx);
+      window.pointer_up(point, gpui_kit::MouseButton::Left, cx);
+    })
+    .unwrap();
+    draw_every_window(cx);
+  };
+
+  open(cx, &first);
+  cx.dispatch_action(handle, ws_ui::ToggleEditorSplit);
+  draw_every_window(cx);
+  open(cx, &second);
+  cx.update_window(handle, |_, window, cx| window.input("edited ", cx)).unwrap();
+  cx.dispatch_action(handle, ws_ui::SaveFile);
+  draw_every_window(cx);
+  assert!(fs::read_to_string(&second).unwrap().contains("edited "));
+  assert_eq!(fs::read_to_string(&first).unwrap(), "first source");
+
+  cx.update_window(handle, |_, window, cx| {
+    window.render_frame(cx);
+    for path in [&first, &second] {
+      assert!(
+        window.try_find(gpui_kit::SharedString::from(format!("close-tab:{}", path.display()))).is_some(),
+        "before docking: {}",
+        path.file_name().unwrap().to_string_lossy()
+      );
+    }
+  })
+  .unwrap();
+
+  cx.dispatch_action(handle, ws_ui::ToggleTerminalDock);
+  draw_every_window(cx);
+  cx.update_window(handle, |_, window, cx| {
+    window.render_frame(cx);
+    assert!(window.try_find("terminal-dock-toggle").is_some());
+    for path in [&first, &second] {
+      assert!(
+        window.try_find(gpui_kit::SharedString::from(format!("close-tab:{}", path.display()))).is_some(),
+        "after docking: {}",
+        path.file_name().unwrap().to_string_lossy()
+      );
+    }
+  })
+  .unwrap();
+
+  cx.dispatch_action(handle, ws_ui::ToggleTerminalDock);
+  draw_every_window(cx);
+  cx.update_window(handle, |_, window, cx| {
+    window.render_frame(cx);
+    assert!(window.try_find("terminal-dock-toggle").is_some());
+    assert!(window.try_find(gpui_kit::SharedString::from(format!("close-tab:{}", first.display()))).is_none());
+  })
+  .unwrap();
 }

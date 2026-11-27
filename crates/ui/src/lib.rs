@@ -71,6 +71,8 @@ actions!(
     NewTerminal,
     SaveFile,
     FormatDocument,
+    ToggleEditorSplit,
+    ToggleTerminalDock,
     // In the editor: comment out, comment in, or switch the comments of the selected lines.
     AddLineComment,
     RemoveLineComment,

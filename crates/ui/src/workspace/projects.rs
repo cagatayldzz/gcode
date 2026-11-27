@@ -24,7 +24,9 @@ impl Workspace {
       alert.title("Enable language servers?").description(description.clone()).confirm().ok_text("Enable").on_ok(move |_, window, cx| {
         workspace.update(cx, |this, cx| {
           if this.projects.active.as_ref() == Some(&project) && project.canonicalize().ok().as_ref() == Some(&root) {
-            this.editor_panel.update(cx, |editor, cx| editor.enable_language_servers(project.clone(), root.clone(), window, cx));
+            for panel in this.editor_panels() {
+              panel.update(cx, |editor, cx| editor.enable_language_servers(project.clone(), root.clone(), window, cx));
+            }
             window.push_notification(Notification::info("Language servers enabled for this project."), cx);
           } else {
             window.push_notification(crate::failure("The project folder changed. Enable language servers again for the current project."), cx);
@@ -36,7 +38,9 @@ impl Workspace {
   }
 
   pub(super) fn disable_language_servers(&mut self, _: &DisableProjectLanguageServers, window: &mut Window, cx: &mut Context<Self>) {
-    self.editor_panel.update(cx, |editor, cx| editor.disable_language_servers(cx));
+    for panel in self.editor_panels() {
+      panel.update(cx, |editor, cx| editor.disable_language_servers(cx));
+    }
     window.push_notification(Notification::info("Project language servers disabled."), cx);
   }
 
@@ -283,7 +287,9 @@ impl Workspace {
       self.projects.remove(path);
       self.persist_projects();
     }
-    self.editor_panel.update(cx, |editor, cx| editor.clear_editor_preferences(path, cx));
+    for panel in self.editor_panels() {
+      panel.update(cx, |editor, cx| editor.clear_editor_preferences(path, cx));
+    }
     self.terminal_tabs.remove(path);
     self.agent_tabs.remove(path);
     self.views.remove(path);
@@ -340,7 +346,9 @@ impl Workspace {
         ProjectSettingsEvent::EditorChanged(root, preferences) => {
           if let Some(project) = this.projects.projects.iter_mut().find(|project| &project.path == root) {
             project.editor = *preferences;
-            this.editor_panel.update(cx, |editor, cx| editor.set_editor_preferences(root.clone(), *preferences, cx));
+            for panel in this.editor_panels() {
+              panel.update(cx, |editor, cx| editor.set_editor_preferences(root.clone(), *preferences, cx));
+            }
             if let Err(error) = this.projects.save(&this.profile.projects_path()) {
               window.push_notification(crate::failure(format!("Could not save editor settings: {error}")), cx);
             }
@@ -548,16 +556,22 @@ impl Workspace {
     if target.exists() {
       return Err(format!("{} already exists", display_path(&target)));
     }
-    if self.editor_panel.read(cx).has_unsaved_under(path) || self.editor_saves.keys().any(|open| open.starts_with(path)) {
+    if self.editor_panels().any(|panel| panel.read(cx).has_unsaved_under(path)) || self.editor_saves.keys().any(|open| open.starts_with(path)) {
       return Err("save or discard the open files first".into());
     }
     std::fs::rename(path, &target).map_err(|error| error.to_string())?;
     let active = self.projects.active.as_deref() == Some(path);
-    self.editor_panel.update(cx, |editor, cx| editor.close_project(path, active, cx));
+    for panel in self.editor_panels() {
+      panel.update(cx, |editor, cx| editor.close_project(path, active, cx));
+    }
     self.projects.relocate(path, &target);
-    self.editor_panel.update(cx, |editor, cx| editor.clear_editor_preferences(path, cx));
+    for panel in self.editor_panels() {
+      panel.update(cx, |editor, cx| editor.clear_editor_preferences(path, cx));
+    }
     if let Some(project) = self.projects.projects.iter().find(|project| project.path == target) {
-      self.editor_panel.update(cx, |editor, cx| editor.set_editor_preferences(target.clone(), project.editor, cx));
+      for panel in self.editor_panels() {
+        panel.update(cx, |editor, cx| editor.set_editor_preferences(target.clone(), project.editor, cx));
+      }
     }
     Ok(target)
   }
@@ -580,6 +594,8 @@ impl Workspace {
         sidebar_tab: self.sidebar_tab,
         git_view: self.git_view,
         terminal_open: self.terminal_open,
+        terminal_docked: self.terminal_docked,
+        split_open: self.split_open,
         agent_open: self.agent_open,
         expanded: std::mem::take(&mut self.expanded),
         selected_entry: self.selected_entry.take(),
@@ -622,6 +638,9 @@ impl Workspace {
     self.sidebar_tab = view.sidebar_tab;
     self.git_view = view.git_view;
     self.terminal_open = view.terminal_open;
+    self.terminal_docked = view.terminal_docked;
+    self.split_open = view.split_open;
+    self.split_focused = false;
     self.agent_open = view.agent_open;
     self.expanded = view.expanded;
     self.selected_entry = view.selected_entry;
@@ -635,12 +654,14 @@ impl Workspace {
     self.file_actions.clear_side();
     let preferences =
       after.as_ref().and_then(|root| self.projects.projects.iter().find(|project| &project.path == root)).map(|project| project.editor);
-    self.editor_panel.update(cx, |editor, cx| {
-      if let (Some(root), Some(preferences)) = (&after, preferences) {
-        editor.set_editor_preferences(root.clone(), preferences, cx);
-      }
-      editor.switch_project(before, after, cx);
-    });
+    for panel in self.editor_panels() {
+      panel.update(cx, |editor, cx| {
+        if let (Some(root), Some(preferences)) = (&after, preferences) {
+          editor.set_editor_preferences(root.clone(), preferences, cx);
+        }
+        editor.switch_project(before.clone(), after.clone(), cx);
+      });
+    }
     self.refresh_project();
     if self.git_view == GitView::History {
       self.load_history(cx);

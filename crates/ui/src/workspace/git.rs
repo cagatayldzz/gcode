@@ -65,7 +65,7 @@ impl Workspace {
     {
       return;
     }
-    if self.editor_panel.read(cx).has_unsaved_under(&root) || self.editor_saves.keys().any(|path| path.starts_with(&root)) {
+    if self.editor_panels().any(|panel| panel.read(cx).has_unsaved_under(&root)) || self.editor_saves.keys().any(|path| path.starts_with(&root)) {
       window.push_notification(crate::failure("Save the affected editor files before resuming the Git operation."), cx);
       return;
     }

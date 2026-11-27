@@ -36,6 +36,15 @@ Click a file to open it in a tab. The tabs sit in a row on top, and the shown on
 - **Limits** — other than images, files must be text and at most 2 MB, or they are refused with a notification.
 - `⌘W` closes the shown tab; pressed again, the remaining tabs from the last to the first. It never closes the window. The red close button minimizes the window instead, so terminals and agents keep running; `⌘Q` quits the app.
 
+### Split editor
+
+Choose **Toggle Split Editor** in the Command Palette, or right-click a file in Explorer and choose **Edit in Split**.
+Each group has its own tabs, selection and cursor. Opening a file that already has an editable buffer returns to its group.
+**Open to the Side** still opens a read-only preview.
+
+Drag the divider to resize the groups. Hiding the split keeps its tabs and unsaved edits. Each project remembers its split
+while the window is open. Unsaved drafts are recovered in the main editor after a restart.
+
 ### Formatting and Quick Fix
 
 With a project language server enabled, run **Format Document** from the Command Palette. The server must support document

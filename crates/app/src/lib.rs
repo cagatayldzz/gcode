@@ -44,6 +44,7 @@ pub fn run() {
       KeyBinding::new("up", SelectPreviousRow, Some("HistoryList")),
       KeyBinding::new("down", SelectNextRow, Some("HistoryList")),
       KeyBinding::new("cmd-j", ToggleTerminal, None),
+      KeyBinding::new("cmd-alt-j", ws_ui::ToggleTerminalDock, None),
       KeyBinding::new("cmd-shift-a", ToggleAgents, None),
       KeyBinding::new("cmd-shift-g", ViewOnHost, None),
       KeyBinding::new("cmd-shift-m", MentionProjects, None),

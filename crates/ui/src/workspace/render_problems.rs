@@ -7,14 +7,15 @@ impl Workspace {
   /// Opens the file of a problem with the cursor on it.
   fn open_problem(&mut self, path: PathBuf, line: u32, column: u32, window: &mut Window, cx: &mut Context<Self>) {
     self.open_file(path.clone(), window, cx);
-    self.editor_panel.update(cx, |editor, cx| editor.reveal_position(&path, line as usize, column as usize, window, cx));
+    self.editor_for_path(&path, cx).update(cx, |editor, cx| editor.reveal_position(&path, line as usize, column as usize, window, cx));
   }
 
   /// The list of problems under the editor, opened from the status bar's counts. A row opens the file at the problem.
   pub(super) fn render_problems_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
     let root = self.projects.active.clone()?;
     let palette = colors(cx);
-    let files = self.editor_panel.read(cx).problems_under(&root);
+    let mut files: Vec<_> = self.editor_panels().flat_map(|panel| panel.read(cx).problems_under(&root)).collect();
+    files.sort_by(|left, right| left.path.cmp(&right.path));
     let total: usize = files.iter().map(|file| file.problems.len()).sum();
     let mut list = v_flex().id("problems-list").size_full().pb_2().overflow_y_scrollbar();
     for file in files {

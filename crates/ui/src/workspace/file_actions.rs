@@ -8,6 +8,7 @@ use std::{fs, process::Command};
 enum CommandKind {
   Preview,
   Side,
+  EditInSplit,
   OpenWith,
   Reveal,
   Timeline,
@@ -115,6 +116,7 @@ impl Workspace {
     match kind {
       Preview => self.open_file_as(path.clone(), true, window, cx),
       Side => self.open_side_preview(path.clone(), window, cx),
+      EditInSplit => self.edit_in_split(path.clone(), window, cx),
       OpenWith => self.open_in_system(path.clone(), false, window, cx),
       Reveal => self.run_file_location(&FileLocation(FileLocationCommand::RevealInFinder, path.clone()), window, cx),
       Timeline => self.open_file_timeline(path.clone(), window, cx),
@@ -207,11 +209,15 @@ impl Workspace {
       window.push_notification(Notification::info("Wait for the current file operation to finish."), cx);
       return;
     }
-    if paths.iter().any(|path| self.editor_panel.read(cx).is_dirty_under(path) || self.editor_saves.keys().any(|open| open.starts_with(path))) {
+    if paths.iter().any(|path| {
+      self.editor_panels().any(|panel| panel.read(cx).is_dirty_under(path)) || self.editor_saves.keys().any(|open| open.starts_with(path))
+    }) {
       window.push_notification(crate::failure("Save the files before deleting them."), cx);
       return;
     }
-    self.editor_panel.update(cx, |editor, cx| editor.lock_replacement_files(paths.clone(), cx));
+    for panel in self.editor_panels() {
+      panel.update(cx, |editor, cx| editor.lock_replacement_files(paths.clone(), cx));
+    }
     let root = self.projects.active.clone();
     let work = cx.background_executor().spawn({
       let paths = paths.clone();
@@ -230,9 +236,13 @@ impl Workspace {
       let (deleted, error) = work.await;
       let _ = this.update_in(cx, |this, window, cx| {
         this.file_actions.mutation = None;
-        this.editor_panel.update(cx, |editor, cx| editor.lock_replacement_files([], cx));
+        for panel in this.editor_panels() {
+          panel.update(cx, |editor, cx| editor.lock_replacement_files([], cx));
+        }
         for path in &deleted {
-          this.editor_panel.update(cx, |editor, cx| editor.forget_under(path, cx));
+          for panel in this.editor_panels() {
+            panel.update(cx, |editor, cx| editor.forget_under(path, cx));
+          }
           if let Some(side) = &this.file_actions.side {
             side.update(cx, |editor, cx| editor.forget_under(path, cx));
           }
@@ -260,11 +270,13 @@ impl Workspace {
     }
     let moves_source = !matches!(edit, FileEdit::Copy { .. });
     if moves_source {
-      if self.editor_panel.read(cx).is_dirty_under(&path) || self.editor_saves.keys().any(|open| open.starts_with(&path)) {
+      if self.editor_panels().any(|panel| panel.read(cx).is_dirty_under(&path)) || self.editor_saves.keys().any(|open| open.starts_with(&path)) {
         window.push_notification(crate::failure("Save the file before moving or deleting it."), cx);
         return;
       }
-      self.editor_panel.update(cx, |editor, cx| editor.lock_replacement_files([path.clone()], cx));
+      for panel in self.editor_panels() {
+        panel.update(cx, |editor, cx| editor.lock_replacement_files([path.clone()], cx));
+      }
     }
     let root = self.projects.active.clone();
     let work = cx.background_executor().spawn({
@@ -276,7 +288,9 @@ impl Workspace {
       let _ = this.update_in(cx, |this, window, cx| {
         this.file_actions.mutation = None;
         if moves_source {
-          this.editor_panel.update(cx, |editor, cx| editor.lock_replacement_files([], cx));
+          for panel in this.editor_panels() {
+            panel.update(cx, |editor, cx| editor.lock_replacement_files([], cx));
+          }
         }
         match result {
           Ok((target, marker)) => {
@@ -286,7 +300,9 @@ impl Workspace {
               }
             }
             if moves_source {
-              this.editor_panel.update(cx, |editor, cx| editor.forget_under(&path, cx));
+              for panel in this.editor_panels() {
+                panel.update(cx, |editor, cx| editor.forget_under(&path, cx));
+              }
               if let Some(side) = &this.file_actions.side {
                 side.update(cx, |editor, cx| editor.forget_under(&path, cx));
               }
@@ -314,6 +330,7 @@ impl Workspace {
   }
 
   fn open_side_preview(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    self.split_open = false;
     let panel = self.file_actions.side.get_or_insert_with(|| {
       let editor = cx.new(|cx| EditorPanel::side_preview(window, cx));
       self.file_actions.side_observer = Some(cx.observe(&editor, |_, _, cx| cx.notify()));
@@ -423,6 +440,7 @@ fn file_menu(menu: PopupMenu, root: &Path, path: &Path, directory: bool, can_pas
   menu
     .item(item("Open Preview", Preview))
     .item(item("Open to the Side", Side))
+    .item(item("Edit in Split", EditInSplit))
     .item(item("Open With…", OpenWith))
     .item(item("Reveal in Finder", Reveal))
     .separator()

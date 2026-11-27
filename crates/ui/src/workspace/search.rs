@@ -183,13 +183,13 @@ impl Workspace {
     if self.projects.active.as_ref() != Some(&root) || self.replacement_task.is_some() || self.file_mutation_pending() {
       return;
     }
-    if edits.iter().any(|edit| self.editor_panel.read(cx).is_dirty(&edit.path) || self.editor_saves.contains_key(&edit.path)) {
+    if edits.iter().any(|edit| self.editor_for_path(&edit.path, cx).read(cx).is_dirty(&edit.path) || self.editor_saves.contains_key(&edit.path)) {
       window.push_notification(crate::failure("Save the affected editor tabs and search again before replacing."), cx);
       return;
     }
-    self.editor_panel.update(cx, |editor, cx| {
-      editor.lock_replacement_files(edits.iter().map(|edit| edit.path.clone()), cx);
-    });
+    for panel in self.editor_panels() {
+      panel.update(cx, |editor, cx| editor.lock_replacement_files(edits.iter().map(|edit| edit.path.clone()), cx));
+    }
     let work = cx.background_executor().spawn({
       let root = root.clone();
       let edits = edits.clone();
@@ -201,20 +201,22 @@ impl Workspace {
         this.replacement_task = None;
         let mut written = 0;
         let mut first_error = None;
-        this.editor_panel.update(cx, |editor, cx| {
-          editor.lock_replacement_files([], cx);
-          for (edit, result) in edits.iter().zip(results) {
-            match result {
-              Ok(()) => {
-                written += 1;
+        for panel in this.editor_panels() {
+          panel.update(cx, |editor, cx| editor.lock_replacement_files([], cx));
+        }
+        for (edit, result) in edits.iter().zip(results) {
+          match result {
+            Ok(()) => {
+              written += 1;
+              this.editor_for_path(&edit.path, cx).update(cx, |editor, cx| {
                 editor.update_replaced_text(&edit.path, &edit.updated, window, cx);
-              }
-              Err(error) => {
-                first_error.get_or_insert_with(|| format!("{}: {error}", edit.path.display()));
-              }
+              });
+            }
+            Err(error) => {
+              first_error.get_or_insert_with(|| format!("{}: {error}", edit.path.display()));
             }
           }
-        });
+        }
         if let Some(error) = first_error {
           window.push_notification(crate::failure(format!("Updated {written} of {} files. {error}", edits.len())), cx);
         } else {
@@ -249,7 +251,7 @@ impl Workspace {
 
   fn open_search_result(&mut self, result: &project_search::Match, window: &mut Window, cx: &mut Context<Self>) {
     self.open_file(result.path.clone(), window, cx);
-    self.editor_panel.update(cx, |editor, cx| editor.reveal_search_match(&result.path, result.line, result.column, window, cx));
+    self.editor_for_path(&result.path, cx).update(cx, |editor, cx| editor.reveal_search_match(&result.path, result.line, result.column, window, cx));
   }
 
   fn search_status(&self) -> String {

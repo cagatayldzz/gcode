@@ -308,6 +308,8 @@ pub(crate) struct EditorPanel {
   recovery: Option<Arc<RecoveryWriter>>,
   recovery_pending: HashSet<PathBuf>,
   _recovery_task: Option<Task<()>>,
+  _checkpoint_task: Option<Task<()>>,
+  recovery_loading: bool,
   /// The run of "Add Next Occurrence" in progress: the file, the selection it started from and where the last occurrence ended.
   occurrences: Option<(PathBuf, Range<usize>, usize)>,
   /// The canonical root approved for language servers while this project is active.
@@ -335,6 +337,30 @@ impl EditorPanel {
 
   pub fn side_preview(window: &mut Window, cx: &mut Context<Self>) -> Self {
     Self::with_read_only(true, window, cx)
+  }
+
+  pub(crate) fn contains_buffer(&self, path: &Path) -> bool {
+    self.files.contains_key(path) || self.images.contains_key(path)
+  }
+
+  pub(crate) fn protects_buffer(&self, path: &Path) -> bool {
+    self.tabs.items.iter().any(|item| item == path)
+      || self.saved.values().any(|tabs| tabs.items.iter().any(|item| item == path))
+      || self.is_dirty(path)
+  }
+
+  pub(crate) fn recovery_is_loading(&self) -> bool {
+    self.recovery_loading
+  }
+
+  pub(crate) fn focus_document(&self, window: &mut Window, cx: &mut App) {
+    let focus =
+      self.active_file().and_then(|file| self.files.get(file)).map_or_else(|| self.focus_handle.clone(), |file| file.state.read(cx).focus_handle(cx));
+    window.defer(cx, move |window, cx| focus.focus(window, cx));
+  }
+
+  pub(crate) fn trusted_root(&self) -> Option<PathBuf> {
+    self.trusted_language_root.clone()
   }
 
   pub fn has_tabs(&self) -> bool {
@@ -428,6 +454,8 @@ impl EditorPanel {
       recovery: None,
       recovery_pending: HashSet::new(),
       _recovery_task: None,
+      _checkpoint_task: None,
+      recovery_loading: false,
       occurrences: None,
       trusted_language_root: None,
       languages: HashMap::new(),

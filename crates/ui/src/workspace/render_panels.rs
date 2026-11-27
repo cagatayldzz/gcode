@@ -118,7 +118,7 @@ impl Workspace {
             cx.background_executor().timer(HOVER_PREPARE_DELAY).await;
             let _ = this.update_in(cx, |this, window, cx| {
               if this.hovered_file.as_ref() == Some(&wanted) {
-                this.editor_panel.update(cx, |editor, cx| editor.prefetch(&wanted, window, cx));
+                this.editor_for_path(&wanted, cx).update(cx, |editor, cx| editor.prefetch(&wanted, window, cx));
               }
             });
           })
@@ -266,7 +266,7 @@ impl Workspace {
                 this.extensions_panel.update(cx, |panel, cx| panel.ensure_loaded(cx));
               }
               if entering_explorer {
-                let active_file = this.editor_panel.read(cx).active_file().map(Path::to_path_buf);
+                let active_file = this.focused_editor(window, cx).read(cx).active_file().map(Path::to_path_buf);
                 if let (Some(root), Some(path)) = (this.projects.active.clone(), active_file) {
                   this.show_explorer_entry(&root, path, ScrollStrategy::Nearest, cx);
                 }
@@ -464,6 +464,29 @@ impl Workspace {
     let headers = node.panes().len() > 1;
     v_flex()
       .size_full()
+      .child(
+        h_flex()
+          .flex_none()
+          .justify_end()
+          .gap_1()
+          .px_2()
+          .border_b_1()
+          .border_color(theme.border)
+          .child(
+            Button::new("terminal-dock-toggle")
+              .ghost()
+              .xsmall()
+              .label(if self.terminal_docked { "Maximize Terminal" } else { "Dock Terminal" })
+              .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::ToggleTerminalDock), cx)),
+          )
+          .child(
+            Button::new("terminal-hide")
+              .ghost()
+              .xsmall()
+              .label("Hide Terminal")
+              .on_click(|_, window, cx| window.dispatch_action(Box::new(ToggleTerminal), cx)),
+          ),
+      )
       .children(strip)
       .child(div().flex_1().min_h_0().child(self.render_pane_node(&node, headers, &root.to_string_lossy(), cx)))
       .into_any_element()

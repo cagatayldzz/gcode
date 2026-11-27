@@ -31,7 +31,9 @@ order, follows `Preferences.activity_bar` (`ActivityBarLayout`: order and hidden
 it runs down to the bottom of the window.
 
 **Main column.** Right of the sidebar, a column holds the Kit **`DockArea`** and the status bar below it. The dock holds the main
-`EditorPanel`; Explorer can open a read-only preview beside it in a horizontal resizable split (it closes when the active project changes).
+`EditorPanel`. A Kit horizontal resizable group can show the editable split beside it. The window routes file operations to the
+panel that owns the buffer and editing commands to the focused panel. The two panels share the profile recovery writer. Each
+project's open tabs stay in their panel during project switches. Explorer can also open a read-only side preview.
 Long text files show a minimap, which samples the buffer in the background and reuses the editor's scroll position. The Kit draws the dock
 chrome (the title, zoom button and `…` menu).
 
@@ -42,11 +44,13 @@ the newest line while it is at the bottom; new lines wait while text is selected
 
 ## Takeover areas
 
-The terminals and the AI view are **not** dock panels. They *replace* everything right of the activity bar:
+The terminals default to the full area, as does the AI view. Docking the terminal uses a Kit vertical resizable group, sharing
+the main column with the editor while retaining the same terminal arrangement. The presentation is kept in each project's
+window state.
 
 ```text
  sidebar_tab: Explorer | Search | Git
- terminal_open: bool          ┐
+ terminal_open && !terminal_docked  ┐
  agent_open: bool             ├─ full_area_open  →  sidebar + dock are NOT drawn (the status bar stays under the terminals)
  project settings open        ┘
 ```

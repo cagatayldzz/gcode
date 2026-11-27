@@ -121,23 +121,26 @@ impl Workspace {
   /// Opens a file; `preview` shows it in the preview tab, which the next preview replaces.
   pub(super) fn open_file_as(&mut self, path: PathBuf, preview: bool, window: &mut Window, cx: &mut Context<Self>) {
     let root = self.projects.active.clone();
-    self.editor_panel.update(cx, |editor, cx| editor.set_root(root, cx));
-    let result =
-      self.editor_panel.update(
-        cx,
-        |editor, cx| {
-          if preview {
-            editor.open_preview(path.clone(), window, cx)
-          } else {
-            editor.open_file(path.clone(), window, cx)
-          }
-        },
-      );
+    let editor = self.target_editor(&path, window, cx);
+    editor.update(cx, |editor, cx| editor.set_root(root, cx));
+    let result = editor.update(
+      cx,
+      |editor, cx| {
+        if preview {
+          editor.open_preview(path.clone(), window, cx)
+        } else {
+          editor.open_file(path.clone(), window, cx)
+        }
+      },
+    );
     match result {
       Ok(()) => {
         self.explorer_selection.clear();
         self.selected_entry = Some(path);
         self.selected_change = None;
+        if self.split_open {
+          editor.update(cx, |editor, cx| editor.focus_document(window, cx));
+        }
       }
       Err(message) => window.push_notification(crate::failure(message), cx),
     }
@@ -157,7 +160,7 @@ impl Workspace {
   pub(super) fn open_conflicted_file(&mut self, relative: &str, window: &mut Window, cx: &mut Context<Self>) {
     self.open_changed_file(&OpenChangedFile(relative.into()), window, cx);
     if let Some(path) = self.projects.active.as_deref().and_then(|root| Self::changed_file_path(root, relative)) {
-      self.editor_panel.update(cx, |editor, cx| editor.reveal_first_conflict(&path, window, cx));
+      self.editor_for_path(&path, cx).update(cx, |editor, cx| editor.reveal_first_conflict(&path, window, cx));
     }
   }
 
